@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Cages | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Cages</h1>
+    <p class="muted">All cages in the colony.</p>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Cage ID</th>
+                <th>Room</th>
+                <th>Rack</th>
+                <th>Position</th>
+                <th>Cage Type</th>
+                <th>Purpose</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cage in cages %}
+            <tr>
+                <td><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a></td>
+                <td>{{ cage.room|default:"-" }}</td>
+                <td>{{ cage.rack|default:"-" }}</td>
+                <td>{{ cage.position|default:"-" }}</td>
+                <td>{{ cage.get_cage_type_display }}</td>
+                <td>{{ cage.get_purpose_display }}</td>
+                <td><span class="status-pill">{{ cage.get_status_display }}</span></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="empty-row">No cages found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Cage {{ cage.cage_id }}</h1>
+        <p class="muted">Cage details and current occupancy.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="#">Edit Cage</a>
+        <a class="button button-light" href="#">Print Cage Card</a>
+        <a class="button button-light" href="#">View Cage History</a>
+    </div>
+</section>
+
+<section class="cards">
+    <article class="card">
+        <h2>Basic Information</h2>
+        <dl class="detail-grid">
+            <dt>Room</dt><dd>{{ cage.room|default:"-" }}</dd>
+            <dt>Rack</dt><dd>{{ cage.rack|default:"-" }}</dd>
+            <dt>Position</dt><dd>{{ cage.position|default:"-" }}</dd>
+            <dt>Cage Type</dt><dd>{{ cage.get_cage_type_display }}</dd>
+            <dt>Purpose</dt><dd>{{ cage.get_purpose_display }}</dd>
+            <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
+        </dl>
+    </article>
+</section>
+
+<section class="card">
+    <h2>Current Mice</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Mouse UID</th>
+                <th>Sex</th>
+                <th>Status</th>
+                <th>Strain Line</th>
+                <th>Birth Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mouse in current_mice %}
+            <tr>
+                <td>{{ mouse.mouse_uid }}</td>
+                <td>{{ mouse.get_sex_display }}</td>
+                <td>{{ mouse.get_status_display }}</td>
+                <td>{{ mouse.strain_line }}</td>
+                <td>{{ mouse.birth_date|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="empty-row">No current mice in this cage.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Notes</h2>
+    <p>{{ cage.notes|default:"No notes." }}</p>
+</section>
+{% endblock %}

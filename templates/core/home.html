@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Home | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>MouseXGene Dashboard</h1>
+    <p class="muted">A lightweight colony management system for your lab.</p>
+</section>
+
+<section class="cards">
+    <article class="card">
+        <h2>Total Cages</h2>
+        <p class="metric">{{ cage_count }}</p>
+    </article>
+    <article class="card">
+        <h2>Active Cages</h2>
+        <p class="metric">{{ active_cage_count }}</p>
+    </article>
+    <article class="card">
+        <h2>Total Mice</h2>
+        <p class="metric">{{ mouse_count }}</p>
+    </article>
+</section>
+
+<section class="actions">
+    <a class="button" href="{% url 'colony:cage_list' %}">Go to Cages</a>
+</section>
+{% endblock %}
