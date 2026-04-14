@@ -1,4 +1,5 @@
 import csv
+from io import BytesIO
 
 from django.http import HttpRequest, HttpResponse
 from django.contrib import messages
@@ -6,11 +7,130 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from openpyxl import Workbook
 
 from .forms import CageForm, CageImportForm, MouseForm, MouseImportForm, MoveCageForm
 from .importers import EXPECTED_COLUMNS, MOUSE_EXPECTED_COLUMNS, parse_cage_import, parse_mouse_import
 from .models import Cage, CageMembership, Mouse
 from genotypes.models import MouseGenotype
+from core.audit import log_audit_event
+from core.models import AuditLog, ImportLog
+from users.permissions import authenticated_required, role_required, can_import
+
+
+def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = sheet_name
+    worksheet.append(headers)
+    for row in rows:
+        worksheet.append(row)
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def record_import_log(
+    *,
+    user,
+    import_type: str,
+    filename: str,
+    success: bool,
+    created_count: int = 0,
+    errors: list[str] | None = None,
+) -> None:
+    summary = ""
+    if errors:
+        summary = "; ".join(errors[:8])
+        if len(errors) > 8:
+            summary = f"{summary}; ... ({len(errors)} total errors)"
+    ImportLog.objects.create(
+        user=user if getattr(user, "is_authenticated", False) else None,
+        import_type=import_type,
+        filename=filename[:255],
+        success=success,
+        created_count=created_count,
+        error_summary=summary,
+    )
+
+
+def get_cages_export_rows() -> list[list]:
+    return [
+        [
+            cage.cage_id,
+            cage.room,
+            cage.rack,
+            cage.position,
+            cage.cage_type,
+            cage.purpose,
+            cage.status,
+            cage.notes,
+        ]
+        for cage in Cage.objects.all().order_by("cage_id")
+    ]
+
+
+def get_cage_inventory_rows(cage: Cage) -> list[list]:
+    mice = Mouse.objects.filter(current_cage=cage).select_related("strain_line", "project").order_by("mouse_uid")
+    return [
+        [
+            cage.cage_id,
+            mouse.mouse_uid,
+            mouse.sex,
+            mouse.birth_date or "",
+            mouse.status,
+            mouse.strain_line.line_name if mouse.strain_line else "",
+            mouse.project.name if mouse.project else "",
+            mouse.ear_tag,
+            mouse.coat_color,
+        ]
+        for mouse in mice
+    ]
+
+
+def get_mice_export_rows() -> list[list]:
+    mice = Mouse.objects.select_related("strain_line", "current_cage", "project").all().order_by("mouse_uid")
+    return [
+        [
+            mouse.mouse_uid,
+            mouse.sex,
+            mouse.birth_date or "",
+            mouse.death_date or "",
+            mouse.status,
+            mouse.strain_line.line_name if mouse.strain_line else "",
+            mouse.current_cage.cage_id if mouse.current_cage else "",
+            mouse.project.name if mouse.project else "",
+            mouse.ear_tag,
+            mouse.coat_color,
+            mouse.notes,
+        ]
+        for mouse in mice
+    ]
+
+
+def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
+    genotype_records = MouseGenotype.objects.filter(mouse=mouse).order_by("-assay_date", "-created_at")
+    return [
+        [
+            mouse.mouse_uid,
+            gt.locus_name,
+            gt.allele_1,
+            gt.allele_2,
+            gt.zygosity_display,
+            gt.is_confirmed,
+            gt.assay_date or "",
+            gt.notes,
+        ]
+        for gt in genotype_records
+    ]
 
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
@@ -38,6 +158,7 @@ def build_mouse_relation_card(mouse: Mouse) -> dict:
     }
 
 
+@authenticated_required
 def cage_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     room = (request.GET.get("room") or "").strip()
@@ -84,6 +205,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_list.html", context)
 
 
+@authenticated_required
 def cage_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = CageForm(request.POST)
@@ -102,18 +224,44 @@ def cage_create(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_form.html", context)
 
 
+@role_required(can_import)
 def cage_import(request: HttpRequest) -> HttpResponse:
     row_errors: list[str] = []
     if request.method == "POST":
         form = CageImportForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = form.cleaned_data["data_file"]
+            upload_name = uploaded_file.name or ""
             result = parse_cage_import(uploaded_file)
             if result.errors:
                 row_errors = result.errors
+                record_import_log(
+                    user=request.user,
+                    import_type=ImportLog.ImportType.CAGE,
+                    filename=upload_name,
+                    success=False,
+                    created_count=0,
+                    errors=result.errors,
+                )
             else:
                 with transaction.atomic():
                     Cage.objects.bulk_create([Cage(**row) for row in result.rows])
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.IMPORT,
+                    message=f"Imported {len(result.rows)} cages via file upload.",
+                    object_type="Cage",
+                    object_id=str(len(result.rows)),
+                    object_repr="Bulk Cage Import",
+                )
+                record_import_log(
+                    user=request.user,
+                    import_type=ImportLog.ImportType.CAGE,
+                    filename=upload_name,
+                    success=True,
+                    created_count=len(result.rows),
+                    errors=[],
+                )
                 messages.success(request, f"Successfully imported {len(result.rows)} cages.")
                 return redirect("colony:cage_list")
     else:
@@ -127,6 +275,7 @@ def cage_import(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_import.html", context)
 
 
+@role_required(can_import)
 def cage_import_template(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="cage_import_template.csv"'
@@ -147,6 +296,24 @@ def cage_import_template(request: HttpRequest) -> HttpResponse:
     return response
 
 
+@role_required(can_import)
+def cage_import_template_xlsx(request: HttpRequest) -> HttpResponse:
+    rows = [
+        [
+            "C001",
+            "Room-A",
+            "Rack-1",
+            "A1",
+            Cage.CageType.STANDARD,
+            Cage.Purpose.HOLDING,
+            Cage.Status.ACTIVE,
+            "Example note",
+        ]
+    ]
+    return build_xlsx_response("cage_import_template.xlsx", "CageTemplate", EXPECTED_COLUMNS, rows)
+
+
+@authenticated_required
 def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(Cage, pk=pk)
     current_mice = Mouse.objects.filter(current_cage=cage).order_by("mouse_uid")
@@ -157,6 +324,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/cage_detail.html", context)
 
 
+@authenticated_required
 def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(Cage, pk=pk)
     current_mice = (
@@ -179,6 +347,7 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/cage_print.html", context)
 
 
+@role_required(can_import)
 def cages_export(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
@@ -195,22 +364,12 @@ def cages_export(request: HttpRequest) -> HttpResponse:
             "notes",
         ]
     )
-    for cage in Cage.objects.all().order_by("cage_id"):
-        writer.writerow(
-            [
-                cage.cage_id,
-                cage.room,
-                cage.rack,
-                cage.position,
-                cage.cage_type,
-                cage.purpose,
-                cage.status,
-                cage.notes,
-            ]
-        )
+    for row in get_cages_export_rows():
+        writer.writerow(row)
     return response
 
 
+@role_required(can_import)
 def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(Cage, pk=pk)
     response = HttpResponse(content_type="text/csv")
@@ -229,24 +388,37 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
             "coat_color",
         ]
     )
-    mice = Mouse.objects.filter(current_cage=cage).select_related("strain_line", "project").order_by("mouse_uid")
-    for mouse in mice:
-        writer.writerow(
-            [
-                cage.cage_id,
-                mouse.mouse_uid,
-                mouse.sex,
-                mouse.birth_date or "",
-                mouse.status,
-                mouse.strain_line.line_name if mouse.strain_line else "",
-                mouse.project.name if mouse.project else "",
-                mouse.ear_tag,
-                mouse.coat_color,
-            ]
-        )
+    for row in get_cage_inventory_rows(cage):
+        writer.writerow(row)
     return response
 
 
+@role_required(can_import)
+def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
+    headers = ["cage_id", "room", "rack", "position", "cage_type", "purpose", "status", "notes"]
+    rows = get_cages_export_rows()
+    return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
+
+
+@role_required(can_import)
+def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
+    cage = get_object_or_404(Cage, pk=pk)
+    headers = [
+        "cage_id",
+        "mouse_uid",
+        "sex",
+        "birth_date",
+        "status",
+        "strain_line",
+        "project",
+        "ear_tag",
+        "coat_color",
+    ]
+    rows = get_cage_inventory_rows(cage)
+    return build_xlsx_response(f"cage_{cage.cage_id}_inventory.xlsx", "CageInventory", headers, rows)
+
+
+@authenticated_required
 def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip()
@@ -290,15 +462,25 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/mouse_list.html", context)
 
 
+@role_required(can_import)
 def mouse_import(request: HttpRequest) -> HttpResponse:
     row_errors: list[str] = []
     if request.method == "POST":
         form = MouseImportForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = form.cleaned_data["data_file"]
+            upload_name = uploaded_file.name or ""
             result = parse_mouse_import(uploaded_file)
             if result.errors:
                 row_errors = result.errors
+                record_import_log(
+                    user=request.user,
+                    import_type=ImportLog.ImportType.MOUSE,
+                    filename=upload_name,
+                    success=False,
+                    created_count=0,
+                    errors=result.errors,
+                )
             else:
                 with transaction.atomic():
                     created_mice = []
@@ -316,6 +498,22 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
                                 notes="",
                             )
 
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.IMPORT,
+                    message=f"Imported {len(created_mice)} mice via file upload.",
+                    object_type="Mouse",
+                    object_id=str(len(created_mice)),
+                    object_repr="Bulk Mouse Import",
+                )
+                record_import_log(
+                    user=request.user,
+                    import_type=ImportLog.ImportType.MOUSE,
+                    filename=upload_name,
+                    success=True,
+                    created_count=len(created_mice),
+                    errors=[],
+                )
                 messages.success(request, f"Successfully imported {len(created_mice)} mice.")
                 return redirect("mice:mouse_list")
     else:
@@ -329,6 +527,7 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/mouse_import.html", context)
 
 
+@role_required(can_import)
 def mouse_import_template(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="mouse_import_template.csv"'
@@ -353,6 +552,28 @@ def mouse_import_template(request: HttpRequest) -> HttpResponse:
     return response
 
 
+@role_required(can_import)
+def mouse_import_template_xlsx(request: HttpRequest) -> HttpResponse:
+    rows = [
+        [
+            "M001",
+            Mouse.Sex.FEMALE,
+            "2026-01-15",
+            Mouse.Status.ACTIVE,
+            "",
+            "",
+            "",
+            "ET-001",
+            "black",
+            "Example imported mouse",
+            "",
+            "",
+        ]
+    ]
+    return build_xlsx_response("mouse_import_template.xlsx", "MouseTemplate", MOUSE_EXPECTED_COLUMNS, rows)
+
+
+@role_required(can_import)
 def mice_export(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
@@ -372,26 +593,31 @@ def mice_export(request: HttpRequest) -> HttpResponse:
             "notes",
         ]
     )
-    mice = Mouse.objects.select_related("strain_line", "current_cage", "project").all().order_by("mouse_uid")
-    for mouse in mice:
-        writer.writerow(
-            [
-                mouse.mouse_uid,
-                mouse.sex,
-                mouse.birth_date or "",
-                mouse.death_date or "",
-                mouse.status,
-                mouse.strain_line.line_name if mouse.strain_line else "",
-                mouse.current_cage.cage_id if mouse.current_cage else "",
-                mouse.project.name if mouse.project else "",
-                mouse.ear_tag,
-                mouse.coat_color,
-                mouse.notes,
-            ]
-        )
+    for row in get_mice_export_rows():
+        writer.writerow(row)
     return response
 
 
+@role_required(can_import)
+def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
+    headers = [
+        "mouse_uid",
+        "sex",
+        "birth_date",
+        "death_date",
+        "status",
+        "strain_line",
+        "current_cage",
+        "project",
+        "ear_tag",
+        "coat_color",
+        "notes",
+    ]
+    rows = get_mice_export_rows()
+    return build_xlsx_response("mice.xlsx", "Mice", headers, rows)
+
+
+@authenticated_required
 def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
         Mouse.objects.select_related("strain_line", "current_cage", "project", "sire", "dam"),
@@ -428,6 +654,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_detail.html", context)
 
 
+@authenticated_required
 def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
         Mouse.objects.select_related("sire", "dam", "current_cage"),
@@ -461,6 +688,7 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_pedigree.html", context)
 
 
+@authenticated_required
 def mouse_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = MouseForm(request.POST)
@@ -479,6 +707,7 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/mouse_form.html", context)
 
 
+@authenticated_required
 def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(Mouse, pk=pk)
     if request.method == "POST":
@@ -499,6 +728,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_form.html", context)
 
 
+@role_required(can_import)
 def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
         Mouse.objects.select_related("strain_line", "current_cage"),
@@ -515,6 +745,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
 
             with transaction.atomic():
                 mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
+                origin_cage = mouse_locked.current_cage
 
                 current_memberships = CageMembership.objects.select_for_update().filter(
                     mouse=mouse_locked,
@@ -536,6 +767,16 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
                     notes=notes,
                 )
 
+            source_label = origin_cage.cage_id if origin_cage else "None"
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.MOVE_CAGE,
+                obj=mouse_locked,
+                message=(
+                    f"Moved mouse {mouse_locked.mouse_uid} from cage {source_label} "
+                    f"to {destination_cage.cage_id} on {move_date}."
+                ),
+            )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MoveCageForm(mouse=mouse)
@@ -547,6 +788,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_move.html", context)
 
 
+@role_required(can_import)
 def mouse_genotypes_export(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(Mouse, pk=pk)
     response = HttpResponse(content_type="text/csv")
@@ -564,18 +806,23 @@ def mouse_genotypes_export(request: HttpRequest, pk: int) -> HttpResponse:
             "notes",
         ]
     )
-    genotype_records = MouseGenotype.objects.filter(mouse=mouse).order_by("-assay_date", "-created_at")
-    for gt in genotype_records:
-        writer.writerow(
-            [
-                mouse.mouse_uid,
-                gt.locus_name,
-                gt.allele_1,
-                gt.allele_2,
-                gt.zygosity_display,
-                gt.is_confirmed,
-                gt.assay_date or "",
-                gt.notes,
-            ]
-        )
+    for row in get_mouse_genotype_rows(mouse):
+        writer.writerow(row)
     return response
+
+
+@role_required(can_import)
+def mouse_genotypes_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
+    mouse = get_object_or_404(Mouse, pk=pk)
+    headers = [
+        "mouse_uid",
+        "locus_name",
+        "allele_1",
+        "allele_2",
+        "zygosity_display",
+        "is_confirmed",
+        "assay_date",
+        "notes",
+    ]
+    rows = get_mouse_genotype_rows(mouse)
+    return build_xlsx_response(f"mouse_{mouse.mouse_uid}_genotypes.xlsx", "Genotypes", headers, rows)

@@ -10,8 +10,11 @@
     </div>
     <div class="action-links">
         <a class="button button-light" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
-        <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
-        <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotypes</a>
+        {% if can_import %}
+            <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
+            <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotypes (CSV)</a>
+            <a class="button button-light" href="{% url 'mice:mouse_genotypes_export_xlsx' mouse.pk %}">Export Genotypes (Excel)</a>
+        {% endif %}
         <a class="button button-light" href="#">Print Mouse Card</a>
         <a class="button button-light" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
     </div>

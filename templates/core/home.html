@@ -32,11 +32,16 @@
     <div class="action-links">
         <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
         <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
-        <a class="button button-light" href="{% url 'colony:cage_import' %}">Import Cages</a>
-        <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
-        <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
-        <a class="button button-light" href="{% url 'colony:cages_export' %}">Export All Cages</a>
-        <a class="button button-light" href="{% url 'mice:mice_export' %}">Export All Mice</a>
+        {% if can_import %}
+            <a class="button button-light" href="{% url 'colony:cage_import' %}">Import Cages</a>
+            <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
+            <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
+            <a class="button button-light" href="{% url 'colony:cages_export' %}">Export All Cages</a>
+            <a class="button button-light" href="{% url 'mice:mice_export' %}">Export All Mice</a>
+        {% endif %}
+        {% if can_manage_breeding %}
+            <a class="button button-light" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
+        {% endif %}
     </div>
 </section>
 

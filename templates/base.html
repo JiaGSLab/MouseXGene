@@ -16,6 +16,9 @@
                 <a href="{% url 'mice:mouse_list' %}">Mice</a>
                 <a href="{% url 'breeding:breeding_list' %}">Breedings</a>
                 <a href="{% url 'litters:litter_list' %}">Litters</a>
+                {% if can_view_audit %}
+                    <a href="{% url 'audit_list' %}">Audit</a>
+                {% endif %}
                 <a href="/admin/">Admin</a>
             </nav>
         </div>

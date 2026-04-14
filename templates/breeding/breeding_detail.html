@@ -10,7 +10,9 @@
     </div>
     <div class="action-links">
         <a class="button button-light" href="#">Edit Breeding</a>
-        <a class="button button-light" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
+        {% if can_manage_breeding %}
+            <a class="button button-light" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
+        {% endif %}
         <a class="button button-light" href="#">Print Breeding Card</a>
     </div>
 </section>

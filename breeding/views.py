@@ -8,8 +8,12 @@ from colony.models import CageMembership, Mouse
 
 from .forms import BreedingForm, LitterForm, WeanLitterForm, get_pup_formset
 from .models import Breeding, Litter
+from core.audit import log_audit_event
+from core.models import AuditLog
+from users.permissions import authenticated_required, role_required, can_manage_breeding
 
 
+@authenticated_required
 def breeding_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     status = (request.GET.get("status") or "").strip()
@@ -44,11 +48,18 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     return render(request, "breeding/breeding_list.html", context)
 
 
+@role_required(can_manage_breeding)
 def breeding_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = BreedingForm(request.POST)
         if form.is_valid():
             breeding = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.CREATE,
+                obj=breeding,
+                message=f"Created breeding {breeding.breeding_code}.",
+            )
             return redirect("breeding:breeding_detail", pk=breeding.pk)
     else:
         form = BreedingForm()
@@ -62,6 +73,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
     return render(request, "breeding/breeding_form.html", context)
 
 
+@authenticated_required
 def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     breeding = get_object_or_404(
         Breeding.objects.select_related("cage", "male", "female_1", "female_2"),
@@ -71,6 +83,7 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "breeding/breeding_detail.html", {"breeding": breeding, "litters": litters})
 
 
+@authenticated_required
 def litter_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     weaned = (request.GET.get("weaned") or "").strip()
@@ -104,6 +117,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     return render(request, "breeding/litter_list.html", context)
 
 
+@role_required(can_manage_breeding)
 def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
     breeding = get_object_or_404(Breeding, pk=breeding_pk)
     if request.method == "POST":
@@ -115,6 +129,12 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
             if breeding.status != Breeding.Status.LITTERED:
                 breeding.status = Breeding.Status.LITTERED
                 breeding.save(update_fields=["status"])
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.RECORD_LITTER,
+                obj=litter,
+                message=f"Recorded litter {litter.litter_code or litter.pk} for breeding {breeding.breeding_code}.",
+            )
             messages.success(request, f"Litter {litter.litter_code or litter.pk} created.")
             return redirect("litters:litter_detail", pk=litter.pk)
     else:
@@ -128,11 +148,13 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
     return render(request, "breeding/litter_form.html", context)
 
 
+@authenticated_required
 def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(Litter.objects.select_related("breeding"), pk=pk)
     return render(request, "breeding/litter_detail.html", {"litter": litter})
 
 
+@role_required(can_manage_breeding)
 def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(
         Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1"),
@@ -227,6 +249,15 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     messages.success(
                         request,
                         f"Weaned {len(created_uids)} pups: {', '.join(created_uids)}.",
+                    )
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.WEAN,
+                        obj=litter,
+                        message=(
+                            f"Weaned {len(created_uids)} pups from litter {litter.litter_code or litter.pk} "
+                            f"into cage {target_cage.cage_id}: {', '.join(created_uids)}."
+                        ),
                     )
                     return redirect("litters:litter_detail", pk=litter.pk)
     else:

@@ -1,13 +1,17 @@
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 from django.db.models import Q
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 
 from colony.models import Cage, Mouse
 from breeding.models import Breeding, Litter
+from .models import AuditLog
+from users.permissions import authenticated_required, role_required, can_view_audit
 
 
+@authenticated_required
 def home(request: HttpRequest) -> HttpResponse:
     today = timezone.localdate()
     wean_due_end = today + timedelta(days=3)
@@ -60,3 +64,29 @@ def home(request: HttpRequest) -> HttpResponse:
         "recent_cages": Cage.objects.order_by("-created_at")[:8],
     }
     return render(request, "core/home.html", context)
+
+
+@role_required(can_view_audit)
+def audit_log_list(request: HttpRequest) -> HttpResponse:
+    action = (request.GET.get("action") or "").strip()
+    object_type = (request.GET.get("object_type") or "").strip()
+    user_id = (request.GET.get("user") or "").strip()
+
+    logs = AuditLog.objects.select_related("user").all()
+    if action:
+        logs = logs.filter(action=action)
+    if object_type:
+        logs = logs.filter(object_type=object_type)
+    if user_id:
+        logs = logs.filter(user_id=user_id)
+
+    context = {
+        "logs": logs.order_by("-created_at")[:200],
+        "action": action,
+        "object_type": object_type,
+        "user_id": user_id,
+        "action_options": AuditLog.Action.choices,
+        "object_type_options": AuditLog.objects.values_list("object_type", flat=True).distinct().order_by("object_type"),
+        "user_options": get_user_model().objects.order_by("username"),
+    }
+    return render(request, "core/audit_list.html", context)

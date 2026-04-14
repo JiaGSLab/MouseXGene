@@ -10,7 +10,9 @@
 
 <section class="card">
     <p>
-        <a href="{% url 'genotypes:genotype_import_template' %}">Download sample template (CSV)</a>
+        <a href="{% url 'genotypes:genotype_import_template' %}">Download template (CSV)</a>
+        |
+        <a href="{% url 'genotypes:genotype_import_template_xlsx' %}">Download template (XLSX)</a>
     </p>
 
     <p class="muted">
@@ -37,7 +39,7 @@
 
         {% if row_errors %}
             <div class="form-errors">
-                <strong>Validation errors:</strong>
+                <strong>Validation errors ({{ row_errors|length }}):</strong>
                 <ul>
                     {% for error in row_errors %}
                         <li>{{ error }}</li>

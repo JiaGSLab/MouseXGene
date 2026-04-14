@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, Project
+from .models import AuditLog, ImportLog, Project
 
 
 @admin.register(Project)
@@ -12,5 +12,15 @@ class ProjectAdmin(admin.ModelAdmin):
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
-    list_display = ("actor", "action", "object_type", "object_id", "created_at")
-    search_fields = ("actor", "action", "object_type", "object_id")
+    list_display = ("created_at", "user", "action", "object_type", "object_id", "object_repr")
+    search_fields = ("message", "object_type", "object_id", "object_repr", "user__username")
+    list_filter = ("action", "object_type", "user")
+    ordering = ("-created_at",)
+
+
+@admin.register(ImportLog)
+class ImportLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "import_type", "filename", "success", "created_count", "user")
+    search_fields = ("filename", "error_summary", "user__username")
+    list_filter = ("import_type", "success", "user")
+    ordering = ("-created_at",)

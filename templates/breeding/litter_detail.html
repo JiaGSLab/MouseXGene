@@ -10,7 +10,9 @@
     </div>
     <div class="action-links">
         <a class="button button-light" href="#">Edit Litter</a>
-        <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean Pups</a>
+        {% if can_manage_breeding %}
+            <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean Pups</a>
+        {% endif %}
     </div>
 </section>
 

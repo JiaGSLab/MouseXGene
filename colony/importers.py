@@ -40,6 +40,17 @@ def _to_text(value) -> str:
     return "" if text.lower() == "nan" else text
 
 
+def _missing_columns_error(missing_columns: list[str], actual_columns: list[str]) -> str:
+    expected_text = ", ".join(EXPECTED_COLUMNS)
+    actual_text = ", ".join(actual_columns) if actual_columns else "(none)"
+    missing_text = ", ".join(missing_columns)
+    return (
+        f"Missing required columns: {missing_text}. "
+        f"Found columns: {actual_text}. "
+        f"Expected schema includes: {expected_text}."
+    )
+
+
 def parse_cage_import(uploaded_file) -> CageImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
@@ -55,7 +66,7 @@ def parse_cage_import(uploaded_file) -> CageImportResult:
     if missing_columns:
         return CageImportResult(
             rows=[],
-            errors=[f"Missing required columns: {', '.join(missing_columns)}"],
+            errors=[_missing_columns_error(missing_columns, list(dataframe.columns))],
         )
 
     allowed_cage_types = {choice[0] for choice in Cage.CageType.choices}
@@ -159,7 +170,13 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
     if missing_columns:
         return MouseImportResult(
             rows=[],
-            errors=[f"Missing required columns: {', '.join(missing_columns)}"],
+            errors=[
+                (
+                    f"Missing required columns: {', '.join(missing_columns)}. "
+                    f"Found columns: {', '.join(dataframe.columns) if len(dataframe.columns) else '(none)'}. "
+                    f"Expected columns: {', '.join(MOUSE_EXPECTED_COLUMNS)}."
+                )
+            ],
         )
 
     allowed_sex = {choice[0] for choice in Mouse.Sex.choices}

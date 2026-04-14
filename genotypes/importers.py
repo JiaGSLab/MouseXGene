@@ -77,7 +77,13 @@ def parse_genotype_import(uploaded_file) -> GenotypeImportResult:
     if missing_columns:
         return GenotypeImportResult(
             rows=[],
-            errors=[f"Missing required columns: {', '.join(missing_columns)}"],
+            errors=[
+                (
+                    f"Missing required columns: {', '.join(missing_columns)}. "
+                    f"Found columns: {', '.join(dataframe.columns) if len(dataframe.columns) else '(none)'}. "
+                    f"Expected columns: {', '.join(GENOTYPE_EXPECTED_COLUMNS)}."
+                )
+            ],
         )
 
     mouse_map = {obj.mouse_uid: obj for obj in Mouse.objects.all()}

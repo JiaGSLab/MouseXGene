@@ -9,7 +9,9 @@
         <p class="muted">Track active and historical breeding setups.</p>
     </div>
     <div class="action-links">
-        <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
+        {% if can_manage_breeding %}
+            <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
+        {% endif %}
     </div>
 </section>
 

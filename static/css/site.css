@@ -437,3 +437,44 @@ a:hover {
     font-size: 0.78rem;
     font-weight: 600;
 }
+
+.family-tree-block {
+    position: relative;
+}
+
+.family-tree-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.family-tree-grid.two-col {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.family-tree-grid.three-col {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.family-tree-grid.four-col {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.family-mouse-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff;
+}
+
+.family-mouse-card h3 {
+    margin: 0 0 6px;
+    font-size: 0.95rem;
+}
+
+.family-mouse-card p {
+    margin: 3px 0;
+}
+
+.focal-card {
+    border: 2px solid #c7d2fe;
+}
