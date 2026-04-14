@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Mice | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Mice</h1>
+    <p class="muted">Browse all mice and search by key identifiers.</p>
+</section>
+
+<section class="card">
+    <form method="get" class="search-form">
+        <input
+            type="text"
+            name="q"
+            value="{{ query }}"
+            placeholder="Search mouse_uid, ear_tag, strain line, or project"
+            class="search-input"
+        >
+        <button type="submit" class="button">Search</button>
+        {% if query %}
+            <a href="{% url 'mice:mouse_list' %}" class="button button-light">Clear</a>
+        {% endif %}
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Mouse UID</th>
+                <th>Sex</th>
+                <th>Birth Date</th>
+                <th>Status</th>
+                <th>Strain Line</th>
+                <th>Current Cage</th>
+                <th>Project</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mouse in mice %}
+            <tr>
+                <td><a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
+                <td>{{ mouse.get_sex_display }}</td>
+                <td>{{ mouse.birth_date|default:"-" }}</td>
+                <td>{{ mouse.get_status_display }}</td>
+                <td>{{ mouse.strain_line }}</td>
+                <td>{{ mouse.current_cage|default:"-" }}</td>
+                <td>{{ mouse.project|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="empty-row">No mice found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

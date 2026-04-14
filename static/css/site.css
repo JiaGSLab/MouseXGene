@@ -187,3 +187,19 @@ a:hover {
 .detail-grid dd {
     margin: 0;
 }
+
+.search-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.search-input {
+    min-width: 360px;
+    flex: 1;
+    padding: 9px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+}

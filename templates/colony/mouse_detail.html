@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Mouse {{ mouse.mouse_uid }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Mouse {{ mouse.mouse_uid }}</h1>
+        <p class="muted">Mouse details and genotype records.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="#">Edit Mouse</a>
+        <a class="button button-light" href="#">Move Cage</a>
+        <a class="button button-light" href="#">Print Mouse Card</a>
+        <a class="button button-light" href="#">View Pedigree</a>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Basic Information</h2>
+    <dl class="detail-grid">
+        <dt>Sex</dt><dd>{{ mouse.get_sex_display }}</dd>
+        <dt>Status</dt><dd>{{ mouse.get_status_display }}</dd>
+        <dt>Birth Date</dt><dd>{{ mouse.birth_date|default:"-" }}</dd>
+        <dt>Death Date</dt><dd>{{ mouse.death_date|default:"-" }}</dd>
+        <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
+        <dt>Project</dt><dd>{{ mouse.project|default:"-" }}</dd>
+        <dt>Ear Tag</dt><dd>{{ mouse.ear_tag|default:"-" }}</dd>
+        <dt>Coat Color</dt><dd>{{ mouse.coat_color|default:"-" }}</dd>
+    </dl>
+</section>
+
+<section class="cards">
+    <article class="card">
+        <h2>Current Cage</h2>
+        <p>{{ mouse.current_cage|default:"No current cage assigned." }}</p>
+    </article>
+    <article class="card">
+        <h2>Parents</h2>
+        <p><strong>Sire:</strong> {{ mouse.sire|default:"-" }}</p>
+        <p><strong>Dam:</strong> {{ mouse.dam|default:"-" }}</p>
+    </article>
+</section>
+
+<section class="card">
+    <h2>Genotype Records</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Gene</th>
+                <th>Locus</th>
+                <th>Allele 1</th>
+                <th>Allele 2</th>
+                <th>Zygosity</th>
+                <th>Confirmed</th>
+                <th>Assay Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for gt in genotype_records %}
+            <tr>
+                <td>{{ gt.gene|default:"-" }}</td>
+                <td>{{ gt.locus_name|default:"-" }}</td>
+                <td>{{ gt.allele_1|default:"-" }}</td>
+                <td>{{ gt.allele_2|default:"-" }}</td>
+                <td>{{ gt.zygosity_display|default:"-" }}</td>
+                <td>{{ gt.is_confirmed|yesno:"Yes,No" }}</td>
+                <td>{{ gt.assay_date|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="empty-row">No genotype records.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Notes</h2>
+    <p>{{ mouse.notes|default:"No notes." }}</p>
+</section>
+{% endblock %}
