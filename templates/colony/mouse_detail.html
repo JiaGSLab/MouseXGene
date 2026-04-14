@@ -13,7 +13,7 @@
         <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
         <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotypes</a>
         <a class="button button-light" href="#">Print Mouse Card</a>
-        <a class="button button-light" href="#">View Pedigree</a>
+        <a class="button button-light" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
     </div>
 </section>
 
@@ -41,6 +41,62 @@
         <p><strong>Sire:</strong> {{ mouse.sire|default:"-" }}</p>
         <p><strong>Dam:</strong> {{ mouse.dam|default:"-" }}</p>
     </article>
+</section>
+
+<section class="card">
+    <h2>Family</h2>
+
+    <h3>Father (Sire)</h3>
+    {% if family_sire %}
+        <p>
+            <a href="{% url 'mice:mouse_detail' family_sire.mouse.pk %}">{{ family_sire.mouse.mouse_uid }}</a>
+            - {{ family_sire.mouse.get_sex_display }} - {{ family_sire.mouse.birth_date|default:"-" }}
+            - Cage: {{ family_sire.mouse.current_cage|default:"-" }}
+            - Genotype: {{ family_sire.genotype_summary }}
+        </p>
+    {% else %}
+        <p class="muted">No sire recorded.</p>
+    {% endif %}
+
+    <h3>Mother (Dam)</h3>
+    {% if family_dam %}
+        <p>
+            <a href="{% url 'mice:mouse_detail' family_dam.mouse.pk %}">{{ family_dam.mouse.mouse_uid }}</a>
+            - {{ family_dam.mouse.get_sex_display }} - {{ family_dam.mouse.birth_date|default:"-" }}
+            - Cage: {{ family_dam.mouse.current_cage|default:"-" }}
+            - Genotype: {{ family_dam.genotype_summary }}
+        </p>
+    {% else %}
+        <p class="muted">No dam recorded.</p>
+    {% endif %}
+
+    <h3>Littermates</h3>
+    <ul class="mini-list">
+        {% for rel in family_littermates %}
+            <li>
+                <a href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
+                - {{ rel.mouse.get_sex_display }} - {{ rel.mouse.birth_date|default:"-" }}
+                - Cage: {{ rel.mouse.current_cage|default:"-" }}
+                - Genotype: {{ rel.genotype_summary }}
+            </li>
+        {% empty %}
+            <li class="muted">No littermates found.</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Offspring</h3>
+    <ul class="mini-list">
+        {% for rel in family_offspring %}
+            <li>
+                <a href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
+                - {{ rel.mouse.get_sex_display }} - {{ rel.mouse.birth_date|default:"-" }}
+                - Cage: {{ rel.mouse.current_cage|default:"-" }}
+                - Genotype: {{ rel.genotype_summary }}
+            </li>
+        {% empty %}
+            <li class="muted">No offspring found.</li>
+        {% endfor %}
+    </ul>
 </section>
 
 <section class="card">

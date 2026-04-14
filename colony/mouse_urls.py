@@ -8,6 +8,7 @@ from .views import (
     mouse_import_template,
     mouse_genotypes_export,
     mouse_list,
+    mouse_pedigree,
     mouse_move,
     mice_export,
 )
@@ -23,6 +24,7 @@ urlpatterns = [
     path("", mouse_list, name="mouse_list"),
     path("<int:pk>/edit/", mouse_edit, name="mouse_edit"),
     path("<int:pk>/move/", mouse_move, name="mouse_move"),
+    path("<int:pk>/pedigree/", mouse_pedigree, name="mouse_pedigree"),
     path("<int:pk>/genotypes/export/", mouse_genotypes_export, name="mouse_genotypes_export"),
     path("<int:pk>/", mouse_detail, name="mouse_detail"),
 ]

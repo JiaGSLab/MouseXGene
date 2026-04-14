@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Breedings | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Breedings</h1>
+        <p class="muted">Track active and historical breeding setups.</p>
+    </div>
+    <div class="action-links">
+        <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
+    </div>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or male/female mouse_uid" class="search-input">
+        <select name="status">
+            <option value="">All Status</option>
+            {% for value, label in status_options %}
+                <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="breeding_type">
+            <option value="">All Types</option>
+            {% for value, label in breeding_type_options %}
+                <option value="{{ value }}" {% if breeding_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="cage">
+            <option value="">All Cages</option>
+            {% for item in cage_options %}
+                <option value="{{ item.pk }}" {% if cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
+            {% endfor %}
+        </select>
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'breeding:breeding_list' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Breeding Code</th>
+                <th>Cage</th>
+                <th>Breeding Type</th>
+                <th>Male</th>
+                <th>Female 1</th>
+                <th>Female 2</th>
+                <th>Start Date</th>
+                <th>Plug Date</th>
+                <th>Expected Birth Date</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for breeding in breedings %}
+            <tr>
+                <td><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
+                <td>{{ breeding.cage }}</td>
+                <td>{{ breeding.get_breeding_type_display }}</td>
+                <td>{{ breeding.male }}</td>
+                <td>{{ breeding.female_1 }}</td>
+                <td>{{ breeding.female_2|default:"-" }}</td>
+                <td>{{ breeding.start_date|default:"-" }}</td>
+                <td>{{ breeding.plug_date|default:"-" }}</td>
+                <td>{{ breeding.expected_birth_date|default:"-" }}</td>
+                <td>{{ breeding.get_status_display }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="10" class="empty-row">No breeding records found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

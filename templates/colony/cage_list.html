@@ -15,6 +15,51 @@
     </div>
 </section>
 
+<section class="card">
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search cage_id" class="search-input">
+        <select name="room">
+            <option value="">All Rooms</option>
+            {% for value in room_options %}
+                <option value="{{ value }}" {% if room == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+        </select>
+        <select name="rack">
+            <option value="">All Racks</option>
+            {% for value in rack_options %}
+                <option value="{{ value }}" {% if rack == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+        </select>
+        <select name="cage_type">
+            <option value="">All Cage Types</option>
+            {% for value, label in cage_type_options %}
+                <option value="{{ value }}" {% if cage_type == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="purpose">
+            <option value="">All Purposes</option>
+            {% for value, label in purpose_options %}
+                <option value="{{ value }}" {% if purpose == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="status">
+            <option value="">All Status</option>
+            {% for value, label in status_options %}
+                <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="is_empty">
+            <option value="">Empty or Not</option>
+            <option value="yes" {% if is_empty == "yes" %}selected{% endif %}>Empty Cages Only</option>
+            <option value="no" {% if is_empty == "no" %}selected{% endif %}>Non-Empty Cages Only</option>
+        </select>
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'colony:cage_list' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
 <section class="table-wrap">
     <table class="data-table">
         <thead>

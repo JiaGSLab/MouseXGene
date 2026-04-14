@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Wean Litter {{ litter.litter_code|default:litter.pk }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Wean Pups</h1>
+    <p class="muted">Create mice from this litter and assign them to a target cage.</p>
+</section>
+
+<section class="card">
+    <h2>Litter Information</h2>
+    <dl class="detail-grid">
+        <dt>Litter Code</dt><dd>{{ litter.litter_code|default:litter.pk }}</dd>
+        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
+        <dt>Birth Date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
+        <dt>Total Born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
+        <dt>Alive Count</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
+        <dt>Dead Count</dt><dd>{{ litter.dead_count|default:"-" }}</dd>
+        <dt>Current Wean Date</dt><dd>{{ litter.wean_date|default:"-" }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if wean_form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in wean_form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for field in wean_form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                    <div class="field-error">
+                        {% for error in field.errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <div class="form-actions">
+            <button type="submit" name="refresh_forms" value="1" class="button button-light">Update Pup Fields</button>
+        </div>
+
+        {{ pup_formset.management_form }}
+        <h2>Pup Entries</h2>
+        {% for pup_form in pup_formset.forms %}
+            <div class="card pup-card">
+                <h3>Pup {{ forloop.counter }}</h3>
+                {% for field in pup_form %}
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+
+        <div class="form-actions">
+            <button type="submit" class="button">Create Weaned Pups</button>
+            <a href="{% url 'litters:litter_detail' litter.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

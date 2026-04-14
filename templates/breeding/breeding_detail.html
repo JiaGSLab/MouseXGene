@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Breeding {{ breeding.breeding_code }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Breeding {{ breeding.breeding_code }}</h1>
+        <p class="muted">Breeding setup details and status.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="#">Edit Breeding</a>
+        <a class="button button-light" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
+        <a class="button button-light" href="#">Print Breeding Card</a>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Basic Information</h2>
+    <dl class="detail-grid">
+        <dt>Breeding Code</dt><dd>{{ breeding.breeding_code }}</dd>
+        <dt>Cage</dt><dd>{{ breeding.cage }}</dd>
+        <dt>Breeding Type</dt><dd>{{ breeding.get_breeding_type_display }}</dd>
+        <dt>Status</dt><dd>{{ breeding.get_status_display }}</dd>
+        <dt>Active</dt><dd>{{ breeding.active|yesno:"Yes,No" }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Mice</h2>
+    <dl class="detail-grid">
+        <dt>Male</dt><dd><a href="{% url 'mice:mouse_detail' breeding.male.pk %}">{{ breeding.male }}</a></dd>
+        <dt>Female 1</dt><dd><a href="{% url 'mice:mouse_detail' breeding.female_1.pk %}">{{ breeding.female_1 }}</a></dd>
+        <dt>Female 2</dt>
+        <dd>
+            {% if breeding.female_2 %}
+                <a href="{% url 'mice:mouse_detail' breeding.female_2.pk %}">{{ breeding.female_2 }}</a>
+            {% else %}
+                -
+            {% endif %}
+        </dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Dates</h2>
+    <dl class="detail-grid">
+        <dt>Start Date</dt><dd>{{ breeding.start_date|default:"-" }}</dd>
+        <dt>Plug Date</dt><dd>{{ breeding.plug_date|default:"-" }}</dd>
+        <dt>Expected Birth Date</dt><dd>{{ breeding.expected_birth_date|default:"-" }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Linked Litters</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Litter Code</th>
+                <th>Birth Date</th>
+                <th>Total Born</th>
+                <th>Alive</th>
+                <th>Dead</th>
+                <th>Wean Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for litter in litters %}
+            <tr>
+                <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a></td>
+                <td>{{ litter.birth_date|default:"-" }}</td>
+                <td>{{ litter.total_born|default:"-" }}</td>
+                <td>{{ litter.alive_count|default:"-" }}</td>
+                <td>{{ litter.dead_count|default:"-" }}</td>
+                <td>{{ litter.wean_date|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="empty-row">No litters recorded for this breeding.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Notes</h2>
+    <p>{{ breeding.notes|default:"No notes." }}</p>
+</section>
+{% endblock %}

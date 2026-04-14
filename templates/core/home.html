@@ -40,7 +40,28 @@
     </div>
 </section>
 
+<section class="page-header">
+    <h2>Warnings / Alerts <span class="attention-pill">Attention Needed</span></h2>
+</section>
+
 <section class="cards dashboard-sections">
+    <article class="card">
+        <h2>
+            <a href="{% url 'litters:litter_list' %}">Weaning Due Soon</a>
+            <span class="muted">({{ weaning_due_soon_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for litter in weaning_due_soon %}
+                <li>
+                    <a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a>
+                    - {{ litter.birth_date }}
+                </li>
+            {% empty %}
+                <li class="muted">No issues found.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
     <article class="card">
         <h2>
             <a href="{% url 'mice:mouse_list' %}">Mice Without Current Cage</a>
@@ -50,7 +71,7 @@
             {% for mouse in mice_without_cage %}
                 <li>{{ mouse.mouse_uid }}{% if mouse.strain_line %} - {{ mouse.strain_line }}{% endif %}</li>
             {% empty %}
-                <li class="muted">None.</li>
+                <li class="muted">No issues found.</li>
             {% endfor %}
         </ul>
     </article>
@@ -64,7 +85,7 @@
             {% for mouse in mice_without_genotype %}
                 <li>{{ mouse.mouse_uid }}{% if mouse.current_cage %} - {{ mouse.current_cage }}{% endif %}</li>
             {% empty %}
-                <li class="muted">None.</li>
+                <li class="muted">No issues found.</li>
             {% endfor %}
         </ul>
     </article>
@@ -78,7 +99,24 @@
             {% for cage in cages_without_mice %}
                 <li>{{ cage.cage_id }}{% if cage.room %} - {{ cage.room }}{% endif %}</li>
             {% empty %}
-                <li class="muted">None.</li>
+                <li class="muted">No issues found.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="card">
+        <h2>
+            <a href="{% url 'breeding:breeding_list' %}">Active/Plugged Breedings Without Litters</a>
+            <span class="muted">({{ breeding_without_litter_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for breeding in breeding_without_litter %}
+                <li>
+                    <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
+                    - {{ breeding.get_status_display }}
+                </li>
+            {% empty %}
+                <li class="muted">No issues found.</li>
             {% endfor %}
         </ul>
     </article>

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Litter {{ litter.litter_code|default:litter.pk }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Litter {{ litter.litter_code|default:litter.pk }}</h1>
+        <p class="muted">Litter details and counts.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="#">Edit Litter</a>
+        <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean Pups</a>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Basic Information</h2>
+    <dl class="detail-grid">
+        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
+        <dt>Birth Date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
+        <dt>Total Born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
+        <dt>Alive Count</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
+        <dt>Dead Count</dt><dd>{{ litter.dead_count|default:"-" }}</dd>
+        <dt>Wean Date</dt><dd>{{ litter.wean_date|default:"-" }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Notes</h2>
+    <p>{{ litter.notes|default:"No notes." }}</p>
+</section>
+{% endblock %}

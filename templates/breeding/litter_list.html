@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Litters | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Litters</h1>
+    <p class="muted">All recorded litters.</p>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search litter_code" class="search-input">
+        <select name="weaned">
+            <option value="">Weaned / Not Weaned</option>
+            <option value="yes" {% if weaned == "yes" %}selected{% endif %}>Weaned</option>
+            <option value="no" {% if weaned == "no" %}selected{% endif %}>Not Weaned</option>
+        </select>
+        <select name="breeding">
+            <option value="">All Breedings</option>
+            {% for item in breeding_options %}
+                <option value="{{ item.pk }}" {% if breeding == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.breeding_code }}</option>
+            {% endfor %}
+        </select>
+        <input type="date" name="birth_date_from" value="{{ birth_date_from }}" placeholder="Birth Date From">
+        <input type="date" name="birth_date_to" value="{{ birth_date_to }}" placeholder="Birth Date To">
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'litters:litter_list' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Litter Code</th>
+                <th>Breeding</th>
+                <th>Birth Date</th>
+                <th>Total Born</th>
+                <th>Alive Count</th>
+                <th>Dead Count</th>
+                <th>Wean Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for litter in litters %}
+            <tr>
+                <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a></td>
+                <td><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></td>
+                <td>{{ litter.birth_date|default:"-" }}</td>
+                <td>{{ litter.total_born|default:"-" }}</td>
+                <td>{{ litter.alive_count|default:"-" }}</td>
+                <td>{{ litter.dead_count|default:"-" }}</td>
+                <td>{{ litter.wean_date|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="empty-row">No litter records found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

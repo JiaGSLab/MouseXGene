@@ -17,18 +17,42 @@
 </section>
 
 <section class="card">
-    <form method="get" class="search-form">
-        <input
-            type="text"
-            name="q"
-            value="{{ query }}"
-            placeholder="Search mouse_uid, ear_tag, strain line, or project"
-            class="search-input"
-        >
-        <button type="submit" class="button">Search</button>
-        {% if query %}
-            <a href="{% url 'mice:mouse_list' %}" class="button button-light">Clear</a>
-        {% endif %}
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ query }}" placeholder="Search mouse_uid or ear_tag" class="search-input">
+        <select name="sex">
+            <option value="">All Sex</option>
+            {% for value, label in sex_options %}
+                <option value="{{ value }}" {% if sex == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="status">
+            <option value="">All Status</option>
+            {% for value, label in status_options %}
+                <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <select name="strain_line">
+            <option value="">All Strain Lines</option>
+            {% for item in strain_line_options %}
+                <option value="{{ item.pk }}" {% if strain_line == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.line_name }}</option>
+            {% endfor %}
+        </select>
+        <select name="current_cage">
+            <option value="">All Cages</option>
+            {% for item in current_cage_options %}
+                <option value="{{ item.pk }}" {% if current_cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
+            {% endfor %}
+        </select>
+        <select name="project">
+            <option value="">All Projects</option>
+            {% for item in project_options %}
+                <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
+            {% endfor %}
+        </select>
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'mice:mouse_list' %}" class="button button-light">Reset</a>
+        </div>
     </form>
 </section>
 

@@ -31,9 +31,57 @@ def build_short_genotype_summary(mouse: Mouse) -> str:
     return f"{summary}..." if len(genotype_records) > 3 else summary
 
 
+def build_mouse_relation_card(mouse: Mouse) -> dict:
+    return {
+        "mouse": mouse,
+        "genotype_summary": build_short_genotype_summary(mouse),
+    }
+
+
 def cage_list(request: HttpRequest) -> HttpResponse:
-    cages = Cage.objects.all().order_by("cage_id")
-    return render(request, "colony/cage_list.html", {"cages": cages})
+    q = (request.GET.get("q") or "").strip()
+    room = (request.GET.get("room") or "").strip()
+    rack = (request.GET.get("rack") or "").strip()
+    cage_type = (request.GET.get("cage_type") or "").strip()
+    purpose = (request.GET.get("purpose") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    is_empty = (request.GET.get("is_empty") or "").strip()
+
+    cages = Cage.objects.all()
+    if q:
+        cages = cages.filter(cage_id__icontains=q)
+    if room:
+        cages = cages.filter(room=room)
+    if rack:
+        cages = cages.filter(rack=rack)
+    if cage_type:
+        cages = cages.filter(cage_type=cage_type)
+    if purpose:
+        cages = cages.filter(purpose=purpose)
+    if status:
+        cages = cages.filter(status=status)
+    if is_empty == "yes":
+        cages = cages.filter(current_mice__isnull=True)
+    elif is_empty == "no":
+        cages = cages.filter(current_mice__isnull=False)
+
+    cages = cages.distinct().order_by("cage_id")
+    context = {
+        "cages": cages,
+        "q": q,
+        "room": room,
+        "rack": rack,
+        "cage_type": cage_type,
+        "purpose": purpose,
+        "status": status,
+        "is_empty": is_empty,
+        "room_options": Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
+        "rack_options": Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
+        "cage_type_options": Cage.CageType.choices,
+        "purpose_options": Cage.Purpose.choices,
+        "status_options": Cage.Status.choices,
+    }
+    return render(request, "colony/cage_list.html", context)
 
 
 def cage_create(request: HttpRequest) -> HttpResponse:
@@ -201,20 +249,43 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
 
 def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
+    sex = (request.GET.get("sex") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    strain_line = (request.GET.get("strain_line") or "").strip()
+    current_cage = (request.GET.get("current_cage") or "").strip()
+    project = (request.GET.get("project") or "").strip()
     mice = Mouse.objects.select_related("strain_line", "current_cage", "project").all()
 
     if query:
         mice = mice.filter(
             Q(mouse_uid__icontains=query)
             | Q(ear_tag__icontains=query)
-            | Q(strain_line__line_name__icontains=query)
-            | Q(project__name__icontains=query)
         )
+    if sex:
+        mice = mice.filter(sex=sex)
+    if status:
+        mice = mice.filter(status=status)
+    if strain_line:
+        mice = mice.filter(strain_line_id=strain_line)
+    if current_cage:
+        mice = mice.filter(current_cage_id=current_cage)
+    if project:
+        mice = mice.filter(project_id=project)
 
     mice = mice.order_by("-birth_date", "mouse_uid")
     context = {
         "mice": mice,
         "query": query,
+        "sex": sex,
+        "status": status,
+        "strain_line": strain_line,
+        "current_cage": current_cage,
+        "project": project,
+        "sex_options": Mouse.Sex.choices,
+        "status_options": Mouse.Status.choices,
+        "strain_line_options": Mouse._meta.get_field("strain_line").related_model.objects.order_by("line_name"),
+        "current_cage_options": Cage.objects.order_by("cage_id"),
+        "project_options": Mouse._meta.get_field("project").related_model.objects.order_by("name"),
     }
     return render(request, "colony/mouse_list.html", context)
 
@@ -328,12 +399,66 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     genotype_records = MouseGenotype.objects.select_related("gene").filter(mouse=mouse)
     cage_history = mouse.cage_memberships.select_related("cage").all()
+    offspring = (
+        Mouse.objects.filter(Q(sire=mouse) | Q(dam=mouse))
+        .select_related("current_cage")
+        .prefetch_related("genotypes__gene")
+        .distinct()
+        .order_by("mouse_uid")
+    )
+    littermates = Mouse.objects.none()
+    if mouse.sire_id and mouse.dam_id:
+        littermates = (
+            Mouse.objects.filter(sire_id=mouse.sire_id, dam_id=mouse.dam_id)
+            .exclude(pk=mouse.pk)
+            .select_related("current_cage")
+            .prefetch_related("genotypes__gene")
+            .order_by("mouse_uid")
+        )
+
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
         "cage_history": cage_history,
+        "family_offspring": [build_mouse_relation_card(m) for m in offspring],
+        "family_littermates": [build_mouse_relation_card(m) for m in littermates],
+        "family_sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
+        "family_dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
     }
     return render(request, "colony/mouse_detail.html", context)
+
+
+def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
+    mouse = get_object_or_404(
+        Mouse.objects.select_related("sire", "dam", "current_cage"),
+        pk=pk,
+    )
+    offspring = (
+        Mouse.objects.filter(Q(sire=mouse) | Q(dam=mouse))
+        .select_related("current_cage")
+        .prefetch_related("genotypes__gene")
+        .distinct()
+        .order_by("mouse_uid")
+    )
+    littermates = Mouse.objects.none()
+    if mouse.sire_id and mouse.dam_id:
+        littermates = (
+            Mouse.objects.filter(sire_id=mouse.sire_id, dam_id=mouse.dam_id)
+            .exclude(pk=mouse.pk)
+            .select_related("current_cage")
+            .prefetch_related("genotypes__gene")
+            .order_by("mouse_uid")
+        )
+
+    context = {
+        "mouse": mouse,
+        "sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
+        "dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
+        "offspring": [build_mouse_relation_card(m) for m in offspring],
+        "littermates": [build_mouse_relation_card(m) for m in littermates],
+        "focal_summary": build_short_genotype_summary(mouse),
+    }
+    return render(request, "colony/mouse_pedigree.html", context)
 
 
 def mouse_create(request: HttpRequest) -> HttpResponse:
