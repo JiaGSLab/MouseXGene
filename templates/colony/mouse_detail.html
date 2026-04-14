@@ -11,6 +11,7 @@
     <div class="action-links">
         <a class="button button-light" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
         <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
+        <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotypes</a>
         <a class="button button-light" href="#">Print Mouse Card</a>
         <a class="button button-light" href="#">View Pedigree</a>
     </div>

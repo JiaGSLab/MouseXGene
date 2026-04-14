@@ -10,7 +10,8 @@
     </div>
     <div class="action-links">
         <a class="button button-light" href="#">Edit Cage</a>
-        <a class="button button-light" href="#">Print Cage Card</a>
+        <a class="button button-light" href="{% url 'colony:cage_inventory_export' cage.pk %}">Export Current Inventory</a>
+        <a class="button button-light" href="{% url 'colony:cage_print' cage.pk %}">Print Cage Card</a>
         <a class="button button-light" href="#">View Cage History</a>
     </div>
 </section>

@@ -5,25 +5,106 @@
 {% block content %}
 <section class="page-header">
     <h1>MouseXGene Dashboard</h1>
-    <p class="muted">A lightweight colony management system for your lab.</p>
+    <p class="muted">Daily overview for colony status, data quality, and quick actions.</p>
 </section>
 
 <section class="cards">
     <article class="card">
         <h2>Total Cages</h2>
-        <p class="metric">{{ cage_count }}</p>
+        <p class="metric">{{ total_cages }}</p>
     </article>
     <article class="card">
         <h2>Active Cages</h2>
-        <p class="metric">{{ active_cage_count }}</p>
+        <p class="metric">{{ active_cages }}</p>
     </article>
     <article class="card">
         <h2>Total Mice</h2>
-        <p class="metric">{{ mouse_count }}</p>
+        <p class="metric">{{ total_mice }}</p>
+    </article>
+    <article class="card">
+        <h2>Active Mice</h2>
+        <p class="metric">{{ active_mice }}</p>
     </article>
 </section>
 
-<section class="actions">
-    <a class="button" href="{% url 'colony:cage_list' %}">Go to Cages</a>
+<section class="card">
+    <h2>Quick Actions</h2>
+    <div class="action-links">
+        <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
+        <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
+        <a class="button button-light" href="{% url 'colony:cage_import' %}">Import Cages</a>
+        <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
+        <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
+        <a class="button button-light" href="{% url 'colony:cages_export' %}">Export All Cages</a>
+        <a class="button button-light" href="{% url 'mice:mice_export' %}">Export All Mice</a>
+    </div>
+</section>
+
+<section class="cards dashboard-sections">
+    <article class="card">
+        <h2>
+            <a href="{% url 'mice:mouse_list' %}">Mice Without Current Cage</a>
+            <span class="muted">({{ mice_without_cage_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for mouse in mice_without_cage %}
+                <li>{{ mouse.mouse_uid }}{% if mouse.strain_line %} - {{ mouse.strain_line }}{% endif %}</li>
+            {% empty %}
+                <li class="muted">None.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="card">
+        <h2>
+            <a href="{% url 'mice:mouse_list' %}">Mice Without Genotype Records</a>
+            <span class="muted">({{ mice_without_genotype_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for mouse in mice_without_genotype %}
+                <li>{{ mouse.mouse_uid }}{% if mouse.current_cage %} - {{ mouse.current_cage }}{% endif %}</li>
+            {% empty %}
+                <li class="muted">None.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="card">
+        <h2>
+            <a href="{% url 'colony:cage_list' %}">Cages With No Current Mice</a>
+            <span class="muted">({{ cages_without_mice_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for cage in cages_without_mice %}
+                <li>{{ cage.cage_id }}{% if cage.room %} - {{ cage.room }}{% endif %}</li>
+            {% empty %}
+                <li class="muted">None.</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+
+<section class="cards dashboard-sections">
+    <article class="card">
+        <h2>Recently Added Mice</h2>
+        <ul class="mini-list">
+            {% for mouse in recent_mice %}
+                <li>{{ mouse.mouse_uid }}{% if mouse.current_cage %} - {{ mouse.current_cage }}{% endif %}</li>
+            {% empty %}
+                <li class="muted">No mice yet.</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="card">
+        <h2>Recently Created Cages</h2>
+        <ul class="mini-list">
+            {% for cage in recent_cages %}
+                <li>{{ cage.cage_id }}{% if cage.room %} - {{ cage.room }}{% endif %}</li>
+            {% empty %}
+                <li class="muted">No cages yet.</li>
+            {% endfor %}
+        </ul>
+    </article>
 </section>
 {% endblock %}

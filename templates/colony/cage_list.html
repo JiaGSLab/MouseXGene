@@ -8,7 +8,9 @@
         <h1>Cages</h1>
         <p class="muted">All cages in the colony.</p>
     </div>
-    <div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'colony:cage_import' %}">Import Cages</a>
+        <a class="button button-light" href="{% url 'colony:cages_export' %}">Export All Cages</a>
         <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
     </div>
 </section>

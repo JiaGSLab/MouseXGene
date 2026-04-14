@@ -254,3 +254,153 @@ a:hover {
     padding: 8px 10px;
     font-size: 0.92rem;
 }
+
+.print-toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.cage-print-sheet {
+    display: flex;
+    justify-content: center;
+}
+
+.cage-card {
+    width: 86mm;
+    min-height: 54mm;
+    background: #fff;
+    color: #111827;
+    border: 1px solid #111827;
+    border-radius: 3mm;
+    padding: 3mm;
+    font-size: 10px;
+    line-height: 1.25;
+}
+
+.cage-card-header {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 2mm;
+}
+
+.cage-card-header h1 {
+    margin: 0;
+    font-size: 16px;
+    letter-spacing: 0.5px;
+}
+
+.qr-placeholder {
+    width: 14mm;
+    height: 14mm;
+    border: 1px dashed #4b5563;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.cage-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5mm 3mm;
+    margin-bottom: 2mm;
+}
+
+.cage-notes {
+    border-top: 1px solid #d1d5db;
+    border-bottom: 1px solid #d1d5db;
+    padding: 1.5mm 0;
+    margin-bottom: 2mm;
+}
+
+.cage-mice h2 {
+    margin: 0 0 1.5mm;
+    font-size: 11px;
+}
+
+.cage-mice table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9px;
+}
+
+.cage-mice th,
+.cage-mice td {
+    border-bottom: 1px solid #e5e7eb;
+    padding: 1mm 0.8mm;
+    text-align: left;
+    vertical-align: top;
+}
+
+@page {
+    size: 86mm 54mm;
+    margin: 2mm;
+}
+
+@media print {
+    .topbar,
+    .print-toolbar,
+    .no-print {
+        display: none !important;
+    }
+
+    body {
+        background: #fff;
+        margin: 0;
+    }
+
+    .container {
+        width: auto;
+        margin: 0;
+    }
+
+    .main-content {
+        padding: 0;
+    }
+
+    .cage-print-sheet {
+        display: block;
+    }
+
+    .cage-card {
+        margin: 0;
+        border-radius: 0;
+        border: 1px solid #000;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+}
+
+.flash-messages {
+    margin-bottom: 14px;
+}
+
+.flash-message {
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e3a8a;
+}
+
+.flash-message.success {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.dashboard-sections {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.mini-list {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 4px;
+}

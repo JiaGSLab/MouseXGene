@@ -76,3 +76,11 @@ class MoveCageForm(forms.Form):
         if self.mouse.current_cage_id and destination_cage.id == self.mouse.current_cage_id:
             raise forms.ValidationError("Destination cage cannot be the same as current cage.")
         return destination_cage
+
+
+class CageImportForm(forms.Form):
+    data_file = forms.FileField(label="CSV or XLSX file")
+
+
+class MouseImportForm(forms.Form):
+    data_file = forms.FileField(label="CSV or XLSX file")

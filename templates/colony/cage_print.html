@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Print Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="print-toolbar no-print">
+    <a href="{% url 'colony:cage_detail' cage.pk %}" class="button button-light">Back</a>
+    <button class="button" onclick="window.print()">Print</button>
+</section>
+
+<section class="cage-print-sheet">
+    <article class="cage-card">
+        <header class="cage-card-header">
+            <h1>{{ cage.cage_id }}</h1>
+            <div class="qr-placeholder">QR</div>
+        </header>
+
+        <div class="cage-meta">
+            <div><strong>Room:</strong> {{ cage.room|default:"-" }}</div>
+            <div><strong>Rack:</strong> {{ cage.rack|default:"-" }}</div>
+            <div><strong>Pos:</strong> {{ cage.position|default:"-" }}</div>
+            <div><strong>Type:</strong> {{ cage.get_cage_type_display }}</div>
+            <div><strong>Purpose:</strong> {{ cage.get_purpose_display }}</div>
+            <div><strong>Status:</strong> {{ cage.get_status_display }}</div>
+        </div>
+
+        {% if cage.notes %}
+        <section class="cage-notes">
+            <strong>Notes:</strong> {{ cage.notes }}
+        </section>
+        {% endif %}
+
+        <section class="cage-mice">
+            <h2>Current Mice</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>UID</th>
+                        <th>Sex</th>
+                        <th>Genotype</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in mice_rows %}
+                    <tr>
+                        <td>{{ row.mouse.mouse_uid }}</td>
+                        <td>{{ row.mouse.get_sex_display }}</td>
+                        <td>{{ row.genotype_summary }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="3">No mice in cage.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </article>
+</section>
+{% endblock %}

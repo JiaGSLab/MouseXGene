@@ -8,7 +8,10 @@
         <h1>Mice</h1>
         <p class="muted">Browse all mice and search by key identifiers.</p>
     </div>
-    <div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
+        <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
+        <a class="button button-light" href="{% url 'mice:mice_export' %}">Export All Mice</a>
         <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
     </div>
 </section>
