@@ -3,9 +3,14 @@
 {% block title %}Cages | MouseXGene{% endblock %}
 
 {% block content %}
-<section class="page-header">
-    <h1>Cages</h1>
-    <p class="muted">All cages in the colony.</p>
+<section class="page-header page-header-row">
+    <div>
+        <h1>Cages</h1>
+        <p class="muted">All cages in the colony.</p>
+    </div>
+    <div>
+        <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
+    </div>
 </section>
 
 <section class="table-wrap">

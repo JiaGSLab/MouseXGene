@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Move Cage | Mouse {{ mouse.mouse_uid }}{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Move Mouse to Another Cage</h1>
+    <p class="muted">Record a cage transfer and preserve movement history.</p>
+</section>
+
+<section class="card">
+    <h2>Mouse Information</h2>
+    <dl class="detail-grid">
+        <dt>Mouse UID</dt><dd>{{ mouse.mouse_uid }}</dd>
+        <dt>Sex</dt><dd>{{ mouse.get_sex_display }}</dd>
+        <dt>Current Cage</dt><dd>{{ mouse.current_cage|default:"-" }}</dd>
+        <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for field in form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}
+                    <div class="field-error">
+                        {% for error in field.errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <div class="form-actions">
+            <button type="submit" class="button">Confirm Move</button>
+            <a href="{% url 'mice:mouse_detail' mouse.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

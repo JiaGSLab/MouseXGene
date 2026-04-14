@@ -9,8 +9,8 @@
         <p class="muted">Mouse details and genotype records.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="#">Edit Mouse</a>
-        <a class="button button-light" href="#">Move Cage</a>
+        <a class="button button-light" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
         <a class="button button-light" href="#">Print Mouse Card</a>
         <a class="button button-light" href="#">View Pedigree</a>
     </div>
@@ -40,6 +40,38 @@
         <p><strong>Sire:</strong> {{ mouse.sire|default:"-" }}</p>
         <p><strong>Dam:</strong> {{ mouse.dam|default:"-" }}</p>
     </article>
+</section>
+
+<section class="card">
+    <h2>Cage History</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Cage</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Current</th>
+                <th>Reason</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for membership in cage_history %}
+            <tr>
+                <td>{{ membership.cage }}</td>
+                <td>{{ membership.start_date }}</td>
+                <td>{{ membership.end_date|default:"-" }}</td>
+                <td>{{ membership.is_current|yesno:"Yes,No" }}</td>
+                <td>{{ membership.reason|default:"-" }}</td>
+                <td>{{ membership.notes|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="empty-row">No cage history records.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </section>
 
 <section class="card">

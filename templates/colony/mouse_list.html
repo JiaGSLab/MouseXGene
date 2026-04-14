@@ -3,9 +3,14 @@
 {% block title %}Mice | MouseXGene{% endblock %}
 
 {% block content %}
-<section class="page-header">
-    <h1>Mice</h1>
-    <p class="muted">Browse all mice and search by key identifiers.</p>
+<section class="page-header page-header-row">
+    <div>
+        <h1>Mice</h1>
+        <p class="muted">Browse all mice and search by key identifiers.</p>
+    </div>
+    <div>
+        <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
+    </div>
 </section>
 
 <section class="card">

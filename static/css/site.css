@@ -203,3 +203,54 @@ a:hover {
     border-radius: 8px;
     background: #fff;
 }
+
+.form-layout {
+    display: grid;
+    gap: 12px;
+}
+
+.form-row {
+    display: grid;
+    gap: 6px;
+}
+
+.form-row label {
+    font-weight: 600;
+    color: #374151;
+}
+
+.form-row input,
+.form-row select,
+.form-row textarea {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.form-row textarea {
+    resize: vertical;
+}
+
+.action-links {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.field-error,
+.form-errors {
+    color: #b91c1c;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 0.92rem;
+}
