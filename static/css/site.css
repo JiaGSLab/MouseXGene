@@ -328,6 +328,16 @@ a:hover {
     margin-top: 8px;
 }
 
+.action-inline-form {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.action-inline-form button {
+    margin: 0;
+}
+
 .field-error,
 .form-errors {
     color: #b91c1c;

@@ -48,7 +48,11 @@
         <tbody>
             {% for line in lines %}
                 <tr class="{% if not line.is_active %}row-inactive{% endif %}">
-                    <td>{{ line.name|default:line.line_name }}</td>
+                    <td>
+                        <a href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">
+                            {{ line.name|default:line.line_name }}
+                        </a>
+                    </td>
                     <td>{{ line.short_name|default:line.display_name|default:line.line_name }}</td>
                     <td>{{ line.get_category_display }}</td>
                     <td>{{ line.gene_or_locus|default:"-" }}</td>

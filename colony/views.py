@@ -216,6 +216,17 @@ def build_mouse_relation_card(mouse: Mouse) -> dict:
     }
 
 
+def build_cage_genotype_overview(mice: list[Mouse], *, sample_size: int = 3) -> str:
+    if not mice:
+        return "-"
+    preview_parts: list[str] = []
+    for mouse in mice[:sample_size]:
+        preview_parts.append(f"{mouse.mouse_uid}:{build_short_genotype_summary(mouse)}")
+    if len(mice) > sample_size:
+        preview_parts.append(f"... (+{len(mice) - sample_size} more)")
+    return "; ".join(preview_parts)
+
+
 def _normalize_name(value: str | None) -> str:
     return (value or "").strip()
 
@@ -563,7 +574,20 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     elif is_empty == "no":
         cages = cages.filter(current_mice__isnull=False)
 
-    cages = cages.distinct().order_by("cage_id")
+    cages = (
+        cages.distinct()
+        .order_by("cage_id")
+        .prefetch_related(
+            "current_mice__strain_line",
+            "current_mice__genotype_components__strain_line",
+            "current_mice__genotypes__gene",
+        )
+    )
+    cages = list(cages)
+    for cage in cages:
+        cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
+        cage.current_mouse_count = len(cage_mice)
+        cage.genotype_overview = build_cage_genotype_overview(cage_mice)
     context = {
         "cages": cages,
         "q": q,
@@ -801,10 +825,24 @@ def cage_import_template_xlsx(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
-    current_mice = _scoped_mouse_queryset(request.user).filter(current_cage=cage).order_by("mouse_uid")
+    current_mice = list(
+        _scoped_mouse_queryset(request.user)
+        .filter(current_cage=cage)
+        .prefetch_related("genotype_components__strain_line", "genotypes__gene")
+        .order_by("mouse_uid")
+    )
+    current_mouse_rows = [
+        {
+            "mouse": mouse,
+            "genotype_summary": build_short_genotype_summary(mouse),
+        }
+        for mouse in current_mice
+    ]
     context = {
         "cage": cage,
         "current_mice": current_mice,
+        "current_mouse_rows": current_mouse_rows,
+        "cage_genotype_overview": build_cage_genotype_overview(current_mice),
     }
     return render(request, "colony/cage_detail.html", context)
 
@@ -924,9 +962,9 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip()
     status = (request.GET.get("status") or "").strip()
-    strain_line = (request.GET.get("strain_line") or "").strip()
-    current_cage = (request.GET.get("current_cage") or "").strip()
-    project = (request.GET.get("project") or "").strip()
+    strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     mice = _scoped_mouse_queryset(request.user)
     if include_inactive != "yes":
@@ -970,6 +1008,15 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     for m in mice:
         if not m.genotype_summary:
             m.genotype_summary = build_short_genotype_summary(m)
+        if m.birth_date:
+            age_days = (timezone.localdate() - m.birth_date).days
+            if age_days >= 0:
+                age_weeks, remaining_days = divmod(age_days, 7)
+                m.age_display = f"{age_weeks}w {remaining_days}d"
+            else:
+                m.age_display = "-"
+        else:
+            m.age_display = "-"
     return render(request, "colony/mouse_list.html", context)
 
 
@@ -1406,6 +1453,34 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
         "form": form,
     }
     return render(request, "colony/mouse_move.html", context)
+
+
+@role_required(can_import)
+def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
+    mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
+    ensure_can_manage_project(request.user, mouse.project)
+    if request.method != "POST":
+        raise PermissionDenied("Use POST to end/euthanize a mouse.")
+
+    previous_status = mouse.status
+    today = timezone.localdate()
+    mouse.status = Mouse.Status.EUTHANIZED
+    if not mouse.euthanasia_date:
+        mouse.euthanasia_date = today
+    if not mouse.death_date:
+        mouse.death_date = today
+    if not mouse.death_reason:
+        mouse.death_reason = "Marked as ended via workflow action."
+    mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+
+    log_audit_event(
+        user=request.user,
+        action=AuditLog.Action.UPDATE,
+        obj=mouse,
+        message=f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status}.",
+    )
+    messages.success(request, f"Mouse {mouse.mouse_uid} marked as euthanized.")
+    return redirect("mice:mouse_detail", pk=mouse.pk)
 
 
 @authenticated_required

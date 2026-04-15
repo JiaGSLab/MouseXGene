@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Genotype Records | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Genotype Records</h1>
+        <p class="muted">每只鼠的实际基因型记录（Mouse-linked records），不同于 Genotype Definitions（主数据/定义）。</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <div>
+            <label for="id_mouse_uid">Mouse UID</label>
+            <input id="id_mouse_uid" type="text" class="search-input" name="mouse_uid" value="{{ mouse_uid }}" placeholder="e.g. M001">
+        </div>
+        <div>
+            <label for="id_locus_name">Locus Name</label>
+            <input id="id_locus_name" type="text" class="search-input" name="locus_name" value="{{ locus_name }}" placeholder="e.g. Trp53">
+        </div>
+        <div>
+            <label for="id_project">Project</label>
+            <select id="id_project" name="project">
+                <option value="">All</option>
+                {% for item in project_options %}
+                    <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="id_is_confirmed">Confirmed</label>
+            <select id="id_is_confirmed" name="is_confirmed">
+                <option value="">All</option>
+                <option value="yes" {% if is_confirmed == "yes" %}selected{% endif %}>Yes</option>
+                <option value="no" {% if is_confirmed == "no" %}selected{% endif %}>No</option>
+            </select>
+        </div>
+        <div>
+            <label for="id_assay_date">Assay Date</label>
+            <input id="id_assay_date" type="date" name="assay_date" value="{{ assay_date }}">
+        </div>
+        <div>
+            <label for="id_strain_line">Strain Line</label>
+            <select id="id_strain_line" name="strain_line">
+                <option value="">All</option>
+                {% for item in strain_line_options %}
+                    <option value="{{ item.pk }}" {% if strain_line == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.line_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'genotypes:genotype_record_list' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>mouse_uid</th>
+                <th>sex</th>
+                <th>project</th>
+                <th>current_cage</th>
+                <th>locus_name</th>
+                <th>allele_1</th>
+                <th>allele_2</th>
+                <th>zygosity_display</th>
+                <th>is_confirmed</th>
+                <th>assay_date</th>
+                <th>notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in records %}
+                <tr>
+                    <td><a href="{% url 'mice:mouse_detail' record.mouse.pk %}">{{ record.mouse.mouse_uid }}</a></td>
+                    <td>{{ record.mouse.get_sex_display }}</td>
+                    <td>{{ record.mouse.project.name|default:"-" }}</td>
+                    <td>{{ record.mouse.current_cage.cage_id|default:"-" }}</td>
+                    <td>{{ record.locus_name|default:"-" }}</td>
+                    <td>{{ record.allele_1|default:"-" }}</td>
+                    <td>{{ record.allele_2|default:"-" }}</td>
+                    <td>{{ record.zygosity_display|default:"-" }}</td>
+                    <td>{{ record.is_confirmed|yesno:"Yes,No" }}</td>
+                    <td>{{ record.assay_date|default:"-" }}</td>
+                    <td>{{ record.notes|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="11" class="empty-row">No genotype records found.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

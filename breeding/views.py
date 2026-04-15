@@ -3,6 +3,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.contrib import messages
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from colony.models import CageMembership, Mouse
 
@@ -10,11 +11,29 @@ from .forms import BreedingForm, LitterForm, WeanLitterForm, get_pup_formset
 from .models import Breeding, Litter
 from core.audit import log_audit_event
 from core.models import AuditLog
-from users.permissions import authenticated_required
+from users.permissions import authenticated_required, role_required, can_import
 
 
 def _scoped_breedings(user):
     return Breeding.objects.select_related("cage", "male", "female_1", "female_2")
+
+
+def _mouse_genotype_summary(mouse: Mouse | None) -> str:
+    if mouse is None:
+        return "-"
+    if mouse.genotype_summary:
+        return mouse.genotype_summary
+    # Fallback to legacy assay-style records when summary has not been prebuilt.
+    records = list(mouse.genotypes.select_related("gene").all())
+    parts: list[str] = []
+    for gt in records[:3]:
+        locus = gt.gene.symbol if gt.gene else (gt.locus_name or "locus")
+        genotype_part = gt.zygosity_display or "/".join([p for p in [gt.allele_1, gt.allele_2] if p])
+        parts.append(f"{locus}:{genotype_part}" if genotype_part else locus)
+    if not parts:
+        return "-"
+    summary = ", ".join(parts)
+    return f"{summary}..." if len(records) > 3 else summary
 
 
 @authenticated_required
@@ -91,6 +110,30 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "breeding/breeding_detail.html", {"breeding": breeding, "litters": litters})
 
 
+@role_required(can_import)
+def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
+    breeding = get_object_or_404(_scoped_breedings(request.user), pk=pk)
+    if request.method != "POST":
+        return redirect("breeding:breeding_detail", pk=breeding.pk)
+    if breeding.status == Breeding.Status.CLOSED and not breeding.active:
+        messages.info(request, f"Breeding {breeding.breeding_code} is already closed.")
+        return redirect("breeding:breeding_detail", pk=breeding.pk)
+
+    breeding.status = Breeding.Status.CLOSED
+    breeding.active = False
+    if not breeding.archived_at:
+        breeding.archived_at = timezone.now()
+    breeding.save(update_fields=["status", "active", "archived_at"])
+    log_audit_event(
+        user=request.user,
+        action=AuditLog.Action.UPDATE,
+        obj=breeding,
+        message=f"Ended breeding {breeding.breeding_code}.",
+    )
+    messages.success(request, f"Breeding {breeding.breeding_code} ended.")
+    return redirect("breeding:breeding_detail", pk=breeding.pk)
+
+
 @authenticated_required
 def litter_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
@@ -100,7 +143,11 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     birth_date_to = (request.GET.get("birth_date_to") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
 
-    litters = Litter.objects.select_related("breeding").filter(breeding__in=_scoped_breedings(request.user))
+    litters = Litter.objects.select_related(
+        "breeding",
+        "breeding__male",
+        "breeding__female_1",
+    ).filter(breeding__in=_scoped_breedings(request.user))
     if include_inactive != "yes":
         litters = litters.filter(is_archived=False)
     if q:
@@ -116,8 +163,13 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     if birth_date_to:
         litters = litters.filter(birth_date__lte=birth_date_to)
 
+    litters = list(litters.order_by("-birth_date", "litter_code"))
+    for litter in litters:
+        litter.sire_genotype_summary = _mouse_genotype_summary(litter.breeding.male)
+        litter.dam_genotype_summary = _mouse_genotype_summary(litter.breeding.female_1)
+
     context = {
-        "litters": litters.order_by("-birth_date", "litter_code"),
+        "litters": litters,
         "q": q,
         "weaned": weaned,
         "breeding": breeding,
@@ -163,10 +215,19 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
 @authenticated_required
 def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(
-        Litter.objects.select_related("breeding").filter(breeding__in=_scoped_breedings(request.user)),
+        Litter.objects.select_related(
+            "breeding",
+            "breeding__male",
+            "breeding__female_1",
+        ).filter(breeding__in=_scoped_breedings(request.user)),
         pk=pk,
     )
-    return render(request, "breeding/litter_detail.html", {"litter": litter})
+    context = {
+        "litter": litter,
+        "sire_genotype_summary": _mouse_genotype_summary(litter.breeding.male),
+        "dam_genotype_summary": _mouse_genotype_summary(litter.breeding.female_1),
+    }
+    return render(request, "breeding/litter_detail.html", context)
 
 
 @authenticated_required

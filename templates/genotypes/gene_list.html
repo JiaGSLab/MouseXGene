@@ -6,12 +6,12 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Genotype Definitions</h1>
-        <p class="muted">Create and manage loci/genes before assigning genotype records to mice.</p>
+        <p class="muted">Genotype Definitions（主数据/定义）：先维护 loci/genes，再用于 Mouse 的 Genotype Records。</p>
     </div>
     <div class="action-links">
         <a href="{% url 'genotypes:gene_create' %}" class="button">New Genotype Definition</a>
         {% if can_import %}
-            <a href="{% url 'genotypes:genotype_import' %}" class="button button-light">Import Genotypes</a>
+            <a href="{% url 'genotypes:genotype_import' %}" class="button button-light">Import Genotype Records</a>
         {% endif %}
     </div>
 </section>

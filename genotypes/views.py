@@ -12,8 +12,9 @@ from openpyxl import Workbook
 from .forms import GeneForm, GenotypeImportForm
 from .importers import GENOTYPE_EXPECTED_COLUMNS, parse_genotype_import
 from .models import Gene, MouseGenotype
+from colony.models import StrainLine
 from core.audit import log_audit_event
-from core.models import AuditLog, ImportLog
+from core.models import AuditLog, ImportLog, Project
 from users.permissions import authenticated_required, role_required, can_import
 
 
@@ -133,6 +134,50 @@ def gene_list(request: HttpRequest) -> HttpResponse:
             "active": active,
         },
     )
+
+
+@authenticated_required
+def genotype_record_list(request: HttpRequest) -> HttpResponse:
+    mouse_uid = (request.GET.get("mouse_uid") or "").strip()
+    locus_name = (request.GET.get("locus_name") or "").strip()
+    project = (request.GET.get("project") or "").strip()
+    is_confirmed = (request.GET.get("is_confirmed") or "").strip()
+    assay_date = (request.GET.get("assay_date") or "").strip()
+    strain_line = (request.GET.get("strain_line") or "").strip()
+
+    records = MouseGenotype.objects.select_related(
+        "mouse",
+        "mouse__project",
+        "mouse__current_cage",
+        "mouse__strain_line",
+    )
+    if mouse_uid:
+        records = records.filter(mouse__mouse_uid__icontains=mouse_uid)
+    if locus_name:
+        records = records.filter(locus_name__icontains=locus_name)
+    if project:
+        records = records.filter(mouse__project_id=project)
+    if is_confirmed == "yes":
+        records = records.filter(is_confirmed=True)
+    elif is_confirmed == "no":
+        records = records.filter(is_confirmed=False)
+    if assay_date:
+        records = records.filter(assay_date=assay_date)
+    if strain_line:
+        records = records.filter(mouse__strain_line_id=strain_line)
+
+    context = {
+        "records": records.order_by("-assay_date", "mouse__mouse_uid", "locus_name"),
+        "mouse_uid": mouse_uid,
+        "locus_name": locus_name,
+        "project": project,
+        "is_confirmed": is_confirmed,
+        "assay_date": assay_date,
+        "strain_line": strain_line,
+        "project_options": Project.objects.order_by("name"),
+        "strain_line_options": StrainLine.objects.order_by("line_name"),
+    }
+    return render(request, "genotypes/genotype_record_list.html", context)
 
 
 @authenticated_required

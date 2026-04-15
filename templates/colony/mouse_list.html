@@ -10,7 +10,7 @@
     </div>
     <div class="action-links">
         {% if can_import %}
-            <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
+            <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotype Records</a>
             <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
         {% endif %}
         {% if user.is_authenticated %}
@@ -73,6 +73,7 @@
                 <th>Genotype Summary</th>
                 <th>Sex</th>
                 <th>Birth Date</th>
+                <th>Age</th>
                 <th>Status</th>
                 <th>Strain Line</th>
                 <th>Current Cage</th>
@@ -86,14 +87,33 @@
                 <td>{{ mouse.genotype_summary|default:"-" }}</td>
                 <td>{{ mouse.get_sex_display }}</td>
                 <td>{{ mouse.birth_date|default:"-" }}</td>
+                <td>{{ mouse.age_display|default:"-" }}</td>
                 <td><span class="status-pill">{{ mouse.get_status_display }}</span></td>
-                <td>{{ mouse.strain_line }}</td>
-                <td>{{ mouse.current_cage|default:"-" }}</td>
-                <td>{{ mouse.project|default:"-" }}</td>
+                <td>
+                    {% if mouse.strain_line %}
+                        <a href="{% url 'mice:mouse_list' %}?strain_line_id={{ mouse.strain_line_id }}">{{ mouse.strain_line }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if mouse.current_cage %}
+                        <a href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if mouse.project %}
+                        <a href="{% url 'mice:mouse_list' %}?project_id={{ mouse.project_id }}">{{ mouse.project }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="8" class="empty-row">No mice found.</td>
+                <td colspan="9" class="empty-row">No mice found.</td>
             </tr>
             {% endfor %}
         </tbody>

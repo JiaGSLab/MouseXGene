@@ -38,7 +38,7 @@
         <tbody>
             {% for project in projects %}
                 <tr>
-                    <td>{{ project.name }}</td>
+                    <td><a href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">{{ project.name }}</a></td>
                     <td>{{ project.owner_name|default:"-" }}</td>
                     <td><span class="status-pill">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
                     <td>

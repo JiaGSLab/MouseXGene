@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Import Genotypes | MouseXGene{% endblock %}
+{% block title %}Import Genotype Records | MouseXGene{% endblock %}
 
 {% block content %}
 <section class="page-header">
-    <h1>Import Genotypes</h1>
+    <h1>Import Genotype Records</h1>
     <p class="muted">
         Upload CSV or XLSX files. Import runs in all-or-nothing mode.
         Required fields are marked <span class="required-mark">*</span>.
@@ -19,8 +19,7 @@
     </p>
 
     <p class="muted">
-        Optional but recommended: create reusable genotype definitions in
-        <a href="{% url 'genotypes:gene_list' %}">Genotypes</a> first.
+        This page imports mouse-linked genotype records directly. If needed, you can still maintain reusable Gene/Definition data in Django Admin.
     </p>
     <p class="muted">
         Expected columns:
@@ -62,7 +61,7 @@
         {% endif %}
 
         <div class="form-actions">
-            <button type="submit" class="button">Import Genotypes</button>
+            <button type="submit" class="button">Import Genotype Records</button>
             <a href="{% url 'mice:mouse_list' %}" class="button button-light">Cancel</a>
         </div>
     </form>

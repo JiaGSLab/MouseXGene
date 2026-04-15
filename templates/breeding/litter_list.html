@@ -3,9 +3,14 @@
 {% block title %}Litters | MouseXGene{% endblock %}
 
 {% block content %}
-<section class="page-header">
-    <h1>Litters</h1>
-    <p class="muted">All recorded litters.</p>
+<section class="page-header page-header-row">
+    <div>
+        <h1>Litters</h1>
+        <p class="muted">All recorded litters.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'breeding:breeding_list' %}">Start/Manage Breedings</a>
+    </div>
 </section>
 
 <section class="card">
@@ -45,7 +50,10 @@
                 <th>Total Born</th>
                 <th>Alive Count</th>
                 <th>Dead Count</th>
+                <th>Sire Genotype</th>
+                <th>Dam Genotype</th>
                 <th>Wean Date</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -57,16 +65,25 @@
                 <td>{{ litter.total_born|default:"-" }}</td>
                 <td>{{ litter.alive_count|default:"-" }}</td>
                 <td>{{ litter.dead_count|default:"-" }}</td>
+                <td>{{ litter.sire_genotype_summary|default:"-" }}</td>
+                <td>{{ litter.dam_genotype_summary|default:"-" }}</td>
                 <td>
                     {{ litter.wean_date|default:"-" }}
                     {% if litter.is_archived %}
                         <span class="status-pill">Archived</span>
                     {% endif %}
                 </td>
+                <td>
+                    {% if can_manage_breeding and not litter.wean_date %}
+                        <a href="{% url 'litters:litter_wean' litter.pk %}">Wean Litter</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="7" class="empty-row">No litter records found.</td>
+                <td colspan="10" class="empty-row">No litter records found.</td>
             </tr>
             {% endfor %}
         </tbody>

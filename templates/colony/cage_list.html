@@ -79,6 +79,8 @@
                 <th>Position</th>
                 <th>Cage Type</th>
                 <th>Purpose</th>
+                <th># Mice</th>
+                <th>Genotype Overview</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -91,11 +93,13 @@
                 <td>{{ cage.position|default:"-" }}</td>
                 <td>{{ cage.get_cage_type_display }}</td>
                 <td>{{ cage.get_purpose_display }}</td>
+                <td>{{ cage.current_mouse_count|default:"0" }}</td>
+                <td>{{ cage.genotype_overview|default:"-" }}</td>
                 <td><span class="status-pill">{{ cage.get_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="7" class="empty-row">No cages found.</td>
+                <td colspan="9" class="empty-row">No cages found.</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -36,6 +36,10 @@
 
 <section class="card">
     <h2>Current Mice</h2>
+    <p class="muted">
+        Total mice: {{ current_mouse_rows|length }} |
+        Genotype overview: {{ cage_genotype_overview }}
+    </p>
     <table class="data-table">
         <thead>
             <tr>
@@ -44,20 +48,22 @@
                 <th>Status</th>
                 <th>Strain Line</th>
                 <th>Birth Date</th>
+                <th>Genotype Summary</th>
             </tr>
         </thead>
         <tbody>
-            {% for mouse in current_mice %}
+            {% for row in current_mouse_rows %}
             <tr>
-                <td>{{ mouse.mouse_uid }}</td>
-                <td>{{ mouse.get_sex_display }}</td>
-                <td>{{ mouse.get_status_display }}</td>
-                <td>{{ mouse.strain_line }}</td>
-                <td>{{ mouse.birth_date|default:"-" }}</td>
+                <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
+                <td>{{ row.mouse.get_sex_display }}</td>
+                <td>{{ row.mouse.get_status_display }}</td>
+                <td>{{ row.mouse.strain_line }}</td>
+                <td>{{ row.mouse.birth_date|default:"-" }}</td>
+                <td>{{ row.genotype_summary|default:"-" }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="5" class="empty-row">No current mice in this cage.</td>
+                <td colspan="6" class="empty-row">No current mice in this cage.</td>
             </tr>
             {% endfor %}
         </tbody>
