@@ -10,7 +10,7 @@
     </div>
     <div class="action-links">
         <a class="button button-light" href="#">Edit Cage</a>
-        {% if can_import %}
+        {% if user.is_authenticated %}
             <a class="button button-light" href="{% url 'colony:cage_inventory_export' cage.pk %}">Export Inventory (CSV)</a>
             <a class="button button-light" href="{% url 'colony:cage_inventory_export_xlsx' cage.pk %}">Export Inventory (Excel)</a>
         {% endif %}

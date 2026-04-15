@@ -12,6 +12,14 @@ def get_env(name: str, default: str | None = None) -> str:
     return value
 
 
+def get_env_bool(name: str, default: bool = False) -> bool:
+    """Read a boolean from the environment. Unset uses default; empty string uses default."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # 🔐 基础配置
 SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
 
@@ -48,6 +56,7 @@ INSTALLED_APPS = [
 # ⚙️ 中间件
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -85,14 +94,16 @@ ASGI_APPLICATION = "config.asgi.application"
 
 
 # 🗄️ 数据库（PostgreSQL）
+_db_host = os.getenv("DB_HOST", "").strip()
+_db_port = os.getenv("DB_PORT", "").strip()
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": get_env("POSTGRES_DB", "mousexgene"),
         "USER": get_env("POSTGRES_USER", "mousexgene"),
         "PASSWORD": get_env("POSTGRES_PASSWORD", "mousexgene_dev_password"),
-        "HOST": get_env("POSTGRES_HOST", "db"),
-        "PORT": get_env("POSTGRES_PORT", "5432"),
+        "HOST": _db_host if _db_host else get_env("POSTGRES_HOST", "db"),
+        "PORT": _db_port if _db_port else get_env("POSTGRES_PORT", "5432"),
     }
 }
 
@@ -120,11 +131,22 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
+WHITENOISE_USE_FINDERS = DEBUG
+
 if not DEBUG:
-    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_SSL_REDIRECT = get_env("DJANGO_SECURE_SSL_REDIRECT", "1") == "1"
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    if get_env_bool("DJANGO_SECURE_PROXY_SSL_HEADER", default=False):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = get_env_bool("DJANGO_SECURE_SSL_REDIRECT", default=False)
+    SESSION_COOKIE_SECURE = get_env_bool("DJANGO_SESSION_COOKIE_SECURE", default=False)
+    CSRF_COOKIE_SECURE = get_env_bool("DJANGO_CSRF_COOKIE_SECURE", default=False)
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
 

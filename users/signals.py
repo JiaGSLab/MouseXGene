@@ -10,6 +10,10 @@ User = get_user_model()
 @receiver(post_save, sender=User)
 def ensure_user_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.create(user=instance)
+        role = UserProfile.Role.ADMIN if instance.is_superuser else UserProfile.Role.MEMBER
+        UserProfile.objects.create(user=instance, role=role)
         return
-    UserProfile.objects.get_or_create(user=instance)
+    profile, _ = UserProfile.objects.get_or_create(user=instance)
+    if instance.is_superuser and profile.role != UserProfile.Role.ADMIN:
+        profile.role = UserProfile.Role.ADMIN
+        profile.save(update_fields=["role"])

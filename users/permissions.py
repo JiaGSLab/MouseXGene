@@ -11,6 +11,8 @@ from .models import UserProfile
 def get_user_role(user) -> str:
     if not getattr(user, "is_authenticated", False):
         return UserProfile.Role.MEMBER
+    if getattr(user, "is_superuser", False):
+        return UserProfile.Role.ADMIN
     profile = getattr(user, "profile", None)
     if profile is None:
         return UserProfile.Role.MEMBER

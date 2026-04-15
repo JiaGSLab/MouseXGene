@@ -347,7 +347,7 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/cage_print.html", context)
 
 
-@role_required(can_import)
+@authenticated_required
 def cages_export(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
@@ -369,7 +369,7 @@ def cages_export(request: HttpRequest) -> HttpResponse:
     return response
 
 
-@role_required(can_import)
+@authenticated_required
 def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(Cage, pk=pk)
     response = HttpResponse(content_type="text/csv")
@@ -393,14 +393,14 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
     return response
 
 
-@role_required(can_import)
+@authenticated_required
 def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
     headers = ["cage_id", "room", "rack", "position", "cage_type", "purpose", "status", "notes"]
     rows = get_cages_export_rows()
     return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
 
 
-@role_required(can_import)
+@authenticated_required
 def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(Cage, pk=pk)
     headers = [
@@ -573,7 +573,7 @@ def mouse_import_template_xlsx(request: HttpRequest) -> HttpResponse:
     return build_xlsx_response("mouse_import_template.xlsx", "MouseTemplate", MOUSE_EXPECTED_COLUMNS, rows)
 
 
-@role_required(can_import)
+@authenticated_required
 def mice_export(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
@@ -598,7 +598,7 @@ def mice_export(request: HttpRequest) -> HttpResponse:
     return response
 
 
-@role_required(can_import)
+@authenticated_required
 def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
     headers = [
         "mouse_uid",
@@ -788,7 +788,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_move.html", context)
 
 
-@role_required(can_import)
+@authenticated_required
 def mouse_genotypes_export(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(Mouse, pk=pk)
     response = HttpResponse(content_type="text/csv")
@@ -811,7 +811,7 @@ def mouse_genotypes_export(request: HttpRequest, pk: int) -> HttpResponse:
     return response
 
 
-@role_required(can_import)
+@authenticated_required
 def mouse_genotypes_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(Mouse, pk=pk)
     headers = [

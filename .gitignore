@@ -1,60 +1,41 @@
+# Environment (never commit secrets)
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
+*.pyd
 .Python
-.pytest_cache/
-.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
 
 # Django
 *.sqlite3
 media/
 staticfiles/
 
-# Virtual environments
-.venv/
-venv/
-
-# Environment files
-.env
-
-# IDE/system
-.DS_Store
-.idea/
-.vscode/
-
-# Docker
-postgres_data/
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-
-# Virtual env
-.venv/
-venv/
-
-# Django
-db.sqlite3
+# Logs and runtime
 *.log
-media/
-staticfiles/
-
-# Environment
-.env
+*.pid
 
 # macOS
 .DS_Store
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 
-# Pytest / cache
+# Docker
+postgres_data/
+
+# Testing / coverage
 .pytest_cache/
 .mypy_cache/
-
-# Coverage
 .coverage
 htmlcov/
