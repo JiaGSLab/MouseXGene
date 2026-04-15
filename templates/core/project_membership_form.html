@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Project Members | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Project Members: {{ project.name }}</h1>
+        <p class="muted">Assign manager/member roles within this project.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {{ formset.management_form }}
+        {% for form in formset %}
+            <div class="card formset-card">
+                {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+                {% for field in form.visible_fields %}
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}<div>{{ error }}</div>{% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="button">Save Membership</button>
+            <a href="{% url 'project_list' %}" class="button button-light">Back</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

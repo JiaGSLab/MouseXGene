@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Cage {{ cage.cage_id }} History | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Cage {{ cage.cage_id }} History</h1>
+        <p class="muted">Chronological membership history for this cage.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'colony:cage_detail' cage.pk %}">Back to Cage</a>
+    </div>
+</section>
+
+<section class="card">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Mouse</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Current</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for membership in memberships %}
+                <tr>
+                    <td>
+                        <a href="{% url 'mice:mouse_detail' membership.mouse.pk %}">{{ membership.mouse.mouse_uid }}</a>
+                    </td>
+                    <td>{{ membership.start_date }}</td>
+                    <td>{{ membership.end_date|default:"-" }}</td>
+                    <td>{{ membership.is_current|yesno:"Yes,No" }}</td>
+                    <td>{{ membership.reason|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="5" class="empty-row">No membership history is available for this cage yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -14,14 +14,17 @@ class TimeStampedModel(models.Model):
 
 class Gene(TimeStampedModel):
     symbol = models.CharField(max_length=64, unique=True)
+    key_name = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    display_name = models.CharField(max_length=255, blank=True)
     full_name = models.CharField(max_length=255, blank=True)
     notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ("symbol",)
 
     def __str__(self) -> str:
-        return self.symbol
+        return self.display_name or self.symbol
 
 
 class Allele(TimeStampedModel):

@@ -1,14 +1,15 @@
 from dataclasses import dataclass
 from datetime import date
+import re
 
 import pandas as pd
 
-from core.models import Project
-from .models import Cage, Mouse, StrainLine
+from .models import Cage, Mouse
 
 
 EXPECTED_COLUMNS = [
     "cage_id",
+    "created_date",
     "room",
     "rack",
     "position",
@@ -29,6 +30,14 @@ class CageImportResult:
 class MouseImportResult:
     rows: list[dict]
     errors: list[str]
+
+
+@dataclass(frozen=True)
+class MouseImportOptions:
+    auto_create_missing_strain_lines: bool = True
+    auto_create_missing_projects: bool = True
+    auto_create_missing_cages: bool = True
+    resolve_pedigree_within_file: bool = True
 
 
 def _to_text(value) -> str:
@@ -88,6 +97,7 @@ def parse_cage_import(uploaded_file) -> CageImportResult:
         purpose = _to_text(record.get("purpose")) or Cage.Purpose.HOLDING
         status = _to_text(record.get("status")) or Cage.Status.ACTIVE
         notes = _to_text(record.get("notes"))
+        created_date = _parse_date(record.get("created_date"), row_number, "created_date", errors)
 
         if not cage_id:
             errors.append(f"Row {row_number}: cage_id is required.")
@@ -109,6 +119,7 @@ def parse_cage_import(uploaded_file) -> CageImportResult:
             {
                 "cage_id": cage_id,
                 "room": room,
+                "created_date": created_date,
                 "rack": rack,
                 "position": position,
                 "cage_type": cage_type,
@@ -138,11 +149,50 @@ MOUSE_EXPECTED_COLUMNS = [
     "current_cage",
     "project",
     "ear_tag",
+    "toe_tag",
+    "origin",
     "coat_color",
     "notes",
     "sire",
     "dam",
 ]
+
+GENOTYPE_SLOT_COUNT = 4
+GENOTYPE_SLOT_FIELDS = (
+    "locus",
+    "allele_1",
+    "allele_2",
+    "zygosity",
+    "is_confirmed",
+    "assay_date",
+    "notes",
+)
+
+
+def _genotype_slot_columns(slot: int) -> list[str]:
+    return [f"genotype_{slot}_{field}" for field in GENOTYPE_SLOT_FIELDS]
+
+
+def _detect_genotype_slots(columns: list[str]) -> list[int]:
+    slots = set(range(1, GENOTYPE_SLOT_COUNT + 1))
+    pattern = re.compile(r"^genotype_(\d+)_")
+    for col in columns:
+        match = pattern.match(col)
+        if match:
+            slots.add(int(match.group(1)))
+    return sorted(slots)
+
+
+GENOTYPE_EXPECTED_COLUMNS = [
+    col
+    for slot in range(1, GENOTYPE_SLOT_COUNT + 1)
+    for col in _genotype_slot_columns(slot)
+]
+
+MOUSE_EXPECTED_COLUMNS = MOUSE_EXPECTED_COLUMNS + GENOTYPE_EXPECTED_COLUMNS
+
+MOUSE_REQUIRED_COLUMNS = ["mouse_uid", "strain_line"]
+MOUSE_OPTIONAL_COLUMNS = [col for col in MOUSE_EXPECTED_COLUMNS if col not in MOUSE_REQUIRED_COLUMNS]
 
 
 def _parse_date(value, row_number: int, field_name: str, errors: list[str]) -> date | None:
@@ -156,6 +206,20 @@ def _parse_date(value, row_number: int, field_name: str, errors: list[str]) -> d
         return None
 
 
+def _parse_bool(value, row_number: int, field_name: str, errors: list[str]) -> bool | None:
+    text = _to_text(value).lower()
+    if text == "":
+        return None
+    truthy = {"true", "yes", "1", "y"}
+    falsy = {"false", "no", "0", "n"}
+    if text in truthy:
+        return True
+    if text in falsy:
+        return False
+    errors.append(f"Row {row_number}: invalid {field_name} '{value}'. Use true/false, yes/no, 1/0, y/n.")
+    return None
+
+
 def parse_mouse_import(uploaded_file) -> MouseImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
@@ -166,7 +230,7 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
         return MouseImportResult(rows=[], errors=["Unsupported file type. Please upload a .csv or .xlsx file."])
 
     dataframe.columns = [str(col).strip() for col in dataframe.columns]
-    missing_columns = [col for col in MOUSE_EXPECTED_COLUMNS if col not in dataframe.columns]
+    missing_columns = [col for col in MOUSE_REQUIRED_COLUMNS if col not in dataframe.columns]
     if missing_columns:
         return MouseImportResult(
             rows=[],
@@ -179,13 +243,13 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
             ],
         )
 
+    for optional_col in MOUSE_OPTIONAL_COLUMNS:
+        if optional_col not in dataframe.columns:
+            dataframe[optional_col] = ""
+    genotype_slots = _detect_genotype_slots(list(dataframe.columns))
+
     allowed_sex = {choice[0] for choice in Mouse.Sex.choices}
     allowed_status = {choice[0] for choice in Mouse.Status.choices}
-
-    strain_map = {obj.line_name: obj for obj in StrainLine.objects.all()}
-    cage_map = {obj.cage_id: obj for obj in Cage.objects.all()}
-    project_map = {obj.name: obj for obj in Project.objects.all()}
-    mouse_map = {obj.mouse_uid: obj for obj in Mouse.objects.all()}
 
     rows: list[dict] = []
     errors: list[str] = []
@@ -214,59 +278,74 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
         uid_to_row_number[mouse_uid] = row_number
 
         if not sex:
-            errors.append(f"Row {row_number}: sex is required.")
+            sex = Mouse.Sex.UNKNOWN
         elif sex not in allowed_sex:
             errors.append(f"Row {row_number}: invalid sex '{sex}'.")
 
         if not status:
-            errors.append(f"Row {row_number}: status is required.")
+            status = Mouse.Status.ACTIVE
         elif status not in allowed_status:
             errors.append(f"Row {row_number}: invalid status '{status}'.")
 
-        strain_line_obj = None
-        if strain_line_name:
-            strain_line_obj = strain_map.get(strain_line_name)
-            if not strain_line_obj:
-                errors.append(f"Row {row_number}: strain_line '{strain_line_name}' does not exist.")
+        if not strain_line_name:
+            errors.append(f"Row {row_number}: strain_line is required.")
 
-        current_cage_obj = None
-        if current_cage_id:
-            current_cage_obj = cage_map.get(current_cage_id)
-            if not current_cage_obj:
-                errors.append(f"Row {row_number}: current_cage '{current_cage_id}' does not exist.")
-
-        project_obj = None
-        if project_name:
-            project_obj = project_map.get(project_name)
-            if not project_obj:
-                errors.append(f"Row {row_number}: project '{project_name}' does not exist.")
-
-        sire_obj = None
-        if sire_uid:
-            sire_obj = mouse_map.get(sire_uid)
-            if not sire_obj:
-                errors.append(f"Row {row_number}: sire '{sire_uid}' does not exist in database.")
-
-        dam_obj = None
-        if dam_uid:
-            dam_obj = mouse_map.get(dam_uid)
-            if not dam_obj:
-                errors.append(f"Row {row_number}: dam '{dam_uid}' does not exist in database.")
+        genotype_slots: list[dict] = []
+        for slot in genotype_slots:
+            prefix = f"genotype_{slot}_"
+            locus = _to_text(record.get(f"{prefix}locus"))
+            allele_1 = _to_text(record.get(f"{prefix}allele_1"))
+            allele_2 = _to_text(record.get(f"{prefix}allele_2"))
+            zygosity = _to_text(record.get(f"{prefix}zygosity"))
+            is_confirmed = _parse_bool(
+                record.get(f"{prefix}is_confirmed"),
+                row_number,
+                f"{prefix}is_confirmed",
+                errors,
+            )
+            assay_date = _parse_date(
+                record.get(f"{prefix}assay_date"),
+                row_number,
+                f"{prefix}assay_date",
+                errors,
+            )
+            genotype_notes = _to_text(record.get(f"{prefix}notes"))
+            if not any([locus, allele_1, allele_2, zygosity, genotype_notes, is_confirmed is not None, assay_date]):
+                continue
+            if not locus:
+                errors.append(f"Row {row_number}: {prefix}locus is required when genotype slot has data.")
+                continue
+            genotype_slots.append(
+                {
+                    "slot": slot,
+                    "locus_name": locus,
+                    "allele_1": allele_1,
+                    "allele_2": allele_2,
+                    "zygosity_display": zygosity,
+                    "is_confirmed": bool(is_confirmed) if is_confirmed is not None else False,
+                    "assay_date": assay_date,
+                    "notes": genotype_notes,
+                }
+            )
 
         rows.append(
             {
+                "row_number": row_number,
                 "mouse_uid": mouse_uid,
                 "sex": sex,
                 "birth_date": birth_date,
                 "status": status,
-                "strain_line": strain_line_obj,
-                "current_cage": current_cage_obj,
-                "project": project_obj,
+                "strain_line_name": strain_line_name,
+                "current_cage_id": current_cage_id,
+                "project_name": project_name,
                 "ear_tag": _to_text(record.get("ear_tag")),
+                "toe_tag": _to_text(record.get("toe_tag")),
+                "origin": _to_text(record.get("origin")),
                 "coat_color": _to_text(record.get("coat_color")),
                 "notes": _to_text(record.get("notes")),
-                "sire": sire_obj,
-                "dam": dam_obj,
+                "sire_uid": sire_uid,
+                "dam_uid": dam_uid,
+                "genotype_slots": genotype_slots,
             }
         )
 

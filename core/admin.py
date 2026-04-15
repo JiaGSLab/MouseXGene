@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, ImportLog, Project
+from .models import AuditLog, ImportLog, Project, ProjectMembership
 
 
 @admin.register(Project)
@@ -8,6 +8,14 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ("name", "owner_name", "is_active", "updated_at")
     search_fields = ("name", "owner_name", "description")
     list_filter = ("is_active",)
+    filter_horizontal = ("members",)
+
+
+@admin.register(ProjectMembership)
+class ProjectMembershipAdmin(admin.ModelAdmin):
+    list_display = ("project", "user", "role", "updated_at")
+    search_fields = ("project__name", "user__username", "user__email")
+    list_filter = ("role",)
 
 
 @admin.register(AuditLog)

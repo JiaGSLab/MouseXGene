@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Genotype Components | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Edit Genotype Components: {{ mouse.mouse_uid }}</h1>
+        <p class="muted">Use one row per genetic component. Supports compound/multi-line genotypes.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'mice:mouse_detail' mouse.pk %}">Back to Mouse</a>
+    </div>
+</section>
+
+<section class="card">
+    <p class="muted">
+        Zygosity examples: <code>+/-</code>, <code>-/-</code>, <code>fl/+ </code>, <code>fl/fl</code>, <code>KI/+ </code>, <code>Cre/+ </code>.
+    </p>
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {{ formset.management_form }}
+
+        {% if formset.non_form_errors %}
+            <div class="form-errors">
+                {% for error in formset.non_form_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        {% for form in formset %}
+            <div class="card formset-card">
+                {% if form.instance.pk %}
+                    <p class="muted">Existing component #{{ forloop.counter }}</p>
+                {% else %}
+                    <p class="muted">New component</p>
+                {% endif %}
+                {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+                {% for field in form.visible_fields %}
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">
+                            {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
+                        </label>
+                        {{ field }}
+                        {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}<div>{{ error }}</div>{% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+
+        <div class="form-actions">
+            <button type="submit" class="button">Save Components</button>
+            <a class="button button-light" href="{% url 'mice:mouse_detail' mouse.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

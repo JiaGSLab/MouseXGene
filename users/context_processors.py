@@ -17,4 +17,5 @@ def role_permissions(request):
         "can_import": can_import(user),
         "can_manage_breeding": can_manage_breeding(user),
         "can_view_audit": can_view_audit(user),
+        "has_project_access": bool(getattr(user, "is_authenticated", False)),
     }

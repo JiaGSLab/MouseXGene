@@ -24,6 +24,10 @@
         </select>
         <input type="date" name="birth_date_from" value="{{ birth_date_from }}" placeholder="Birth Date From">
         <input type="date" name="birth_date_to" value="{{ birth_date_to }}" placeholder="Birth Date To">
+        <select name="include_inactive">
+            <option value="">Active Only</option>
+            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Archived</option>
+        </select>
         <div class="form-actions">
             <button type="submit" class="button">Apply</button>
             <a href="{% url 'litters:litter_list' %}" class="button button-light">Reset</a>
@@ -46,14 +50,19 @@
         </thead>
         <tbody>
             {% for litter in litters %}
-            <tr>
+            <tr class="{% if litter.is_archived %}row-inactive{% endif %}">
                 <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a></td>
                 <td><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></td>
                 <td>{{ litter.birth_date|default:"-" }}</td>
                 <td>{{ litter.total_born|default:"-" }}</td>
                 <td>{{ litter.alive_count|default:"-" }}</td>
                 <td>{{ litter.dead_count|default:"-" }}</td>
-                <td>{{ litter.wean_date|default:"-" }}</td>
+                <td>
+                    {{ litter.wean_date|default:"-" }}
+                    {% if litter.is_archived %}
+                        <span class="status-pill">Archived</span>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
             <tr>

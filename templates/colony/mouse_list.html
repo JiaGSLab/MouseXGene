@@ -54,6 +54,10 @@
                 <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
             {% endfor %}
         </select>
+        <select name="include_inactive">
+            <option value="">Active Only</option>
+            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
+        </select>
         <div class="form-actions">
             <button type="submit" class="button">Apply</button>
             <a href="{% url 'mice:mouse_list' %}" class="button button-light">Reset</a>
@@ -66,6 +70,7 @@
         <thead>
             <tr>
                 <th>Mouse UID</th>
+                <th>Genotype Summary</th>
                 <th>Sex</th>
                 <th>Birth Date</th>
                 <th>Status</th>
@@ -76,18 +81,19 @@
         </thead>
         <tbody>
             {% for mouse in mice %}
-            <tr>
+            <tr class="{% if mouse.status != 'active' %}row-inactive{% endif %}">
                 <td><a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
+                <td>{{ mouse.genotype_summary|default:"-" }}</td>
                 <td>{{ mouse.get_sex_display }}</td>
                 <td>{{ mouse.birth_date|default:"-" }}</td>
-                <td>{{ mouse.get_status_display }}</td>
+                <td><span class="status-pill">{{ mouse.get_status_display }}</span></td>
                 <td>{{ mouse.strain_line }}</td>
                 <td>{{ mouse.current_cage|default:"-" }}</td>
                 <td>{{ mouse.project|default:"-" }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="7" class="empty-row">No mice found.</td>
+                <td colspan="8" class="empty-row">No mice found.</td>
             </tr>
             {% endfor %}
         </tbody>

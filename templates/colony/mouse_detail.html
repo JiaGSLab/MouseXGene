@@ -13,6 +13,7 @@
         {% if can_import %}
             <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
         {% endif %}
+        <a class="button button-light" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotype Components</a>
         {% if user.is_authenticated %}
             <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotypes (CSV)</a>
             <a class="button button-light" href="{% url 'mice:mouse_genotypes_export_xlsx' mouse.pk %}">Export Genotypes (Excel)</a>
@@ -26,14 +27,23 @@
     <h2>Basic Information</h2>
     <dl class="detail-grid">
         <dt>Sex</dt><dd>{{ mouse.get_sex_display }}</dd>
-        <dt>Status</dt><dd>{{ mouse.get_status_display }}</dd>
+        <dt>Status</dt><dd><span class="status-pill">{{ mouse.get_status_display }}</span></dd>
         <dt>Birth Date</dt><dd>{{ mouse.birth_date|default:"-" }}</dd>
         <dt>Death Date</dt><dd>{{ mouse.death_date|default:"-" }}</dd>
+        <dt>Euthanasia Date</dt><dd>{{ mouse.euthanasia_date|default:"-" }}</dd>
+        <dt>Death/Euthanasia Reason</dt><dd>{{ mouse.death_reason|default:"-" }}</dd>
         <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
         <dt>Project</dt><dd>{{ mouse.project|default:"-" }}</dd>
         <dt>Ear Tag</dt><dd>{{ mouse.ear_tag|default:"-" }}</dd>
+        <dt>Toe Tag</dt><dd>{{ mouse.toe_tag|default:"-" }}</dd>
+        <dt>Origin</dt><dd>{{ mouse.origin|default:"-" }}</dd>
         <dt>Coat Color</dt><dd>{{ mouse.coat_color|default:"-" }}</dd>
     </dl>
+</section>
+
+<section class="card">
+    <h2>Genotype Summary</h2>
+    <p>{{ genotype_summary|default:"-" }}</p>
 </section>
 
 <section class="cards">
@@ -130,6 +140,38 @@
             {% empty %}
             <tr>
                 <td colspan="6" class="empty-row">No cage history records.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Genotype Components</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Component</th>
+                <th>Category</th>
+                <th>Zygosity</th>
+                <th>Allele 1</th>
+                <th>Allele 2</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for component in genotype_components %}
+            <tr>
+                <td>{{ component.sort_order }}</td>
+                <td>{{ component.strain_line }}</td>
+                <td>{{ component.strain_line.get_category_display }}</td>
+                <td>{{ component.zygosity|default:"-" }}</td>
+                <td>{{ component.allele_display_1|default:"-" }}</td>
+                <td>{{ component.allele_display_2|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="empty-row">No structured genotype components recorded.</td>
             </tr>
             {% endfor %}
         </tbody>

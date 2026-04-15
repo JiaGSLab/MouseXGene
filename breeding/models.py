@@ -35,6 +35,7 @@ class Breeding(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.SETUP)
     notes = models.TextField(blank=True)
     active = models.BooleanField(default=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("-start_date", "breeding_code")
@@ -66,6 +67,8 @@ class Litter(models.Model):
     alive_count = models.PositiveIntegerField(null=True, blank=True)
     dead_count = models.PositiveIntegerField(null=True, blank=True)
     wean_date = models.DateField(null=True, blank=True)
+    is_archived = models.BooleanField(default=False)
+    archived_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:

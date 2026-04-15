@@ -153,3 +153,8 @@ if not DEBUG:
 
 # 🧱 默认主键类型
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# 🔑 App authentication (not Django admin)
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/accounts/login/"

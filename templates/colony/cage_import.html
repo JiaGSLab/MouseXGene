@@ -5,7 +5,10 @@
 {% block content %}
 <section class="page-header">
     <h1>Import Cages</h1>
-    <p class="muted">Upload a CSV or XLSX file. Import runs in all-or-nothing mode.</p>
+    <p class="muted">
+        Upload a CSV or XLSX file. Import runs in all-or-nothing mode.
+        Required fields are marked <span class="required-mark">*</span>.
+    </p>
 </section>
 
 <section class="card">
@@ -21,6 +24,7 @@
             <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
         {% endfor %}
     </p>
+    <p class="muted">Example row: <code>C001,2026-04-10,Room-A,Rack-1,A1,standard,holding,active,Example note</code></p>
 
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
@@ -34,8 +38,13 @@
         {% endif %}
 
         <div class="form-row">
-            <label for="{{ form.data_file.id_for_label }}">{{ form.data_file.label }}</label>
+            <label for="{{ form.data_file.id_for_label }}">
+                {{ form.data_file.label }}{% if form.data_file.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
             {{ form.data_file }}
+            {% if form.data_file.help_text %}
+                <small class="muted">{{ form.data_file.help_text }}</small>
+            {% endif %}
             {% if form.data_file.errors %}
                 <div class="field-error">
                     {% for error in form.data_file.errors %}

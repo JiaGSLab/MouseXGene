@@ -5,7 +5,14 @@
 {% block content %}
 <section class="page-header">
     <h1>Import Mice</h1>
-    <p class="muted">Upload CSV or XLSX. Import runs in all-or-nothing mode.</p>
+    <p class="muted">
+        Upload CSV or XLSX. Import runs in all-or-nothing mode.
+        Required fields are marked <span class="required-mark">*</span>.
+    </p>
+    <p class="muted">
+        One row = one mouse. You can include up to 4 genotype components per row via
+        <code>genotype_1_*</code> ... <code>genotype_4_*</code> columns.
+    </p>
 </section>
 
 <section class="card">
@@ -16,18 +23,35 @@
     </p>
 
     <p class="muted">
+        Create dependencies first: <a href="{% url 'colony:strain_line_list' %}">Strain Lines</a>.
+        You can reference strain by line name, key name, or display name.
+    </p>
+    <p class="muted">
         Expected columns:
         {% for col in expected_columns %}
             <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
         {% endfor %}
+    </p>
+    <p class="muted">
+        Example row includes core mouse fields + genotype slots:
+        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Tet2,fl,fl,fl/fl,yes,2026-04-14,Validated...</code>
+    </p>
+    <p class="muted">
+        If you need more than 4 genotype components, extend the spreadsheet with additional
+        <code>genotype_N_*</code> groups or use the separate genotype import.
     </p>
 
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
 
         <div class="form-row">
-            <label for="{{ form.data_file.id_for_label }}">{{ form.data_file.label }}</label>
+            <label for="{{ form.data_file.id_for_label }}">
+                {{ form.data_file.label }}{% if form.data_file.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
             {{ form.data_file }}
+            {% if form.data_file.help_text %}
+                <small class="muted">{{ form.data_file.help_text }}</small>
+            {% endif %}
             {% if form.data_file.errors %}
                 <div class="field-error">
                     {% for error in form.data_file.errors %}
@@ -36,6 +60,26 @@
                 </div>
             {% endif %}
         </div>
+
+        <section class="card">
+            <h2>Import Options</h2>
+            <div class="form-row">
+                <label for="{{ form.auto_create_missing_strain_lines.id_for_label }}">{{ form.auto_create_missing_strain_lines }} {{ form.auto_create_missing_strain_lines.label }}</label>
+                <small class="muted">{{ form.auto_create_missing_strain_lines.help_text }}</small>
+            </div>
+            <div class="form-row">
+                <label for="{{ form.auto_create_missing_projects.id_for_label }}">{{ form.auto_create_missing_projects }} {{ form.auto_create_missing_projects.label }}</label>
+                <small class="muted">{{ form.auto_create_missing_projects.help_text }}</small>
+            </div>
+            <div class="form-row">
+                <label for="{{ form.auto_create_missing_cages.id_for_label }}">{{ form.auto_create_missing_cages }} {{ form.auto_create_missing_cages.label }}</label>
+                <small class="muted">{{ form.auto_create_missing_cages.help_text }}</small>
+            </div>
+            <div class="form-row">
+                <label for="{{ form.resolve_pedigree_within_file.id_for_label }}">{{ form.resolve_pedigree_within_file }} {{ form.resolve_pedigree_within_file.label }}</label>
+                <small class="muted">{{ form.resolve_pedigree_within_file.help_text }}</small>
+            </div>
+        </section>
 
         {% if row_errors %}
             <div class="form-errors">

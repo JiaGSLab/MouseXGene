@@ -9,6 +9,7 @@
         <p class="muted">Track active and historical breeding setups.</p>
     </div>
     <div class="action-links">
+        <a class="button button-light" href="{% url 'litters:litter_list' %}">View Litters</a>
         {% if can_manage_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
@@ -36,6 +37,10 @@
                 <option value="{{ item.pk }}" {% if cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
             {% endfor %}
         </select>
+        <select name="include_inactive">
+            <option value="">Active Only</option>
+            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Closed</option>
+        </select>
         <div class="form-actions">
             <button type="submit" class="button">Apply</button>
             <a href="{% url 'breeding:breeding_list' %}" class="button button-light">Reset</a>
@@ -61,7 +66,7 @@
         </thead>
         <tbody>
             {% for breeding in breedings %}
-            <tr>
+            <tr class="{% if not breeding.active or breeding.status == 'closed' %}row-inactive{% endif %}">
                 <td><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
                 <td>{{ breeding.cage }}</td>
                 <td>{{ breeding.get_breeding_type_display }}</td>
@@ -71,7 +76,7 @@
                 <td>{{ breeding.start_date|default:"-" }}</td>
                 <td>{{ breeding.plug_date|default:"-" }}</td>
                 <td>{{ breeding.expected_birth_date|default:"-" }}</td>
-                <td>{{ breeding.get_status_display }}</td>
+                <td><span class="status-pill">{{ breeding.get_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>

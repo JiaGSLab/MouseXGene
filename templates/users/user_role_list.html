@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}User Roles | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>User Roles</h1>
+    <p class="muted">Global role management (Admin only).</p>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Role</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+                <tr>
+                    <td>{{ u.username }}</td>
+                    <td>{% if u.profile %}{{ u.profile.display_name|default:"-" }}{% else %}-{% endif %}</td>
+                    <td>{% if u.profile %}{{ u.profile.get_role_display }}{% else %}Member{% endif %}</td>
+                    <td><a href="{% url 'accounts:user_role_edit' u.pk %}">Edit role</a></td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

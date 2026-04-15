@@ -58,6 +58,10 @@
             <option value="yes" {% if is_empty == "yes" %}selected{% endif %}>Empty Cages Only</option>
             <option value="no" {% if is_empty == "no" %}selected{% endif %}>Non-Empty Cages Only</option>
         </select>
+        <select name="include_inactive">
+            <option value="">Active Only</option>
+            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
+        </select>
         <div class="form-actions">
             <button type="submit" class="button">Apply</button>
             <a href="{% url 'colony:cage_list' %}" class="button button-light">Reset</a>
@@ -80,7 +84,7 @@
         </thead>
         <tbody>
             {% for cage in cages %}
-            <tr>
+            <tr class="{% if cage.status != 'active' %}row-inactive{% endif %}">
                 <td><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a></td>
                 <td>{{ cage.room|default:"-" }}</td>
                 <td>{{ cage.rack|default:"-" }}</td>

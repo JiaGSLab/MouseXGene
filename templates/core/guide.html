@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Guide | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Guide</h1>
+    <p class="muted">MouseXGene 使用指南（中文）</p>
+</section>
+
+<section class="card guide-card">
+    <h2>A. 系统概览</h2>
+    <p>
+        MouseXGene 用于实验室日常协作管理，覆盖 <strong>Projects</strong>、<strong>Mice</strong>、<strong>Cages</strong>、
+        <strong>Breedings</strong>、<strong>Litters</strong>、<strong>Strain Lines</strong>、
+        <strong>Genotypes</strong> 等核心对象。系统强调数据可追溯、状态可管理（active / archived / euthanized / retired）、
+        以及 import / export 的批量处理能力。
+    </p>
+</section>
+
+<section class="card guide-card">
+    <h2>B. 推荐使用流程</h2>
+    <ol class="guide-list">
+        <li>先确认或新建 <strong>Strain Line</strong>，保证后续 Mouse 和 Genotype 记录有统一命名基础。</li>
+        <li>新建 <strong>Cage</strong>；如果使用 import Mouse 且开启自动创建，也可在导入时自动补齐 Cage。</li>
+        <li>新建或 import <strong>Mouse</strong>，优先保证核心身份字段完整。</li>
+        <li>补录或 import <strong>Genotype</strong>，完善每只 Mouse 的遗传信息。</li>
+        <li>记录 <strong>Breeding</strong> 和 <strong>Litter</strong>，形成连续繁殖与后代追踪链路。</li>
+    </ol>
+</section>
+
+<section class="card guide-card">
+    <h2>C. Import 说明</h2>
+    <ul class="guide-list">
+        <li>支持 import <strong>Cage</strong>、import <strong>Mouse</strong>、import <strong>Genotype</strong>。</li>
+        <li>Mouse 导入支持 mouse-centered import with genotype slots（单文件导入 Mouse + 分组基因型列）。</li>
+        <li>导入时可按选项自动创建依赖对象：<strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>。</li>
+        <li>常见失败原因：必填列缺失、日期格式不正确、重复主键、引用对象无法解析、字段取值超出允许范围。</li>
+        <li>涉及 sire / dam 时，父母需要已存在，或与当前 Mouse 在同一个导入文件中可被解析。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>D. 权限说明</h2>
+    <p>
+        系统采用基于角色（role）的权限控制。不同角色在“查看、编辑、导入、归档、项目管理、用户管理、审计查看”等方面拥有不同权限。下表用于快速说明各角色的主要能力范围。
+    </p>
+    <div class="table-wrap guide-table-wrap">
+        <table class="data-table guide-table">
+            <thead>
+                <tr>
+                    <th>功能</th>
+                    <th>Admin</th>
+                    <th>Manager</th>
+                    <th>Member</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>查看全部业务数据（Mice / Cages / Breedings / Litters / Genotypes / Strain Lines）</td>
+                    <td>是</td><td>是</td><td>是</td>
+                </tr>
+                <tr>
+                    <td>新建普通业务记录</td>
+                    <td>是</td><td>是</td><td>是</td>
+                </tr>
+                <tr>
+                    <td>编辑普通业务记录</td>
+                    <td>是</td><td>是</td><td>是</td>
+                </tr>
+                <tr>
+                    <td>导入数据（import）</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>导出数据（export）</td>
+                    <td>是</td><td>是</td><td>是</td>
+                </tr>
+                <tr>
+                    <td>归档 / 停用记录（archive / deactivate）</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>新建 Project</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>编辑 Project</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>管理 Project 成员</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>查看 Audit</td>
+                    <td>是</td><td>否</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>管理全局 Users / roles</td>
+                    <td>是</td><td>否</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>进入 Django Admin</td>
+                    <td>是</td><td>否</td><td>否</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>说明：</strong></p>
+    <ol class="guide-list">
+        <li>“普通业务记录”通常包括 Mouse、Cage、Breeding、Litter、Genotype 等实验室日常数据。</li>
+        <li>Manager 和 Member 均可参与日常协作录入，但高风险操作（如 import、archive、权限管理、Audit 查看）会受到限制。</li>
+        <li>Admin 负责系统级管理；Manager 负责业务管理；Member 主要负责日常使用与记录维护。</li>
+    </ol>
+</section>
+
+<section class="card guide-card">
+    <h2>E. 状态说明</h2>
+    <ul class="guide-list">
+        <li><strong>active</strong>：正常在用状态，默认优先展示。</li>
+        <li><strong>inactive</strong>：非活跃状态，通常表示暂不使用或待观察。</li>
+        <li><strong>archived</strong>：已归档，保留历史记录但不作为日常工作重点。</li>
+        <li><strong>euthanized</strong>：Mouse 已执行安乐，记录仍保留用于追溯。</li>
+        <li><strong>retired</strong>：Cage 或其他对象已退役，不再用于当前流程。</li>
+    </ul>
+    <p>列表中灰色显示通常表示对象处于 inactive / archived / retired 等非活跃状态。</p>
+</section>
+
+<section class="card guide-card">
+    <h2>F. 常见问题</h2>
+    <dl class="guide-faq">
+        <dt>为什么有些对象不会被真正删除？</dt>
+        <dd>系统采用历史保留策略，优先使用 archive / deactivate，避免影响审计和追溯链路。</dd>
+
+        <dt>为什么 sire / dam 需要先存在或在同一个 import 文件中？</dt>
+        <dd>因为父母关系需要在导入流程中解析到具体 Mouse，系统才能建立正确谱系。</dd>
+
+        <dt>为什么 Strain Line / Project / Cage 可能会自动创建？</dt>
+        <dd>当导入选项开启自动创建时，系统会补齐缺失依赖，减少手工前置维护。</dd>
+
+        <dt>为什么有些记录会显示为灰色？</dt>
+        <dd>灰色通常表示记录不是 active 状态（例如 archived / inactive / retired），用于提醒非日常主流程对象。</dd>
+    </dl>
+</section>
+{% endblock %}

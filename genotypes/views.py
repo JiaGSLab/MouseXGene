@@ -4,15 +4,17 @@ from io import BytesIO
 from django.contrib import messages
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.db.models import Q
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect, render
 from openpyxl import Workbook
 
-from .forms import GenotypeImportForm
+from .forms import GeneForm, GenotypeImportForm
 from .importers import GENOTYPE_EXPECTED_COLUMNS, parse_genotype_import
-from .models import MouseGenotype
+from .models import Gene, MouseGenotype
 from core.audit import log_audit_event
 from core.models import AuditLog, ImportLog
-from users.permissions import role_required, can_import
+from users.permissions import authenticated_required, role_required, can_import
 
 
 def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
@@ -104,6 +106,71 @@ def genotype_import(request: HttpRequest) -> HttpResponse:
         "expected_columns": GENOTYPE_EXPECTED_COLUMNS,
     }
     return render(request, "genotypes/genotype_import.html", context)
+
+
+@authenticated_required
+def gene_list(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    active = (request.GET.get("active") or "yes").strip()
+    genes = Gene.objects.all()
+    if q:
+        genes = genes.filter(
+            Q(symbol__icontains=q)
+            | Q(display_name__icontains=q)
+            | Q(key_name__icontains=q)
+            | Q(full_name__icontains=q)
+        )
+    if active == "yes":
+        genes = genes.filter(is_active=True)
+    elif active == "no":
+        genes = genes.filter(is_active=False)
+    return render(
+        request,
+        "genotypes/gene_list.html",
+        {
+            "genes": genes.order_by("symbol"),
+            "q": q,
+            "active": active,
+        },
+    )
+
+
+@authenticated_required
+def gene_create(request: HttpRequest) -> HttpResponse:
+    if request.method == "POST":
+        form = GeneForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Genotype definition created.")
+            return redirect("genotypes:gene_list")
+    else:
+        form = GeneForm()
+    return render(
+        request,
+        "genotypes/gene_form.html",
+        {"form": form, "page_title": "Create Genotype Definition", "submit_label": "Save"},
+    )
+
+
+@authenticated_required
+def gene_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    gene = get_object_or_404(Gene, pk=pk)
+    previous_active = gene.is_active
+    if request.method == "POST":
+        form = GeneForm(request.POST, instance=gene)
+        if form.is_valid():
+            if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
+                raise PermissionDenied("Only managers or admins can archive/deactivate genotype definitions.")
+            form.save()
+            messages.success(request, "Genotype definition updated.")
+            return redirect("genotypes:gene_list")
+    else:
+        form = GeneForm(instance=gene)
+    return render(
+        request,
+        "genotypes/gene_form.html",
+        {"form": form, "page_title": f"Edit Genotype {gene.symbol}", "submit_label": "Save Changes"},
+    )
 
 
 @role_required(can_import)

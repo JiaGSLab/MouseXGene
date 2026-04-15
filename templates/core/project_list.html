@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Projects | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Projects</h1>
+        <p class="muted">Project-scoped collaboration and membership.</p>
+    </div>
+    <div class="action-links">
+        {% if can_import or is_admin %}
+            <a href="{% url 'project_create' %}" class="button">New Project</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search project name/owner" class="search-input">
+        <div class="form-actions">
+            <button type="submit" class="button">Apply</button>
+            <a href="{% url 'project_list' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Owner</th>
+                <th>Active</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for project in projects %}
+                <tr>
+                    <td>{{ project.name }}</td>
+                    <td>{{ project.owner_name|default:"-" }}</td>
+                    <td><span class="status-pill">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
+                    <td>
+                        {% if can_import or is_admin %}
+                            <a href="{% url 'project_edit' project.pk %}">Edit</a>
+                            |
+                            <a href="{% url 'project_membership_manage' project.pk %}">Members</a>
+                        {% else %}
+                            <span class="muted">View only</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="4" class="empty-row">No projects available.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

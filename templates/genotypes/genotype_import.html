@@ -5,7 +5,10 @@
 {% block content %}
 <section class="page-header">
     <h1>Import Genotypes</h1>
-    <p class="muted">Upload CSV or XLSX files. Import runs in all-or-nothing mode.</p>
+    <p class="muted">
+        Upload CSV or XLSX files. Import runs in all-or-nothing mode.
+        Required fields are marked <span class="required-mark">*</span>.
+    </p>
 </section>
 
 <section class="card">
@@ -16,18 +19,28 @@
     </p>
 
     <p class="muted">
+        Optional but recommended: create reusable genotype definitions in
+        <a href="{% url 'genotypes:gene_list' %}">Genotypes</a> first.
+    </p>
+    <p class="muted">
         Expected columns:
         {% for col in expected_columns %}
             <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
         {% endfor %}
     </p>
+    <p class="muted">Example row: <code>M001,Trp53,wt,ko,het,yes,2026-04-14,Panel A result</code></p>
 
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
 
         <div class="form-row">
-            <label for="{{ form.data_file.id_for_label }}">{{ form.data_file.label }}</label>
+            <label for="{{ form.data_file.id_for_label }}">
+                {{ form.data_file.label }}{% if form.data_file.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
             {{ form.data_file }}
+            {% if form.data_file.help_text %}
+                <small class="muted">{{ form.data_file.help_text }}</small>
+            {% endif %}
             {% if form.data_file.errors %}
                 <div class="field-error">
                     {% for error in form.data_file.errors %}

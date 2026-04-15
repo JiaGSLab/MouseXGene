@@ -10,7 +10,11 @@ from .forms import BreedingForm, LitterForm, WeanLitterForm, get_pup_formset
 from .models import Breeding, Litter
 from core.audit import log_audit_event
 from core.models import AuditLog
-from users.permissions import authenticated_required, role_required, can_manage_breeding
+from users.permissions import authenticated_required
+
+
+def _scoped_breedings(user):
+    return Breeding.objects.select_related("cage", "male", "female_1", "female_2")
 
 
 @authenticated_required
@@ -19,8 +23,11 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     status = (request.GET.get("status") or "").strip()
     breeding_type = (request.GET.get("breeding_type") or "").strip()
     cage = (request.GET.get("cage") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
 
-    breedings = Breeding.objects.select_related("cage", "male", "female_1", "female_2").all()
+    breedings = _scoped_breedings(request.user)
+    if include_inactive != "yes":
+        breedings = breedings.filter(active=True)
     if q:
         breedings = breedings.filter(
             Q(breeding_code__icontains=q)
@@ -41,6 +48,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "status": status,
         "breeding_type": breeding_type,
         "cage": cage,
+        "include_inactive": include_inactive,
         "status_options": Breeding.Status.choices,
         "breeding_type_options": Breeding.BreedingType.choices,
         "cage_options": Breeding._meta.get_field("cage").related_model.objects.order_by("cage_id"),
@@ -48,7 +56,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     return render(request, "breeding/breeding_list.html", context)
 
 
-@role_required(can_manage_breeding)
+@authenticated_required
 def breeding_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = BreedingForm(request.POST)
@@ -76,7 +84,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     breeding = get_object_or_404(
-        Breeding.objects.select_related("cage", "male", "female_1", "female_2"),
+        _scoped_breedings(request.user),
         pk=pk,
     )
     litters = breeding.litters.all()
@@ -90,8 +98,11 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     breeding = (request.GET.get("breeding") or "").strip()
     birth_date_from = (request.GET.get("birth_date_from") or "").strip()
     birth_date_to = (request.GET.get("birth_date_to") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
 
-    litters = Litter.objects.select_related("breeding").all()
+    litters = Litter.objects.select_related("breeding").filter(breeding__in=_scoped_breedings(request.user))
+    if include_inactive != "yes":
+        litters = litters.filter(is_archived=False)
     if q:
         litters = litters.filter(litter_code__icontains=q)
     if weaned == "yes":
@@ -112,14 +123,15 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         "breeding": breeding,
         "birth_date_from": birth_date_from,
         "birth_date_to": birth_date_to,
-        "breeding_options": Breeding.objects.order_by("breeding_code"),
+        "include_inactive": include_inactive,
+        "breeding_options": _scoped_breedings(request.user).order_by("breeding_code"),
     }
     return render(request, "breeding/litter_list.html", context)
 
 
-@role_required(can_manage_breeding)
+@authenticated_required
 def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
-    breeding = get_object_or_404(Breeding, pk=breeding_pk)
+    breeding = get_object_or_404(_scoped_breedings(request.user), pk=breeding_pk)
     if request.method == "POST":
         form = LitterForm(request.POST)
         if form.is_valid():
@@ -150,18 +162,22 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
 
 @authenticated_required
 def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    litter = get_object_or_404(Litter.objects.select_related("breeding"), pk=pk)
+    litter = get_object_or_404(
+        Litter.objects.select_related("breeding").filter(breeding__in=_scoped_breedings(request.user)),
+        pk=pk,
+    )
     return render(request, "breeding/litter_detail.html", {"litter": litter})
 
 
-@role_required(can_manage_breeding)
+@authenticated_required
 def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(
-        Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1"),
+        Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1").filter(
+            breeding__in=_scoped_breedings(request.user)
+        ),
         pk=pk,
     )
     breeding = litter.breeding
-
     if request.method == "POST":
         wean_form = WeanLitterForm(request.POST)
         number_of_pups = 1

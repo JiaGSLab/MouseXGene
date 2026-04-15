@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Genotype Definitions | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Genotype Definitions</h1>
+        <p class="muted">Create and manage loci/genes before assigning genotype records to mice.</p>
+    </div>
+    <div class="action-links">
+        <a href="{% url 'genotypes:gene_create' %}" class="button">New Genotype Definition</a>
+        {% if can_import %}
+            <a href="{% url 'genotypes:genotype_import' %}" class="button button-light">Import Genotypes</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <div>
+            <label for="id_q">Search</label>
+            <input id="id_q" type="text" class="search-input" name="q" value="{{ q }}" placeholder="symbol, key, full name">
+        </div>
+        <div>
+            <label for="id_active">Status</label>
+            <select id="id_active" name="active">
+                <option value="">All</option>
+                <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
+                <option value="no" {% if active == "no" %}selected{% endif %}>Inactive</option>
+            </select>
+        </div>
+        <div>
+            <button type="submit" class="button">Apply</button>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Display Name</th>
+                <th>Key Name</th>
+                <th>Full Name</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for gene in genes %}
+                <tr class="{% if not gene.is_active %}row-inactive{% endif %}">
+                    <td>{{ gene.symbol }}</td>
+                    <td>{{ gene.display_name|default:"-" }}</td>
+                    <td>{{ gene.key_name|default:"-" }}</td>
+                    <td>{{ gene.full_name|default:"-" }}</td>
+                    <td><span class="status-pill">{{ gene.is_active|yesno:"Active,Archived" }}</span></td>
+                    <td><a href="{% url 'genotypes:gene_edit' gene.pk %}">Edit</a></td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="6" class="empty-row">No genotype definitions yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -61,6 +61,50 @@ a:hover {
     font-weight: 500;
 }
 
+.nav-logout {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+
+.nav-link-button {
+    background: none;
+    border: none;
+    color: #e5e7eb;
+    font-weight: 500;
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    padding: 0;
+}
+
+.nav-link-button:hover {
+    text-decoration: underline;
+}
+
+.auth-card {
+    max-width: 420px;
+}
+
+.stack-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.stack-form label {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.stack-form input {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-size: 1rem;
+}
+
+
 .main-content {
     padding: 26px 0 32px;
 }
@@ -83,6 +127,11 @@ a:hover {
 
 .muted {
     color: var(--muted);
+}
+
+.required-mark {
+    color: #b91c1c;
+    margin-left: 2px;
 }
 
 .cards {
@@ -164,6 +213,15 @@ a:hover {
     border: 1px solid #d1d5db;
     background: #f3f4f6;
     font-size: 0.85rem;
+}
+
+.row-inactive td {
+    color: #9ca3af;
+    background: #f9fafb;
+}
+
+.row-inactive a {
+    color: #6b7280;
 }
 
 .empty-row {
@@ -252,6 +310,10 @@ a:hover {
 
 .form-row textarea {
     resize: vertical;
+}
+
+.formset-card {
+    margin-bottom: 10px;
 }
 
 .action-links {
@@ -436,6 +498,49 @@ a:hover {
     color: #b91c1c;
     font-size: 0.78rem;
     font-weight: 600;
+}
+
+.guide-card h2 {
+    margin-bottom: 10px;
+}
+
+.guide-card p {
+    line-height: 1.65;
+    margin: 8px 0;
+}
+
+.guide-list {
+    margin: 8px 0 0 18px;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+    line-height: 1.6;
+}
+
+.guide-table-wrap {
+    margin-top: 10px;
+}
+
+.guide-table th,
+.guide-table td {
+    white-space: normal;
+    vertical-align: top;
+}
+
+.guide-faq {
+    margin: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.guide-faq dt {
+    font-weight: 700;
+}
+
+.guide-faq dd {
+    margin: 0;
+    color: #374151;
+    line-height: 1.6;
 }
 
 .family-tree-block {

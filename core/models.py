@@ -14,6 +14,11 @@ class Project(TimeStampedModel):
     name = models.CharField(max_length=128, unique=True)
     description = models.TextField(blank=True)
     owner_name = models.CharField(max_length=128, blank=True)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="managed_projects",
+        blank=True,
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -21,6 +26,23 @@ class Project(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class ProjectMembership(TimeStampedModel):
+    class Role(models.TextChoices):
+        MANAGER = "manager", "Manager"
+        MEMBER = "member", "Member"
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="project_memberships")
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
+
+    class Meta:
+        unique_together = ("project", "user")
+        ordering = ("project__name", "user__username")
+
+    def __str__(self) -> str:
+        return f"{self.user} in {self.project} ({self.role})"
 
 
 class AuditLog(models.Model):
