@@ -17,6 +17,8 @@ services:
       - .env.prod
     expose:
       - "8000"
+    volumes:
+      - ./staticfiles:/app/staticfiles
     depends_on:
       - db
 
