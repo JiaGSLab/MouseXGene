@@ -18,6 +18,37 @@
     </p>
 </section>
 
+<section id="import-prefix" class="card">
+    <h2>Import ID prefix</h2>
+    <p class="muted">
+        Optional lab initials or short code. When you check “Prefix mouse & cage IDs…” in import options,
+        spreadsheet values like <code>M001</code> / <code>C001</code> are stored with this prefix so simple numbers stay unique.
+    </p>
+    {% if import_prefix_hint %}
+        <p class="muted">Saved prefix: <code>{{ import_prefix_hint }}-</code></p>
+    {% endif %}
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {% for field in prefix_form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <small class="muted">{{ field.help_text }}</small>
+                {% endif %}
+                {% if field.errors %}
+                    <div class="field-error">
+                        {% for error in field.errors %}<div>{{ error }}</div>{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" name="save_import_prefix" value="1" class="button">Save prefix</button>
+        </div>
+    </form>
+</section>
+
 <section class="card">
     <p>
         <a href="{% url 'mice:mouse_import_template' %}">Download template (CSV)</a>
@@ -47,6 +78,14 @@
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
 
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
         <div class="form-row">
             <label for="{{ form.data_file.id_for_label }}">
                 {{ form.data_file.label }}{% if form.data_file.field.required %}<span class="required-mark">*</span>{% endif %}
@@ -66,6 +105,17 @@
 
         <section class="card">
             <h2>Import Options</h2>
+            <div class="form-row">
+                <label for="{{ form.apply_import_prefix.id_for_label }}">{{ form.apply_import_prefix }} {{ form.apply_import_prefix.label }}</label>
+                <small class="muted">{{ form.apply_import_prefix.help_text }}</small>
+                {% if form.apply_import_prefix.errors %}
+                    <div class="field-error">
+                        {% for error in form.apply_import_prefix.errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
             <div class="form-row">
                 <label for="{{ form.auto_create_missing_strain_lines.id_for_label }}">{{ form.auto_create_missing_strain_lines }} {{ form.auto_create_missing_strain_lines.label }}</label>
                 <small class="muted">{{ form.auto_create_missing_strain_lines.help_text }}</small>

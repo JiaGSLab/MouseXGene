@@ -145,10 +145,8 @@ class Mouse(TimeStampedModel):
     )
     project = models.ForeignKey(
         "core.Project",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="mice",
-        null=True,
-        blank=True,
     )
     ear_tag = models.CharField(max_length=64, blank=True)
     toe_tag = models.CharField(max_length=64, blank=True)

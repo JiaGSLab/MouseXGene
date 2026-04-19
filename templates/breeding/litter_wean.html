@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}Wean Litter {{ litter.litter_code|default:litter.pk }} | MouseXGene{% endblock %}
+{% block title %}Wean Litter {{ litter.litter_id_display }} | MouseXGene{% endblock %}
 
 {% block content %}
 <section class="page-header">
-    <h1>Wean Pups</h1>
-    <p class="muted">Create mice from this litter and assign them to a target cage.</p>
+    <h1>Wean litter</h1>
+    <p class="muted">Creates individual <strong>Mouse</strong> records (promotes pups into colony tracking) and sets the litter wean date. If you added <strong>pup rows</strong> on the litter edit page, new mice are linked to those rows in <em>sort order</em> when counts match.</p>
 </section>
 
 <section class="card">
-    <h2>Litter Information</h2>
+    <h2>Litter information</h2>
     <dl class="detail-grid">
-        <dt>Litter Code</dt><dd>{{ litter.litter_code|default:litter.pk }}</dd>
+        <dt>Litter ID</dt><dd>{{ litter.litter_id_display }}</dd>
         <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
         <dt>Birth Date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
         <dt>Total Born</dt><dd>{{ litter.total_born|default:"-" }}</dd>

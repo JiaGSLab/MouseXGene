@@ -4,6 +4,8 @@ import re
 
 import pandas as pd
 
+from users.import_prefix import apply_import_prefix_to_id
+
 from .models import Cage, Mouse
 
 
@@ -49,6 +51,24 @@ def _to_text(value) -> str:
     return "" if text.lower() == "nan" else text
 
 
+def _resolve_prefixed_cage_ref(raw: str, prefix: str, existing_cages: set[str]) -> str:
+    text = _to_text(raw)
+    if not text:
+        return ""
+    if text in existing_cages:
+        return text
+    return apply_import_prefix_to_id(text, prefix)
+
+
+def _resolve_prefixed_pedigree_uid(raw: str, prefix: str, existing_mice: set[str]) -> str:
+    text = _to_text(raw)
+    if not text:
+        return ""
+    if text in existing_mice:
+        return text
+    return apply_import_prefix_to_id(text, prefix)
+
+
 def _missing_columns_error(missing_columns: list[str], actual_columns: list[str]) -> str:
     expected_text = ", ".join(EXPECTED_COLUMNS)
     actual_text = ", ".join(actual_columns) if actual_columns else "(none)"
@@ -60,7 +80,7 @@ def _missing_columns_error(missing_columns: list[str], actual_columns: list[str]
     )
 
 
-def parse_cage_import(uploaded_file) -> CageImportResult:
+def parse_cage_import(uploaded_file, *, id_prefix: str | None = None) -> CageImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
         dataframe = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
@@ -90,6 +110,8 @@ def parse_cage_import(uploaded_file) -> CageImportResult:
     for index, record in dataframe[EXPECTED_COLUMNS].iterrows():
         row_number = index + 2
         cage_id = _to_text(record.get("cage_id"))
+        if id_prefix:
+            cage_id = apply_import_prefix_to_id(cage_id, id_prefix)
         room = _to_text(record.get("room"))
         rack = _to_text(record.get("rack"))
         position = _to_text(record.get("position"))
@@ -220,7 +242,7 @@ def _parse_bool(value, row_number: int, field_name: str, errors: list[str]) -> b
     return None
 
 
-def parse_mouse_import(uploaded_file) -> MouseImportResult:
+def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
         dataframe = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
@@ -248,6 +270,12 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
             dataframe[optional_col] = ""
     genotype_slots = _detect_genotype_slots(list(dataframe.columns))
 
+    existing_mice: set[str] = set()
+    existing_cages: set[str] = set()
+    if id_prefix:
+        existing_mice = set(Mouse.objects.values_list("mouse_uid", flat=True))
+        existing_cages = set(Cage.objects.values_list("cage_id", flat=True))
+
     allowed_sex = {choice[0] for choice in Mouse.Sex.choices}
     allowed_status = {choice[0] for choice in Mouse.Status.choices}
 
@@ -267,6 +295,12 @@ def parse_mouse_import(uploaded_file) -> MouseImportResult:
         project_name = _to_text(record.get("project"))
         sire_uid = _to_text(record.get("sire"))
         dam_uid = _to_text(record.get("dam"))
+
+        if id_prefix:
+            mouse_uid = apply_import_prefix_to_id(mouse_uid, id_prefix)
+            current_cage_id = _resolve_prefixed_cage_ref(current_cage_id, id_prefix, existing_cages)
+            sire_uid = _resolve_prefixed_pedigree_uid(sire_uid, id_prefix, existing_mice)
+            dam_uid = _resolve_prefixed_pedigree_uid(dam_uid, id_prefix, existing_mice)
 
         if not mouse_uid:
             errors.append(f"Row {row_number}: mouse_uid is required.")

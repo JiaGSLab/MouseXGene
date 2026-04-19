@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 from openpyxl import Workbook
 
@@ -27,17 +27,22 @@ from .importers import (
     parse_mouse_import,
 )
 from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine
+from breeding.models import Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
 from core.models import AuditLog, ImportLog, Project, ProjectMembership
+from users.forms import UserImportPrefixForm
+from colony.mouse_age import mouse_list_age_band
+from users.import_prefix import get_effective_import_prefix
+from users.models import UserProfile
 from users.permissions import (
     authenticated_required,
     can_import,
-    ensure_can_manage_project,
-    get_accessible_project_ids,
+    ensure_can_archive_or_change_terminal_status,
+    ensure_can_edit_cage,
+    ensure_can_edit_project_data,
+    ensure_cage_status_change,
     is_admin,
-    is_project_manager,
-    is_project_member,
     role_required,
 )
 
@@ -101,18 +106,17 @@ def record_import_log(
 
 
 def _scoped_mouse_queryset(user):
+    """Lab-wide read: all mice for any authenticated user (edit is enforced per view)."""
     queryset = Mouse.objects.select_related("strain_line", "current_cage", "project")
-    if is_admin(user):
-        return queryset
-    return queryset.filter(project_id__in=get_accessible_project_ids(user))
+    if not getattr(user, "is_authenticated", False):
+        return queryset.none()
+    return queryset
 
 
 def _scoped_cage_queryset(user):
-    queryset = Cage.objects.all()
-    if is_admin(user):
-        return queryset
-    project_ids = get_accessible_project_ids(user)
-    return queryset.filter(current_mice__project_id__in=project_ids).distinct()
+    if not getattr(user, "is_authenticated", False):
+        return Cage.objects.none()
+    return Cage.objects.all()
 
 
 def get_cages_export_rows(user) -> list[list]:
@@ -308,6 +312,7 @@ def _execute_two_pass_mouse_import(
                     name=name,
                     description="Auto-created during mouse import.",
                     is_active=True,
+                    owner=acting_user,
                 )
                 for name in missing_projects
             ]
@@ -327,9 +332,9 @@ def _execute_two_pass_mouse_import(
         project = project_lookup.get(name)
         if project is None:
             continue
-        if not is_project_member(acting_user, project):
+        if not can_edit_project_data(acting_user, project):
             errors.append(
-                f"Project '{name}' is not assigned to your account; you cannot manage mice in this project."
+                f"Project '{name}': you do not have permission to create or update mice in this project."
             )
 
     cage_lookup = {cage.cage_id: cage for cage in Cage.objects.all()}
@@ -411,8 +416,8 @@ def _execute_two_pass_mouse_import(
             project = project_lookup.get(project_name)
             if project is None:
                 errors.append(f"Row {row_number}: unresolved project '{project_name}'.")
-            elif not is_project_member(acting_user, project):
-                errors.append(f"Row {row_number}: project '{project_name}' is not assigned to your account.")
+            elif not can_edit_project_data(acting_user, project):
+                errors.append(f"Row {row_number}: project '{project_name}': you do not have edit permission.")
         else:
             errors.append(f"Row {row_number}: project is required for ownership control.")
 
@@ -524,8 +529,8 @@ def _execute_two_pass_mouse_import(
 
 @authenticated_required
 def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpResponse:
-    mouse = get_object_or_404(Mouse.objects.select_related("strain_line"), pk=pk)
-    ensure_can_manage_project(request.user, mouse.project)
+    mouse = get_object_or_404(Mouse.objects.select_related("strain_line", "project"), pk=pk)
+    ensure_can_edit_project_data(request.user, mouse.project)
     if request.method == "POST":
         formset = MouseGenotypeComponentFormSet(request.POST, instance=mouse)
         if formset.is_valid():
@@ -627,6 +632,35 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
         lines = lines.filter(is_active=True)
     elif active == "no":
         lines = lines.filter(is_active=False)
+    lines = lines.annotate(
+        active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
+        active_cages_count=Count(
+            "mice__current_cage",
+            filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
+            distinct=True,
+        ),
+        active_breedings_count=Count(
+            "mice__maternal_breedings_primary",
+            filter=Q(mice__maternal_breedings_primary__active=True),
+            distinct=True,
+        )
+        + Count(
+            "mice__sired_breedings",
+            filter=Q(mice__sired_breedings__active=True),
+            distinct=True,
+        ),
+        active_litters_count=Count(
+            "mice__maternal_breedings_primary__litters",
+            filter=Q(
+                mice__maternal_breedings_primary__litters__litter_status__in=[
+                    Litter.LitterStatus.ACTIVE,
+                    Litter.LitterStatus.WEANED,
+                    Litter.LitterStatus.TAIL_TAGGED,
+                ]
+            ),
+            distinct=True,
+        ),
+    )
     context = {
         "lines": lines.order_by("name", "line_name"),
         "q": q,
@@ -703,12 +737,14 @@ def cage_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
+    ensure_can_edit_cage(request.user, cage)
     previous_status = cage.status
     if request.method == "POST":
         form = CageForm(request.POST, instance=cage)
         if form.is_valid():
-            if form.cleaned_data.get("status") != previous_status and not can_import(request.user):
-                raise PermissionDenied("Only project managers can archive/deactivate cages.")
+            new_status = form.cleaned_data.get("status")
+            if new_status != previous_status:
+                ensure_cage_status_change(request.user, cage, previous_status, new_status)
             cage = form.save()
             if cage.status != previous_status:
                 log_audit_event(
@@ -733,13 +769,28 @@ def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
 @role_required(can_import)
 def cage_import(request: HttpRequest) -> HttpResponse:
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
     row_errors: list[str] = []
-    if request.method == "POST":
-        form = CageImportForm(request.POST, request.FILES)
+    prefix_form = UserImportPrefixForm(instance=profile)
+    form = CageImportForm(user=request.user)
+
+    if request.method == "POST" and request.POST.get("save_import_prefix"):
+        prefix_form = UserImportPrefixForm(request.POST, instance=profile)
+        if prefix_form.is_valid():
+            prefix_form.save()
+            messages.success(request, "Import ID prefix saved.")
+            return redirect("colony:cage_import")
+        form = CageImportForm(user=request.user)
+    elif request.method == "POST":
+        form = CageImportForm(request.POST, request.FILES, user=request.user)
+        prefix_form = UserImportPrefixForm(instance=profile)
         if form.is_valid():
             uploaded_file = form.cleaned_data["data_file"]
             upload_name = uploaded_file.name or ""
-            result = parse_cage_import(uploaded_file)
+            id_prefix = None
+            if form.cleaned_data.get("apply_import_prefix"):
+                id_prefix = get_effective_import_prefix(request.user)
+            result = parse_cage_import(uploaded_file, id_prefix=id_prefix)
             if result.errors:
                 row_errors = result.errors
                 record_import_log(
@@ -771,13 +822,13 @@ def cage_import(request: HttpRequest) -> HttpResponse:
                 )
                 messages.success(request, f"Successfully imported {len(result.rows)} cages.")
                 return redirect("colony:cage_list")
-    else:
-        form = CageImportForm()
 
     context = {
         "form": form,
+        "prefix_form": prefix_form,
         "row_errors": row_errors,
         "expected_columns": EXPECTED_COLUMNS,
+        "import_prefix_hint": get_effective_import_prefix(request.user),
     }
     return render(request, "colony/cage_import.html", context)
 
@@ -838,11 +889,32 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         }
         for mouse in current_mice
     ]
+    active_litters = (
+        Litter.objects.select_related("breeding")
+        .filter(
+            Q(breeding__cage=cage)
+            | Q(breeding__female_1__current_cage=cage)
+            | Q(breeding__male__current_cage=cage),
+            litter_status__in=[
+                Litter.LitterStatus.ACTIVE,
+                Litter.LitterStatus.WEANED,
+                Litter.LitterStatus.TAIL_TAGGED,
+            ],
+        )
+        .distinct()
+        .order_by("-birth_date")[:8]
+    )
+    latest_setup = (
+        CageMembership.objects.filter(cage=cage, is_current=True).aggregate(setup=Max("start_date")).get("setup")
+    )
     context = {
         "cage": cage,
         "current_mice": current_mice,
         "current_mouse_rows": current_mouse_rows,
         "cage_genotype_overview": build_cage_genotype_overview(current_mice),
+        "active_litters": active_litters,
+        "current_mouse_count": len(current_mice),
+        "cage_setup_date": latest_setup or cage.created_date,
     }
     return render(request, "colony/cage_detail.html", context)
 
@@ -1005,11 +1077,13 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "current_cage_options": Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id"),
         "project_options": Project.objects.filter(id__in=mice.values_list("project_id", flat=True)).distinct().order_by("name"),
     }
+    today = timezone.localdate()
     for m in mice:
         if not m.genotype_summary:
             m.genotype_summary = build_short_genotype_summary(m)
+        m.list_age_band = mouse_list_age_band(m.birth_date, today)
         if m.birth_date:
-            age_days = (timezone.localdate() - m.birth_date).days
+            age_days = (today - m.birth_date).days
             if age_days >= 0:
                 age_weeks, remaining_days = divmod(age_days, 7)
                 m.age_display = f"{age_weeks}w {remaining_days}d"
@@ -1022,9 +1096,21 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
 
 @role_required(can_import)
 def mouse_import(request: HttpRequest) -> HttpResponse:
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
     row_errors: list[str] = []
-    if request.method == "POST":
-        form = MouseImportForm(request.POST, request.FILES)
+    prefix_form = UserImportPrefixForm(instance=profile)
+    form = MouseImportForm(user=request.user)
+
+    if request.method == "POST" and request.POST.get("save_import_prefix"):
+        prefix_form = UserImportPrefixForm(request.POST, instance=profile)
+        if prefix_form.is_valid():
+            prefix_form.save()
+            messages.success(request, "Import ID prefix saved.")
+            return redirect("mice:mouse_import")
+        form = MouseImportForm(user=request.user)
+    elif request.method == "POST":
+        form = MouseImportForm(request.POST, request.FILES, user=request.user)
+        prefix_form = UserImportPrefixForm(instance=profile)
         if form.is_valid():
             uploaded_file = form.cleaned_data["data_file"]
             upload_name = uploaded_file.name or ""
@@ -1034,7 +1120,10 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
                 auto_create_missing_cages=form.cleaned_data["auto_create_missing_cages"],
                 resolve_pedigree_within_file=form.cleaned_data["resolve_pedigree_within_file"],
             )
-            result = parse_mouse_import(uploaded_file)
+            id_prefix = None
+            if form.cleaned_data.get("apply_import_prefix"):
+                id_prefix = get_effective_import_prefix(request.user)
+            result = parse_mouse_import(uploaded_file, id_prefix=id_prefix)
             if result.errors:
                 row_errors = result.errors
                 record_import_log(
@@ -1099,13 +1188,13 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
                         ),
                     )
                     return redirect("mice:mouse_list")
-    else:
-        form = MouseImportForm()
 
     context = {
         "form": form,
+        "prefix_form": prefix_form,
         "row_errors": row_errors,
         "expected_columns": MOUSE_EXPECTED_COLUMNS,
+        "import_prefix_hint": get_effective_import_prefix(request.user),
     }
     return render(request, "colony/mouse_import.html", context)
 
@@ -1240,7 +1329,7 @@ def mice_export(request: HttpRequest) -> HttpResponse:
             "notes",
         ]
     )
-    for row in get_mice_export_rows():
+    for row in get_mice_export_rows(request.user):
         writer.writerow(row)
     return response
 
@@ -1341,11 +1430,28 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @authenticated_required
+def family_tree(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    mice = _scoped_mouse_queryset(request.user).select_related("sire", "dam", "current_cage", "strain_line")
+    if q:
+        mice = mice.filter(Q(mouse_uid__icontains=q) | Q(ear_tag__icontains=q) | Q(toe_tag__icontains=q))
+    mice = mice.order_by("-birth_date", "mouse_uid")[:80]
+    return render(
+        request,
+        "colony/family_tree.html",
+        {
+            "mice": mice,
+            "q": q,
+        },
+    )
+
+
+@authenticated_required
 def mouse_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = MouseForm(request.POST, user=request.user)
         if form.is_valid():
-            ensure_can_manage_project(request.user, form.cleaned_data.get("project"))
+            ensure_can_edit_project_data(request.user, form.cleaned_data.get("project"))
             mouse = form.save()
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
@@ -1363,15 +1469,29 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
-    ensure_can_manage_project(request.user, mouse.project)
+    ensure_can_edit_project_data(request.user, mouse.project)
     previous_status = mouse.status
     if request.method == "POST":
         form = MouseForm(request.POST, instance=mouse, user=request.user)
         if form.is_valid():
-            ensure_can_manage_project(request.user, form.cleaned_data.get("project"))
+            new_project = form.cleaned_data.get("project")
+            old_project = mouse.project
+            if new_project != old_project:
+                ensure_can_edit_project_data(request.user, old_project)
+                ensure_can_edit_project_data(request.user, new_project)
+            else:
+                ensure_can_edit_project_data(request.user, old_project)
             target_status = form.cleaned_data.get("status")
-            if target_status != previous_status and not is_project_manager(request.user, mouse.project):
-                raise PermissionDenied("Only project managers can archive/deactivate mice.")
+            if target_status != previous_status:
+                terminal = {
+                    Mouse.Status.ARCHIVED,
+                    Mouse.Status.DEAD,
+                    Mouse.Status.CULLED,
+                    Mouse.Status.TRANSFERRED,
+                    Mouse.Status.EUTHANIZED,
+                }
+                if target_status in terminal or previous_status in terminal:
+                    ensure_can_archive_or_change_terminal_status(request.user, new_project)
             mouse = form.save()
             if mouse.status != previous_status:
                 log_audit_event(
@@ -1394,13 +1514,13 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_form.html", context)
 
 
-@role_required(can_import)
+@authenticated_required
 def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
         _scoped_mouse_queryset(request.user),
         pk=pk,
     )
-    ensure_can_manage_project(request.user, mouse.project)
+    ensure_can_edit_project_data(request.user, mouse.project)
 
     if request.method == "POST":
         form = MoveCageForm(request.POST, mouse=mouse)
@@ -1455,10 +1575,11 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "colony/mouse_move.html", context)
 
 
-@role_required(can_import)
+@authenticated_required
 def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
-    ensure_can_manage_project(request.user, mouse.project)
+    ensure_can_edit_project_data(request.user, mouse.project)
+    ensure_can_archive_or_change_terminal_status(request.user, mouse.project)
     if request.method != "POST":
         raise PermissionDenied("Use POST to end/euthanize a mouse.")
 

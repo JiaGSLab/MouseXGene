@@ -9,9 +9,11 @@
         <p class="muted">Genotype Definitions（主数据/定义）：先维护 loci/genes，再用于 Mouse 的 Genotype Records。</p>
     </div>
     <div class="action-links">
-        <a href="{% url 'genotypes:gene_create' %}" class="button">New Genotype Definition</a>
+        <a href="{% url 'genotypes:gene_create' %}" class="button">New Gene Definition</a>
+        <a href="{% url 'genotypes:mouse_genotype_create' %}" class="button button-light">Add Genotype Record</a>
+        <a href="{% url 'genotypes:genotype_record_list' %}" class="button button-light">Genotype Records</a>
         {% if can_import %}
-            <a href="{% url 'genotypes:genotype_import' %}" class="button button-light">Import Genotype Records</a>
+            <a href="{% url 'genotypes:genotype_import' %}" class="button button-light">Bulk import</a>
         {% endif %}
     </div>
 </section>

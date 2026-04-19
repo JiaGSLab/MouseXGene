@@ -8,15 +8,16 @@ from datetime import timedelta
 
 from colony.models import Cage, Mouse
 from breeding.models import Breeding, Litter
+from breeding.models import LitterPup
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
-from .models import Project
+from .models import Project, ProjectMembership
 from users.permissions import (
     authenticated_required,
     can_import,
+    can_manage_project_settings,
     can_view_audit,
     is_admin,
-    is_project_manager,
     role_required,
 )
 
@@ -36,7 +37,7 @@ def home(request: HttpRequest) -> HttpResponse:
     )
     mice_without_genotype_qs = (
         mice_queryset.filter(genotypes__isnull=True)
-        .select_related("strain_line", "project")
+        .select_related("strain_line", "project", "current_cage")
         .distinct()
     )
     cages_without_mice_qs = (
@@ -59,8 +60,23 @@ def home(request: HttpRequest) -> HttpResponse:
         .select_related("cage", "male", "female_1")
         .distinct()
     )
+    pups_lacking_genotype_qs = (
+        LitterPup.objects.select_related("litter", "mouse")
+        .filter(tail_tag_date__isnull=False, mouse__isnull=False)
+        .filter(mouse__genotypes__isnull=True)
+        .order_by("-tail_tag_date")
+        .distinct()
+    )
+    empty_active_cages_long_qs = (
+        cages_queryset.filter(status=Cage.Status.ACTIVE, current_mice__isnull=True)
+        .filter(updated_at__lt=timezone.now() - timedelta(days=14))
+        .order_by("updated_at")
+        .distinct()
+    )
 
+    dashboard_list_limit = 8
     context = {
+        "dashboard_list_limit": dashboard_list_limit,
         "total_cages": cages_queryset.count(),
         "active_cages": cages_queryset.filter(status=Cage.Status.ACTIVE).count(),
         "total_mice": mice_queryset.count(),
@@ -70,13 +86,19 @@ def home(request: HttpRequest) -> HttpResponse:
         "cages_without_mice_count": cages_without_mice_qs.count(),
         "weaning_due_soon_count": weaning_due_soon_qs.count(),
         "breeding_without_litter_count": breeding_without_litter_qs.count(),
-        "mice_without_cage": mice_without_cage_qs.order_by("mouse_uid")[:8],
-        "mice_without_genotype": mice_without_genotype_qs.order_by("mouse_uid")[:8],
-        "cages_without_mice": cages_without_mice_qs[:8],
-        "weaning_due_soon": weaning_due_soon_qs.order_by("birth_date")[:8],
-        "breeding_without_litter": breeding_without_litter_qs.order_by("-start_date")[:8],
-        "recent_mice": mice_queryset.select_related("strain_line", "current_cage").order_by("-created_at")[:8],
-        "recent_cages": cages_queryset.order_by("-created_at")[:8],
+        "pups_lacking_genotype_count": pups_lacking_genotype_qs.count(),
+        "empty_active_cages_long_count": empty_active_cages_long_qs.count(),
+        "mice_without_cage": mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit],
+        "mice_without_genotype": mice_without_genotype_qs.order_by("mouse_uid")[:dashboard_list_limit],
+        "cages_without_mice": cages_without_mice_qs[:dashboard_list_limit],
+        "weaning_due_soon": weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit],
+        "breeding_without_litter": breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit],
+        "pups_lacking_genotype": pups_lacking_genotype_qs[:dashboard_list_limit],
+        "empty_active_cages_long": empty_active_cages_long_qs[:dashboard_list_limit],
+        "recent_mice": mice_queryset.select_related("strain_line", "current_cage").order_by("-created_at")[
+            :dashboard_list_limit
+        ],
+        "recent_cages": cages_queryset.order_by("-created_at")[:dashboard_list_limit],
     }
     return render(request, "core/home.html", context)
 
@@ -110,9 +132,17 @@ def audit_log_list(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def project_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
-    projects = Project.objects.all()
+    projects = Project.objects.select_related("owner", "owner__profile").all()
     if q:
-        projects = projects.filter(Q(name__icontains=q) | Q(owner_name__icontains=q) | Q(description__icontains=q))
+        projects = projects.filter(
+            Q(name__icontains=q)
+            | Q(owner_name__icontains=q)
+            | Q(owner__username__icontains=q)
+            | Q(owner__first_name__icontains=q)
+            | Q(owner__last_name__icontains=q)
+            | Q(owner__profile__display_name__icontains=q)
+            | Q(description__icontains=q)
+        )
     context = {
         "projects": projects.order_by("name"),
         "q": q,
@@ -127,13 +157,19 @@ def project_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = ProjectForm(request.POST)
         if form.is_valid():
-            project = form.save()
+            project = form.save(commit=False)
+            if not project.owner_id:
+                project.owner = request.user
+            project.save()
             # Non-admin creator becomes manager of new project.
             if not is_admin(request.user):
-                project.memberships.get_or_create(user=request.user, defaults={"role": "manager"})
+                project.memberships.get_or_create(
+                    user=request.user,
+                    defaults={"role": ProjectMembership.Role.MANAGER},
+                )
             return redirect("project_list")
     else:
-        form = ProjectForm()
+        form = ProjectForm(initial={"owner": request.user})
     return render(
         request,
         "core/project_form.html",
@@ -144,7 +180,7 @@ def project_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def project_edit(request: HttpRequest, pk: int) -> HttpResponse:
     project = get_object_or_404(Project, pk=pk)
-    if not (is_admin(request.user) or is_project_manager(request.user, project)):
+    if not (is_admin(request.user) or can_manage_project_settings(request.user, project)):
         raise PermissionDenied("You cannot edit this project.")
     if request.method == "POST":
         form = ProjectForm(request.POST, instance=project)
@@ -163,7 +199,7 @@ def project_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def project_membership_manage(request: HttpRequest, pk: int) -> HttpResponse:
     project = get_object_or_404(Project, pk=pk)
-    if not (is_admin(request.user) or is_project_manager(request.user, project)):
+    if not (is_admin(request.user) or can_manage_project_settings(request.user, project)):
         raise PermissionDenied("You cannot manage membership for this project.")
     if request.method == "POST":
         formset = ProjectMembershipFormSet(request.POST, instance=project)

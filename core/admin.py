@@ -5,8 +5,12 @@ from .models import AuditLog, ImportLog, Project, ProjectMembership
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ("name", "owner_name", "is_active", "updated_at")
-    search_fields = ("name", "owner_name", "description")
+    list_display = ("name", "owner", "owner_label_synced", "is_active", "updated_at")
+    search_fields = ("name", "owner_name", "description", "owner__username", "owner__first_name", "owner__last_name")
+
+    @admin.display(description="Owner (display)")
+    def owner_label_synced(self, obj: Project) -> str:
+        return obj.owner_display
     list_filter = ("is_active",)
     filter_horizontal = ("members",)
 

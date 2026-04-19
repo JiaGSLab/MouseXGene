@@ -41,6 +41,10 @@
                 <th>Short Name</th>
                 <th>Category</th>
                 <th>Gene/Locus</th>
+                <th>Active Mice</th>
+                <th>Active Cages</th>
+                <th>Active Breedings</th>
+                <th>Active Litters</th>
                 <th>Status</th>
                 <th></th>
             </tr>
@@ -56,12 +60,16 @@
                     <td>{{ line.short_name|default:line.display_name|default:line.line_name }}</td>
                     <td>{{ line.get_category_display }}</td>
                     <td>{{ line.gene_or_locus|default:"-" }}</td>
+                    <td><a href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
+                    <td><a href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
+                    <td><a href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
+                    <td><a href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
                     <td><span class="status-pill">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
                     <td><a href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td class="empty-row" colspan="6">No strain lines yet. Create one before mouse data entry/import.</td>
+                    <td class="empty-row" colspan="10">No strain lines yet. Create one before mouse data entry/import.</td>
                 </tr>
             {% endfor %}
         </tbody>

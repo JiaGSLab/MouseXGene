@@ -1,5 +1,24 @@
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.conf import settings
+
+
+def format_project_owner_label(user) -> str:
+    """Display name for a project owner: profile display_name, else full name, else username."""
+    if not user:
+        return ""
+    try:
+        profile = user.profile
+    except ObjectDoesNotExist:
+        profile = None
+    if profile is not None:
+        dn = (getattr(profile, "display_name", "") or "").strip()
+        if dn:
+            return dn[:128]
+    full = (user.get_full_name() or "").strip()
+    if full:
+        return full[:128]
+    return (user.get_username() or "")[:128]
 
 
 class TimeStampedModel(models.Model):
@@ -13,6 +32,11 @@ class TimeStampedModel(models.Model):
 class Project(TimeStampedModel):
     name = models.CharField(max_length=128, unique=True)
     description = models.TextField(blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="owned_projects",
+    )
     owner_name = models.CharField(max_length=128, blank=True)
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
@@ -23,6 +47,17 @@ class Project(TimeStampedModel):
 
     class Meta:
         ordering = ("name",)
+
+    @property
+    def owner_display(self) -> str:
+        if not self.owner_id:
+            return "—"
+        return format_project_owner_label(self.owner) or "—"
+
+    def save(self, *args, **kwargs):
+        if self.owner_id:
+            self.owner_name = format_project_owner_label(self.owner)
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.name

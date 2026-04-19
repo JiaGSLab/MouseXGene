@@ -32,6 +32,7 @@
     <div class="action-links">
         <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
         <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
+        <a class="button" href="{% url 'genotypes:mouse_genotype_create' %}">New Genotype Record</a>
         {% if can_import %}
             <a class="button button-light" href="{% url 'colony:cage_import' %}">Import Cages</a>
             <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
@@ -51,6 +52,10 @@
 
 <section class="page-header">
     <h2>Warnings / Alerts <span class="attention-pill">Attention Needed</span></h2>
+    <p class="muted">
+        Each card shows the total count in the title. Lists below are a preview of up to
+        <strong>{{ dashboard_list_limit }}</strong> rows (see the linked list pages for the full set).
+    </p>
 </section>
 
 <section class="cards dashboard-sections">
@@ -78,7 +83,10 @@
         </h2>
         <ul class="mini-list">
             {% for mouse in mice_without_cage %}
-                <li>{{ mouse.mouse_uid }}{% if mouse.strain_line %} - {{ mouse.strain_line }}{% endif %}</li>
+                <li>
+                    <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
+                    {% if mouse.strain_line %} - {{ mouse.strain_line }}{% endif %}
+                </li>
             {% empty %}
                 <li class="muted">No issues found.</li>
             {% endfor %}
@@ -92,7 +100,13 @@
         </h2>
         <ul class="mini-list">
             {% for mouse in mice_without_genotype %}
-                <li>{{ mouse.mouse_uid }}{% if mouse.current_cage %} - {{ mouse.current_cage }}{% endif %}</li>
+                <li>
+                    <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
+                    {% if mouse.current_cage %}
+                        -
+                        <a href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                    {% endif %}
+                </li>
             {% empty %}
                 <li class="muted">No issues found.</li>
             {% endfor %}
@@ -106,7 +120,10 @@
         </h2>
         <ul class="mini-list">
             {% for cage in cages_without_mice %}
-                <li>{{ cage.cage_id }}{% if cage.room %} - {{ cage.room }}{% endif %}</li>
+                <li>
+                    <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
+                    {% if cage.room %} - {{ cage.room }}{% endif %}
+                </li>
             {% empty %}
                 <li class="muted">No issues found.</li>
             {% endfor %}
@@ -129,14 +146,51 @@
             {% endfor %}
         </ul>
     </article>
+    <article class="card">
+        <h2>
+            <a href="{% url 'litters:litter_list' %}">Tail-tagged Pups Missing Genotype</a>
+            <span class="muted">({{ pups_lacking_genotype_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for pup in pups_lacking_genotype %}
+                <li>
+                    <a href="{% url 'litters:litter_detail' pup.litter.pk %}">{{ pup.litter.litter_id_display }}</a>
+                    - {% if pup.mouse %}<a href="{% url 'mice:mouse_detail' pup.mouse.pk %}">{{ pup.mouse.mouse_uid }}</a>{% else %}Unlinked pup{% endif %}
+                    - tail-tag {{ pup.tail_tag_date|date:"Y-m-d" }}
+                </li>
+            {% empty %}
+                <li class="muted">No issues found.</li>
+            {% endfor %}
+        </ul>
+    </article>
+    <article class="card">
+        <h2>
+            <a href="{% url 'colony:cage_list' %}">Active Cages Empty >14 Days</a>
+            <span class="muted">({{ empty_active_cages_long_count }})</span>
+        </h2>
+        <ul class="mini-list">
+            {% for cage in empty_active_cages_long %}
+                <li><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a> - updated {{ cage.updated_at|date:"Y-m-d" }}</li>
+            {% empty %}
+                <li class="muted">No issues found.</li>
+            {% endfor %}
+        </ul>
+    </article>
 </section>
 
 <section class="cards dashboard-sections">
     <article class="card">
-        <h2>Recently Added Mice</h2>
+        <h2><a href="{% url 'mice:mouse_list' %}">Recently Added Mice</a></h2>
+        <p class="muted">Latest {{ dashboard_list_limit }} by record creation time (not birth date).</p>
         <ul class="mini-list">
             {% for mouse in recent_mice %}
-                <li>{{ mouse.mouse_uid }}{% if mouse.current_cage %} - {{ mouse.current_cage }}{% endif %}</li>
+                <li>
+                    <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
+                    {% if mouse.current_cage %}
+                        -
+                        <a href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                    {% endif %}
+                </li>
             {% empty %}
                 <li class="muted">No mice yet.</li>
             {% endfor %}
@@ -144,10 +198,14 @@
     </article>
 
     <article class="card">
-        <h2>Recently Created Cages</h2>
+        <h2><a href="{% url 'colony:cage_list' %}">Recently Created Cages</a></h2>
+        <p class="muted">Latest {{ dashboard_list_limit }} by record creation time.</p>
         <ul class="mini-list">
             {% for cage in recent_cages %}
-                <li>{{ cage.cage_id }}{% if cage.room %} - {{ cage.room }}{% endif %}</li>
+                <li>
+                    <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
+                    {% if cage.room %} - {{ cage.room }}{% endif %}
+                </li>
             {% empty %}
                 <li class="muted">No cages yet.</li>
             {% endfor %}

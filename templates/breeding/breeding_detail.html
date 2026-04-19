@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load mouse_age_tags %}
 
 {% block title %}Breeding {{ breeding.breeding_code }} | MouseXGene{% endblock %}
 
@@ -36,12 +37,21 @@
 <section class="card">
     <h2>Mice</h2>
     <dl class="detail-grid">
-        <dt>Male</dt><dd><a href="{% url 'mice:mouse_detail' breeding.male.pk %}">{{ breeding.male }}</a></dd>
-        <dt>Female 1</dt><dd><a href="{% url 'mice:mouse_detail' breeding.female_1.pk %}">{{ breeding.female_1 }}</a></dd>
+        <dt>Male</dt>
+        <dd>
+            <a href="{% url 'mice:mouse_detail' breeding.male.pk %}">{{ breeding.male }}</a>
+            {% mouse_breeding_age_chip breeding.male %}
+        </dd>
+        <dt>Female 1</dt>
+        <dd>
+            <a href="{% url 'mice:mouse_detail' breeding.female_1.pk %}">{{ breeding.female_1 }}</a>
+            {% mouse_breeding_age_chip breeding.female_1 %}
+        </dd>
         <dt>Female 2</dt>
         <dd>
             {% if breeding.female_2 %}
                 <a href="{% url 'mice:mouse_detail' breeding.female_2.pk %}">{{ breeding.female_2 }}</a>
+                {% mouse_breeding_age_chip breeding.female_2 %}
             {% else %}
                 -
             {% endif %}
@@ -63,27 +73,29 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th>Litter Code</th>
-                <th>Birth Date</th>
-                <th>Total Born</th>
+                <th>Litter ID</th>
+                <th>Birth date</th>
+                <th>Total born</th>
                 <th>Alive</th>
                 <th>Dead</th>
-                <th>Wean Date</th>
+                <th>Wean date</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
             {% for litter in litters %}
             <tr>
-                <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a></td>
+                <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_id_display }}</a></td>
                 <td>{{ litter.birth_date|default:"-" }}</td>
                 <td>{{ litter.total_born|default:"-" }}</td>
                 <td>{{ litter.alive_count|default:"-" }}</td>
                 <td>{{ litter.dead_count|default:"-" }}</td>
                 <td>{{ litter.wean_date|default:"-" }}</td>
+                <td><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="6" class="empty-row">No litters recorded for this breeding.</td>
+                <td colspan="7" class="empty-row">No litters recorded for this breeding.</td>
             </tr>
             {% endfor %}
         </tbody>

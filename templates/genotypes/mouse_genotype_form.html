@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>{{ page_title }}</h1>
+        <p class="muted">
+            Add or edit one assay-style <strong>genotype record</strong> for a mouse (locus, alleles, zygosity).
+            For compound line composition, use the mouse’s <strong>Genotype Components</strong> editor.
+        </p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'genotypes:genotype_record_list' %}">All records</a>
+        <a class="button button-light" href="{% url 'genotypes:gene_list' %}">Gene definitions</a>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {% if mouse_fixed %}
+            <p class="muted">Mouse: <strong><a href="{% url 'mice:mouse_detail' mouse_fixed.pk %}">{{ mouse_fixed.mouse_uid }}</a></strong></p>
+        {% endif %}
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+            </div>
+        {% endif %}
+        {% for field in form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}</label>
+                {{ field }}
+                {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+                {% if field.errors %}
+                    <div class="field-error">{% for error in field.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="button">{{ submit_label }}</button>
+            {% if mouse_fixed %}
+                <a href="{% url 'mice:mouse_detail' mouse_fixed.pk %}" class="button button-light">Cancel</a>
+            {% else %}
+                <a href="{% url 'genotypes:genotype_record_list' %}" class="button button-light">Cancel</a>
+            {% endif %}
+        </div>
+    </form>
+</section>
+{% endblock %}

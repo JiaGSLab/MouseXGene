@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    family_tree,
     mouse_create,
     mouse_detail,
     mouse_edit,
@@ -22,6 +23,7 @@ from .views import (
 app_name = "mice"
 
 urlpatterns = [
+    path("family-tree/", family_tree, name="family_tree"),
     path("new/", mouse_create, name="mouse_create"),
     path("import/", mouse_import, name="mouse_import"),
     path("import/template/", mouse_import_template, name="mouse_import_template"),

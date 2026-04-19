@@ -11,6 +11,37 @@
     </p>
 </section>
 
+<section id="import-prefix" class="card">
+    <h2>Import ID prefix</h2>
+    <p class="muted">
+        Optional lab initials or short code. When you check “Prefix cage IDs…” in the form below,
+        values like <code>C001</code> are stored as <code>PREFIX-C001</code> so simple numbers stay unique across people.
+    </p>
+    {% if import_prefix_hint %}
+        <p class="muted">Saved prefix: <code>{{ import_prefix_hint }}-</code></p>
+    {% endif %}
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {% for field in prefix_form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <small class="muted">{{ field.help_text }}</small>
+                {% endif %}
+                {% if field.errors %}
+                    <div class="field-error">
+                        {% for error in field.errors %}<div>{{ error }}</div>{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" name="save_import_prefix" value="1" class="button">Save prefix</button>
+        </div>
+    </form>
+</section>
+
 <section class="card">
     <p>
         <a href="{% url 'colony:cage_import_template' %}">Download template (CSV)</a>
@@ -48,6 +79,22 @@
             {% if form.data_file.errors %}
                 <div class="field-error">
                     {% for error in form.data_file.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.apply_import_prefix.id_for_label }}">
+                {{ form.apply_import_prefix }} {{ form.apply_import_prefix.label }}
+            </label>
+            {% if form.apply_import_prefix.help_text %}
+                <small class="muted">{{ form.apply_import_prefix.help_text }}</small>
+            {% endif %}
+            {% if form.apply_import_prefix.errors %}
+                <div class="field-error">
+                    {% for error in form.apply_import_prefix.errors %}
                         <div>{{ error }}</div>
                     {% endfor %}
                 </div>

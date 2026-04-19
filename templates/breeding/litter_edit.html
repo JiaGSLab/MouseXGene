@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>{{ page_title }}</h1>
+        <p class="muted">Update litter workflow fields and optional per-pup rows. Pups listed here can be linked to new <strong>Mouse</strong> records when you <a href="{% url 'litters:litter_wean' litter.pk %}">wean the litter</a> (matched in sort order).</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'litters:litter_detail' litter.pk %}">Back to Litter</a>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+            </div>
+        {% endif %}
+
+        <h2 class="card-subheading">Litter</h2>
+        {% for field in form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<small class="muted">{{ field.help_text }}</small>{% endif %}
+                {% if field.errors %}
+                    <div class="field-error">{% for error in field.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <h2 class="card-subheading">Pups on this litter</h2>
+        <p class="muted small-print">Add rows for each pup (sex, ear tag, etc.). Leave blank sort order to default; lower numbers wean first when linking to new mice.</p>
+
+        {{ formset.management_form }}
+        {% if formset.non_form_errors %}
+            <div class="form-errors">
+                {% for error in formset.non_form_errors %}<div>{{ error }}</div>{% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="formset-rows">
+            {% for f in formset %}
+                <div class="formset-row card card-nested">
+                    {% for hidden in f.hidden_fields %}{{ hidden }}{% endfor %}
+                    {% if f.instance.pk %}{{ f.DELETE }}<label class="inline-delete">{{ f.DELETE.label }}</label>{% endif %}
+                    {% for field in f.visible_fields %}
+                        <div class="form-row">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="field-error">{% for error in field.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="button">Save</button>
+            <a href="{% url 'litters:litter_detail' litter.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

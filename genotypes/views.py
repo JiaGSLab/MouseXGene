@@ -1,21 +1,29 @@
 import csv
 from io import BytesIO
 
+from django import forms
 from django.contrib import messages
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.db.models import Q
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from openpyxl import Workbook
 
-from .forms import GeneForm, GenotypeImportForm
+from colony.models import Mouse
+from .forms import GeneForm, GenotypeImportForm, MouseGenotypeForm
 from .importers import GENOTYPE_EXPECTED_COLUMNS, parse_genotype_import
 from .models import Gene, MouseGenotype
 from colony.models import StrainLine
 from core.audit import log_audit_event
 from core.models import AuditLog, ImportLog, Project
-from users.permissions import authenticated_required, role_required, can_import
+from users.permissions import (
+    authenticated_required,
+    can_edit_project_data,
+    can_import,
+    ensure_can_edit_project_data,
+    role_required,
+)
 
 
 def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
@@ -79,25 +87,43 @@ def genotype_import(request: HttpRequest) -> HttpResponse:
                     errors=result.errors,
                 )
             else:
-                with transaction.atomic():
-                    MouseGenotype.objects.bulk_create([MouseGenotype(**row) for row in result.rows])
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.IMPORT,
-                    message=f"Imported {len(result.rows)} genotype records via file upload.",
-                    object_type="MouseGenotype",
-                    object_id=str(len(result.rows)),
-                    object_repr="Bulk Genotype Import",
-                )
-                record_import_log(
-                    user=request.user,
-                    filename=upload_name,
-                    success=True,
-                    created_count=len(result.rows),
-                    errors=[],
-                )
-                messages.success(request, f"Successfully imported {len(result.rows)} genotype records.")
-                return redirect("mice:mouse_list")
+                permission_errors: list[str] = []
+                for row in result.rows:
+                    mouse_obj = row["mouse"]
+                    if not can_edit_project_data(request.user, mouse_obj.project):
+                        permission_errors.append(
+                            f"No permission to edit genotypes for mouse {mouse_obj.mouse_uid} "
+                            f"(project {mouse_obj.project.name})."
+                        )
+                if permission_errors:
+                    row_errors = permission_errors
+                    record_import_log(
+                        user=request.user,
+                        filename=upload_name,
+                        success=False,
+                        created_count=0,
+                        errors=row_errors,
+                    )
+                else:
+                    with transaction.atomic():
+                        MouseGenotype.objects.bulk_create([MouseGenotype(**row) for row in result.rows])
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.IMPORT,
+                        message=f"Imported {len(result.rows)} genotype records via file upload.",
+                        object_type="MouseGenotype",
+                        object_id=str(len(result.rows)),
+                        object_repr="Bulk Genotype Import",
+                    )
+                    record_import_log(
+                        user=request.user,
+                        filename=upload_name,
+                        success=True,
+                        created_count=len(result.rows),
+                        errors=[],
+                    )
+                    messages.success(request, f"Successfully imported {len(result.rows)} genotype records.")
+                    return redirect("mice:mouse_list")
     else:
         form = GenotypeImportForm()
 
@@ -215,6 +241,104 @@ def gene_edit(request: HttpRequest, pk: int) -> HttpResponse:
         request,
         "genotypes/gene_form.html",
         {"form": form, "page_title": f"Edit Genotype {gene.symbol}", "submit_label": "Save Changes"},
+    )
+
+
+@authenticated_required
+def mouse_genotype_create(request: HttpRequest) -> HttpResponse:
+    mouse_fixed: Mouse | None = None
+    if request.method == "GET" and request.GET.get("mouse"):
+        mouse_fixed = get_object_or_404(Mouse.objects.select_related("project"), pk=request.GET["mouse"])
+        ensure_can_edit_project_data(request.user, mouse_fixed.project)
+    elif request.method == "POST" and request.POST.get("mouse"):
+        mouse_fixed = get_object_or_404(Mouse.objects.select_related("project"), pk=request.POST["mouse"])
+
+    if request.method == "POST":
+        form = MouseGenotypeForm(request.POST, user=request.user)
+        if mouse_fixed:
+            form.fields["mouse"].widget = forms.HiddenInput()
+        if form.is_valid():
+            obj = form.save(commit=False)
+            try:
+                ensure_can_edit_project_data(request.user, obj.mouse.project)
+            except PermissionDenied:
+                raise
+            try:
+                obj.save()
+            except IntegrityError:
+                form.add_error(
+                    None,
+                    "A genotype record already exists for this combination of mouse, gene, and locus.",
+                )
+            else:
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.CREATE,
+                    obj=obj,
+                    message=f"Added genotype record for {obj.mouse.mouse_uid}.",
+                )
+                messages.success(request, "Genotype record saved.")
+                return redirect("mice:mouse_detail", pk=obj.mouse_id)
+    else:
+        initial = {}
+        if mouse_fixed:
+            initial["mouse"] = mouse_fixed.pk
+        form = MouseGenotypeForm(initial=initial, user=request.user)
+        if mouse_fixed:
+            form.fields["mouse"].widget = forms.HiddenInput()
+
+    return render(
+        request,
+        "genotypes/mouse_genotype_form.html",
+        {
+            "form": form,
+            "mouse_fixed": mouse_fixed,
+            "page_title": "Add Genotype Record",
+            "submit_label": "Save Genotype Record",
+        },
+    )
+
+
+@authenticated_required
+def mouse_genotype_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    record = get_object_or_404(
+        MouseGenotype.objects.select_related("mouse", "mouse__project", "gene"),
+        pk=pk,
+    )
+    ensure_can_edit_project_data(request.user, record.mouse.project)
+    if request.method == "POST":
+        form = MouseGenotypeForm(request.POST, instance=record, user=request.user)
+        if form.is_valid():
+            obj = form.save(commit=False)
+            ensure_can_edit_project_data(request.user, obj.mouse.project)
+            try:
+                obj.save()
+            except IntegrityError:
+                form.add_error(
+                    None,
+                    "A genotype record already exists for this combination of mouse, gene, and locus.",
+                )
+            else:
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=obj,
+                    message=f"Updated genotype record for {obj.mouse.mouse_uid}.",
+                )
+                messages.success(request, "Genotype record updated.")
+                return redirect("mice:mouse_detail", pk=obj.mouse_id)
+    else:
+        form = MouseGenotypeForm(instance=record, user=request.user)
+
+    return render(
+        request,
+        "genotypes/mouse_genotype_form.html",
+        {
+            "form": form,
+            "mouse_fixed": None,
+            "page_title": f"Edit Genotype Record — {record.mouse.mouse_uid}",
+            "submit_label": "Save Changes",
+        },
     )
 
 

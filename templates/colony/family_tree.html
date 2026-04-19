@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Family Tree | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Family Tree</h1>
+        <p class="muted">Pedigree-first workflow page for sire/dam/offspring navigation across the colony.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="get" class="filter-grid">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search mouse UID / ear tag / toe tag" class="search-input">
+        <div class="form-actions">
+            <button class="button" type="submit">Search</button>
+            <a href="{% url 'mice:family_tree' %}" class="button button-light">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Mouse</th>
+                <th>Sire</th>
+                <th>Dam</th>
+                <th>Cage</th>
+                <th>Strain</th>
+                <th>Pedigree</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in mice %}
+                <tr>
+                    <td><a href="{% url 'mice:mouse_detail' m.pk %}">{{ m.mouse_uid }}</a></td>
+                    <td>{% if m.sire %}<a href="{% url 'mice:mouse_detail' m.sire.pk %}">{{ m.sire.mouse_uid }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if m.dam %}<a href="{% url 'mice:mouse_detail' m.dam.pk %}">{{ m.dam.mouse_uid }}</a>{% else %}-{% endif %}</td>
+                    <td>
+                        {% if m.current_cage %}
+                            <a href="{% url 'colony:cage_detail' m.current_cage.pk %}">{{ m.current_cage }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if m.strain_line %}
+                            <a href="{% url 'mice:mouse_list' %}?strain_line_id={{ m.strain_line.pk }}">{{ m.strain_line }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td><a href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="empty-row">No mice matched your query.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -1,39 +1,153 @@
 {% extends "base.html" %}
 
-{% block title %}Litter {{ litter.litter_code|default:litter.pk }} | MouseXGene{% endblock %}
+{% block title %}Litter {{ litter.litter_id_display }} | MouseXGene{% endblock %}
 
 {% block content %}
 <section class="page-header page-header-row">
     <div>
-        <h1>Litter {{ litter.litter_code|default:litter.pk }}</h1>
-        <p class="muted">Litter details and counts.</p>
+        <h1>Litter {{ litter.litter_id_display }}</h1>
+        <p class="muted">Intermediate workflow: parental breeding → pup cohort → individual mouse records.</p>
     </div>
-    <div class="action-links">
-        <a class="button button-light" href="#">Edit Litter</a>
-        {% if can_manage_breeding %}
-            <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean Pups</a>
+    <div class="action-links workflow-actions">
+        {% if can_edit_litter %}
+            <a class="button" href="{% url 'litters:litter_edit' litter.pk %}">Edit litter &amp; pups</a>
+            {% if not litter.wean_date and litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
+                <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean litter</a>
+            {% endif %}
+            {% if litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
+                <form method="post" action="{% url 'litters:litter_end' litter.pk %}" class="action-inline-form" onsubmit="return confirm('End this litter workflow? You can still view it from archived filters.');">
+                    {% csrf_token %}
+                    <button type="submit" class="button button-light">End litter</button>
+                </form>
+            {% endif %}
         {% endif %}
+        <a class="button button-light" href="{% url 'litters:litter_list' %}">All litters</a>
     </div>
 </section>
 
 <section class="card">
-    <h2>Basic Information</h2>
+    <h2>Litter summary</h2>
     <dl class="detail-grid">
-        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
-        <dt>Birth Date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
-        <dt>Total Born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
-        <dt>Alive Count</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
-        <dt>Dead Count</dt><dd>{{ litter.dead_count|default:"-" }}</dd>
-        <dt>Wean Date</dt><dd>{{ litter.wean_date|default:"-" }}</dd>
-        <dt>Sire</dt><dd>{{ litter.breeding.male|default:"-" }}</dd>
-        <dt>Sire Genotype</dt><dd>{{ sire_genotype_summary|default:"-" }}</dd>
-        <dt>Dam</dt><dd>{{ litter.breeding.female_1|default:"-" }}</dd>
-        <dt>Dam Genotype</dt><dd>{{ dam_genotype_summary|default:"-" }}</dd>
+        <dt>Litter ID</dt><dd><strong>{{ litter.litter_id_display }}</strong></dd>
+        <dt>Status</dt><dd><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></dd>
+        <dt>Birth date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
+        <dt>Litter size (total born)</dt><dd>{{ litter.total_born|default:"—" }}</dd>
+        <dt>Alive / dead</dt><dd>{{ litter.alive_count|default:"—" }} / {{ litter.dead_count|default:"—" }}</dd>
+        <dt>Male / female counts</dt><dd>{{ litter.male_count|default:"—" }} / {{ litter.female_count|default:"—" }}</dd>
+        <dt>Wean date</dt><dd>{{ litter.wean_date|default:"—" }}</dd>
+        <dt>Tail tag (litter)</dt><dd>{{ litter.tail_tag_date|default:"—" }}</dd>
     </dl>
 </section>
 
 <section class="card">
+    <h2>Linked breeding &amp; cage</h2>
+    <dl class="detail-grid">
+        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding.breeding_code }}</a></dd>
+        <dt>Breeding cage</dt>
+        <dd>
+            {% if litter.breeding.cage %}
+                <a href="{% url 'colony:cage_detail' litter.breeding.cage.pk %}">{{ litter.breeding.cage.cage_id }}</a>
+            {% else %}—{% endif %}
+        </dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Parents</h2>
+    <dl class="detail-grid">
+        <dt>Sire</dt><dd><a href="{% url 'mice:mouse_detail' litter.breeding.male.pk %}">{{ litter.breeding.male }}</a></dd>
+        <dt>Sire cage</dt>
+        <dd>
+            {% if litter.breeding.male.current_cage %}
+                <a href="{% url 'colony:cage_detail' litter.breeding.male.current_cage.pk %}">{{ litter.breeding.male.current_cage.cage_id }}</a>
+            {% else %}—{% endif %}
+        </dd>
+        <dt>Sire genotype</dt><dd>{{ sire_genotype_summary|default:"-" }}</dd>
+        <dt>Dam</dt><dd><a href="{% url 'mice:mouse_detail' litter.breeding.female_1.pk %}">{{ litter.breeding.female_1 }}</a></dd>
+        <dt>Dam cage</dt>
+        <dd>
+            {% if litter.breeding.female_1.current_cage %}
+                <a href="{% url 'colony:cage_detail' litter.breeding.female_1.current_cage.pk %}">{{ litter.breeding.female_1.current_cage.cage_id }}</a>
+            {% else %}—{% endif %}
+        </dd>
+        <dt>Dam strain</dt><dd>{{ litter.breeding.female_1.strain_line|default:"-" }}</dd>
+        <dt>Dam genotype</dt><dd>{{ dam_genotype_summary|default:"-" }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Pup rows (on litter)</h2>
+    {% if pups %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Sex</th>
+                    <th>Ear tag</th>
+                    <th>Toe tag</th>
+                    <th>Coat</th>
+                    <th>Tail tag</th>
+                    <th>Linked mouse</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pup in pups %}
+                <tr>
+                    <td>{{ pup.sort_order|default:pup.pk }}</td>
+                    <td>{{ pup.get_sex_display }}</td>
+                    <td>{{ pup.ear_tag|default:"—" }}</td>
+                    <td>{{ pup.toe_tag|default:"—" }}</td>
+                    <td>{{ pup.coat_color|default:"—" }}</td>
+                    <td>{{ pup.tail_tag_date|default:"—" }}</td>
+                    <td>
+                        {% if pup.mouse %}
+                            <a href="{% url 'mice:mouse_detail' pup.mouse.pk %}">{{ pup.mouse.mouse_uid }}</a>
+                        {% else %}
+                            <span class="muted">Not yet registered</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="muted">No per-pup rows yet. Use <strong>Edit litter &amp; pups</strong> to add pups, then wean to create mouse records (pups are linked in sort order when possible).</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2>Registered offspring (mice)</h2>
+    <p class="muted small-print">Mice with this birth date and sire/dam pairing (includes weaned animals and any manually registered matches).</p>
+    {% if registered_offspring %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>UID</th>
+                    <th>Sex</th>
+                    <th>Strain</th>
+                    <th>Cage</th>
+                    <th>Project</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in registered_offspring %}
+                <tr>
+                    <td><a href="{% url 'mice:mouse_detail' m.pk %}">{{ m.mouse_uid }}</a></td>
+                    <td>{{ m.get_sex_display }}</td>
+                    <td>{{ m.strain_line|default:"-" }}</td>
+                    <td>{% if m.current_cage %}<a href="{% url 'colony:cage_detail' m.current_cage.pk %}">{{ m.current_cage.cage_id }}</a>{% else %}—{% endif %}</td>
+                    <td>{% if m.project %}<a href="{% url 'project_list' %}?q={{ m.project.name|urlencode }}">{{ m.project.name }}</a>{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="muted">No matching mouse records yet.</p>
+    {% endif %}
+</section>
+
+<section class="card">
     <h2>Notes</h2>
-    <p>{{ litter.notes|default:"No notes." }}</p>
+    <p>{{ litter.notes|default:"No notes for this litter."|linebreaksbr }}</p>
 </section>
 {% endblock %}

@@ -5,9 +5,16 @@
 {% block content %}
 <section class="page-header">
     <h1>{{ page_title }}</h1>
+    <p class="muted">
+        Age hints for breeders use days since birth date: ~3 months (90d), ~4 months (122d), ~6 months (183d).
+        They do not block saving.
+    </p>
 </section>
 
 <section class="card">
+    {{ breeding_age_tier_map|json_script:"breeding-age-tier-data" }}
+    {{ breeding_age_hints|json_script:"breeding-age-hint-data" }}
+
     <form method="post" class="form-layout">
         {% csrf_token %}
 
@@ -23,6 +30,9 @@
             <div class="form-row">
                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                 {{ field }}
+                {% if field.name == 'male' or field.name == 'female_1' or field.name == 'female_2' %}
+                    <p class="breeding-age-hint" id="hint-{{ field.name }}" aria-live="polite"></p>
+                {% endif %}
                 {% if field.errors %}
                     <div class="field-error">
                         {% for error in field.errors %}
@@ -39,4 +49,50 @@
         </div>
     </form>
 </section>
+
+<script>
+(function () {
+    var tEl = document.getElementById("breeding-age-tier-data");
+    var hEl = document.getElementById("breeding-age-hint-data");
+    if (!tEl || !hEl) {
+        return;
+    }
+    var tiers = JSON.parse(tEl.textContent);
+    var hints = JSON.parse(hEl.textContent);
+    var pairs = [
+        ["id_male", "hint-male"],
+        ["id_female_1", "hint-female_1"],
+        ["id_female_2", "hint-female_2"],
+    ];
+    function refresh(selectId, hintId) {
+        var sel = document.getElementById(selectId);
+        var hint = document.getElementById(hintId);
+        if (!sel || !hint) {
+            return;
+        }
+        var v = sel.value;
+        hint.textContent = "";
+        hint.className = "breeding-age-hint";
+        if (!v) {
+            return;
+        }
+        var tier = tiers[v];
+        if (!tier || tier === "none") {
+            return;
+        }
+        hint.textContent = hints[tier] || "";
+        hint.classList.add("is-" + tier);
+    }
+    pairs.forEach(function (pair) {
+        var sel = document.getElementById(pair[0]);
+        if (!sel) {
+            return;
+        }
+        sel.addEventListener("change", function () {
+            refresh(pair[0], pair[1]);
+        });
+        refresh(pair[0], pair[1]);
+    });
+})();
+</script>
 {% endblock %}

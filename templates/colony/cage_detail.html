@@ -21,8 +21,9 @@
 
 <section class="cards">
     <article class="card">
-        <h2>Basic Information</h2>
+        <h2>Cage Overview</h2>
         <dl class="detail-grid">
+            <dt>Setup Date</dt><dd>{{ cage_setup_date|default:"-" }}</dd>
             <dt>Room</dt><dd>{{ cage.room|default:"-" }}</dd>
             <dt>Created Date</dt><dd>{{ cage.created_date|default:"-" }}</dd>
             <dt>Rack</dt><dd>{{ cage.rack|default:"-" }}</dd>
@@ -30,6 +31,7 @@
             <dt>Cage Type</dt><dd>{{ cage.get_cage_type_display }}</dd>
             <dt>Purpose</dt><dd>{{ cage.get_purpose_display }}</dd>
             <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
+            <dt>Current Occupancy</dt><dd>{{ current_mouse_count }}</dd>
         </dl>
     </article>
 </section>
@@ -37,7 +39,7 @@
 <section class="card">
     <h2>Current Mice</h2>
     <p class="muted">
-        Total mice: {{ current_mouse_rows|length }} |
+        Total mice: {{ current_mouse_count }} |
         Genotype overview: {{ cage_genotype_overview }}
     </p>
     <table class="data-table">
@@ -65,6 +67,34 @@
             <tr>
                 <td colspan="6" class="empty-row">No current mice in this cage.</td>
             </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Linked Litters (Active Workflow)</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Litter</th>
+                <th>Breeding</th>
+                <th>Birth</th>
+                <th>Status</th>
+                <th>Wean Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for litter in active_litters %}
+                <tr>
+                    <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_id_display }}</a></td>
+                    <td><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding.breeding_code }}</a></td>
+                    <td>{{ litter.birth_date|default:"-" }}</td>
+                    <td>{{ litter.get_litter_status_display }}</td>
+                    <td>{{ litter.wean_date|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="5" class="empty-row">No active litter workflow linked to this cage.</td></tr>
             {% endfor %}
         </tbody>
     </table>

@@ -1,6 +1,10 @@
 from django import forms
+from django.core.exceptions import ValidationError
 from django.forms import inlineformset_factory
 from django.utils import timezone
+from django.utils.safestring import mark_safe
+
+from users.import_prefix import get_effective_import_prefix
 
 from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 
@@ -98,6 +102,28 @@ class CageImportForm(forms.Form):
         label="CSV or XLSX file",
         help_text="Required. Use the provided template to avoid schema errors.",
     )
+    apply_import_prefix = forms.BooleanField(
+        required=False,
+        initial=False,
+        label="Prefix cage IDs with my import prefix",
+        help_text="Prepends your profile prefix to each cage_id (e.g. C001 → JG-C001).",
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("apply_import_prefix") and self.user is not None:
+            if not get_effective_import_prefix(self.user):
+                raise ValidationError(
+                    mark_safe(
+                        'Set your import ID prefix in the <a href="#import-prefix">Import ID prefix</a> '
+                        "section on this page first."
+                    )
+                )
+        return cleaned
 
 
 class MouseImportForm(forms.Form):
@@ -129,6 +155,31 @@ class MouseImportForm(forms.Form):
         label="Resolve sire/dam within this file",
         help_text="If enabled, sire/dam can reference mice that are also in the same import file.",
     )
+    apply_import_prefix = forms.BooleanField(
+        required=False,
+        initial=False,
+        label="Prefix mouse & cage IDs with my import prefix",
+        help_text=(
+            "Prepends your profile prefix to mouse_uid and to cage references when they are new. "
+            "Existing cage/mouse IDs in the database are left unchanged so you can reference legacy records."
+        ),
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("apply_import_prefix") and self.user is not None:
+            if not get_effective_import_prefix(self.user):
+                raise ValidationError(
+                    mark_safe(
+                        'Set your import ID prefix in the <a href="#import-prefix">Import ID prefix</a> '
+                        "section on this page first."
+                    )
+                )
+        return cleaned
 
 
 class StrainLineForm(forms.ModelForm):

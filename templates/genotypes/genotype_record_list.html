@@ -6,7 +6,11 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Genotype Records</h1>
-        <p class="muted">每只鼠的实际基因型记录（Mouse-linked records），不同于 Genotype Definitions（主数据/定义）。</p>
+        <p class="muted">Assay-style records per mouse (alleles / zygosity). For strain-line composition, use <strong>Genotype Components</strong> on each mouse.</p>
+    </div>
+    <div class="action-links">
+        <a href="{% url 'genotypes:mouse_genotype_create' %}" class="button">Add Genotype Record</a>
+        <a href="{% url 'genotypes:gene_list' %}" class="button button-light">Gene definitions</a>
     </div>
 </section>
 
@@ -72,6 +76,7 @@
                 <th>is_confirmed</th>
                 <th>assay_date</th>
                 <th>notes</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
@@ -88,10 +93,11 @@
                     <td>{{ record.is_confirmed|yesno:"Yes,No" }}</td>
                     <td>{{ record.assay_date|default:"-" }}</td>
                     <td>{{ record.notes|default:"-" }}</td>
+                    <td><a href="{% url 'genotypes:mouse_genotype_edit' record.pk %}">Edit</a></td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="11" class="empty-row">No genotype records found.</td>
+                    <td colspan="12" class="empty-row">No genotype records found.</td>
                 </tr>
             {% endfor %}
         </tbody>

@@ -7,8 +7,12 @@
     <div>
         <h1>Mice</h1>
         <p class="muted">Browse all mice and search by key identifiers.</p>
+        <p class="muted small-print">
+            Age column: gray <strong>Age unknown</strong> if birth date is missing; amber <strong>≥6mo</strong> (≥183d) and red bar <strong>≥1yr</strong> (≥365d) include a left row marker.
+        </p>
     </div>
     <div class="action-links">
+        <a class="button button-light" href="{% url 'genotypes:mouse_genotype_create' %}">Add Genotype Record</a>
         {% if can_import %}
             <a class="button button-light" href="{% url 'genotypes:genotype_import' %}">Import Genotype Records</a>
             <a class="button button-light" href="{% url 'mice:mouse_import' %}">Import Mice</a>
@@ -82,12 +86,23 @@
         </thead>
         <tbody>
             {% for mouse in mice %}
-            <tr class="{% if mouse.status != 'active' %}row-inactive{% endif %}">
+            <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.list_age_band %}mouse-row-age mouse-row-age--{{ mouse.list_age_band }}{% endif %}">
                 <td><a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
                 <td>{{ mouse.genotype_summary|default:"-" }}</td>
                 <td>{{ mouse.get_sex_display }}</td>
                 <td>{{ mouse.birth_date|default:"-" }}</td>
-                <td>{{ mouse.age_display|default:"-" }}</td>
+                <td>
+                    <span class="mouse-age-cell">
+                        {{ mouse.age_display|default:"-" }}
+                        {% if mouse.list_age_band == "unknown" %}
+                            <span class="mouse-age-pill mouse-age-pill--unknown" title="No birth date on record">Age unknown</span>
+                        {% elif mouse.list_age_band == "6mo" %}
+                            <span class="mouse-age-pill mouse-age-pill--6mo" title="About 6 months old or older (≥183 days)">≥6mo</span>
+                        {% elif mouse.list_age_band == "1yr" %}
+                            <span class="mouse-age-pill mouse-age-pill--1yr" title="About 1 year old or older (≥365 days)">≥1yr</span>
+                        {% endif %}
+                    </span>
+                </td>
                 <td><span class="status-pill">{{ mouse.get_status_display }}</span></td>
                 <td>
                     {% if mouse.strain_line %}

@@ -17,7 +17,7 @@
 
 <section class="card">
     <form method="get" class="filter-grid">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search project name/owner" class="search-input">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search name, owner, or description" class="search-input">
         <div class="form-actions">
             <button type="submit" class="button">Apply</button>
             <a href="{% url 'project_list' %}" class="button button-light">Reset</a>
@@ -39,7 +39,7 @@
             {% for project in projects %}
                 <tr>
                     <td><a href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">{{ project.name }}</a></td>
-                    <td>{{ project.owner_name|default:"-" }}</td>
+                    <td>{{ project.owner_display }}</td>
                     <td><span class="status-pill">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
                     <td>
                         {% if can_import or is_admin %}

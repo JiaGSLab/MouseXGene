@@ -17,8 +17,10 @@
                     <a href="{% url 'mice:mouse_list' %}">Mice</a>
                     <a href="{% url 'colony:cage_list' %}">Cages</a>
                     <a href="{% url 'breeding:breeding_list' %}">Breedings</a>
+                    <a href="{% url 'litters:litter_list' %}">Litters</a>
                     <a href="{% url 'project_list' %}">Projects</a>
                     <a href="{% url 'colony:strain_line_list' %}">Strain Lines</a>
+                    <a href="{% url 'mice:family_tree' %}">Family Tree</a>
                     {% if is_admin %}
                         <a href="{% url 'audit_list' %}">Audit</a>
                         <a href="{% url 'accounts:user_role_list' %}">Roles</a>

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 
@@ -106,6 +107,15 @@ DATABASES = {
         "PORT": _db_port if _db_port else get_env("POSTGRES_PORT", "5432"),
     }
 }
+
+# `manage.py test` without a live Postgres instance (local / CI).
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    }
 
 
 # 🔐 密码校验

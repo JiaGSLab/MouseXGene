@@ -1,8 +1,8 @@
 from django import forms
-from django.forms import formset_factory
+from django.forms import formset_factory, inlineformset_factory
 
 from colony.models import Cage, Mouse
-from .models import Breeding, Litter
+from .models import Breeding, Litter, LitterPup
 
 
 class BreedingForm(forms.ModelForm):
@@ -47,14 +47,39 @@ class LitterForm(forms.ModelForm):
             "total_born",
             "alive_count",
             "dead_count",
+            "male_count",
+            "female_count",
             "wean_date",
+            "tail_tag_date",
+            "litter_status",
             "notes",
         ]
         widgets = {
             "birth_date": forms.DateInput(attrs={"type": "date"}),
             "wean_date": forms.DateInput(attrs={"type": "date"}),
+            "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
+
+
+class LitterPupForm(forms.ModelForm):
+    class Meta:
+        model = LitterPup
+        fields = ["sort_order", "sex", "ear_tag", "toe_tag", "coat_color", "tail_tag_date", "notes"]
+        widgets = {
+            "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
+            "notes": forms.Textarea(attrs={"rows": 2}),
+        }
+
+
+LitterPupFormSet = inlineformset_factory(
+    Litter,
+    LitterPup,
+    form=LitterPupForm,
+    extra=1,
+    can_delete=True,
+    min_num=0,
+)
 
 
 class WeanLitterForm(forms.Form):
