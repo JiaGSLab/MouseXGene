@@ -16,34 +16,34 @@
     </div>
 </section>
 
-<section class="card">
+<section class="card card--filters">
     <form method="get" class="filter-grid">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or male/female mouse_uid" class="search-input">
-        <select name="status">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or male/female mouse_uid" class="search-input filter-control">
+        <select name="status" class="filter-control">
             <option value="">All Status</option>
             {% for value, label in status_options %}
                 <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
-        <select name="breeding_type">
+        <select name="breeding_type" class="filter-control">
             <option value="">All Types</option>
             {% for value, label in breeding_type_options %}
                 <option value="{{ value }}" {% if breeding_type == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
-        <select name="cage">
+        <select name="cage" class="filter-control">
             <option value="">All Cages</option>
             {% for item in cage_options %}
                 <option value="{{ item.pk }}" {% if cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
             {% endfor %}
         </select>
-        <select name="include_inactive">
+        <select name="include_inactive" class="filter-control">
             <option value="">Active Only</option>
             <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Closed</option>
         </select>
-        <div class="form-actions">
+        <div class="form-actions filter-actions">
             <button type="submit" class="button">Apply</button>
-            <a href="{% url 'breeding:breeding_list' %}" class="button button-light">Reset</a>
+            <a href="{% url 'breeding:breeding_list' %}" class="button button-reset">Reset</a>
         </div>
     </form>
 </section>

@@ -8,25 +8,27 @@
         <h1>Projects</h1>
         <p class="muted">Project-scoped collaboration and membership.</p>
     </div>
-    <div class="action-links">
+    <div class="action-links action-links--primary">
         {% if can_import or is_admin %}
             <a href="{% url 'project_create' %}" class="button">New Project</a>
         {% endif %}
     </div>
 </section>
 
-<section class="card">
-    <form method="get" class="filter-grid">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search name, owner, or description" class="search-input">
-        <div class="form-actions">
-            <button type="submit" class="button">Apply</button>
-            <a href="{% url 'project_list' %}" class="button button-light">Reset</a>
+<section class="card card--filters">
+    <form method="get" class="filter-form">
+        <div class="filter-row filter-row--primary">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search name, owner, or description" class="search-input filter-control">
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'project_list' %}" class="button button-reset">Reset</a>
+            </div>
         </div>
     </form>
 </section>
 
-<section class="table-wrap">
-    <table class="data-table">
+<section class="table-wrap table-wrap--data">
+    <table class="data-table data-table--compact data-table--striped">
         <thead>
             <tr>
                 <th>Name</th>
@@ -38,14 +40,14 @@
         <tbody>
             {% for project in projects %}
                 <tr>
-                    <td><a href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">{{ project.name }}</a></td>
+                    <td><a class="table-link table-link--strong" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">{{ project.name }}</a></td>
                     <td>{{ project.owner_display }}</td>
-                    <td><span class="status-pill">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
+                    <td><span class="status-pill {% if project.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
                     <td>
                         {% if can_import or is_admin %}
-                            <a href="{% url 'project_edit' project.pk %}">Edit</a>
-                            |
-                            <a href="{% url 'project_membership_manage' project.pk %}">Members</a>
+                            <a class="table-link" href="{% url 'project_edit' project.pk %}">Edit</a>
+                            <span class="muted">|</span>
+                            <a class="table-link" href="{% url 'project_membership_manage' project.pk %}">Members</a>
                         {% else %}
                             <span class="muted">View only</span>
                         {% endif %}

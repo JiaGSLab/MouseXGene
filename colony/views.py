@@ -3,10 +3,12 @@ from io import BytesIO
 
 from django.http import HttpRequest, HttpResponse
 from django.contrib import messages
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, F, Max, Q
 from django.utils import timezone
 from openpyxl import Workbook
 
@@ -45,6 +47,10 @@ from users.permissions import (
     is_admin,
     role_required,
 )
+
+LIST_PAGE_SIZES = (25, 50, 100)
+LIST_PAGE_DEFAULT = 25
+LIST_ALL_RESULTS_MAX = 500
 
 
 DEFAULT_MOUSE_IMPORT_OPTIONS = MouseImportOptions(
@@ -117,6 +123,91 @@ def _scoped_cage_queryset(user):
     if not getattr(user, "is_authenticated", False):
         return Cage.objects.none()
     return Cage.objects.all()
+
+
+def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
+    def href(n: int) -> str:
+        q = request.GET.copy()
+        if n <= 1:
+            q.pop("page", None)
+        else:
+            q["page"] = str(n)
+        qs = q.urlencode()
+        base = reverse(viewname)
+        return f"{base}?{qs}" if qs else base
+
+    np = page_obj.paginator.num_pages
+    hrefs: dict[str, str | None] = {
+        "first": href(1),
+        "last": href(np) if np else href(1),
+    }
+    hrefs["prev"] = href(page_obj.previous_page_number()) if page_obj.has_previous() else None
+    hrefs["next"] = href(page_obj.next_page_number()) if page_obj.has_next() else None
+    return hrefs
+
+
+def paginate_queryset_for_list(
+    request: HttpRequest,
+    queryset,
+    *,
+    viewname: str,
+) -> dict:
+    """Split queryset into pages or full list (all, only if count ≤ LIST_ALL_RESULTS_MAX)."""
+    total = queryset.count()
+    raw_per = (request.GET.get("per_page") or "").strip().lower()
+
+    use_all = raw_per == "all" and total <= LIST_ALL_RESULTS_MAX
+    if raw_per == "all" and total > LIST_ALL_RESULTS_MAX:
+        messages.warning(
+            request,
+            (
+                f"Cannot show all {total} rows at once (limit is {LIST_ALL_RESULTS_MAX}). "
+                f"Using {LIST_PAGE_DEFAULT} per page — narrow filters or use export."
+            ),
+        )
+        use_all = False
+
+    if use_all:
+        return {
+            "page_obj": None,
+            "paginator": None,
+            "pagination_hrefs": None,
+            "per_page": "all",
+            "total_count": total,
+            "all_allowed": True,
+            "items": list(queryset),
+        }
+
+    try:
+        per_int = int(raw_per) if raw_per and raw_per != "all" else LIST_PAGE_DEFAULT
+    except ValueError:
+        per_int = LIST_PAGE_DEFAULT
+    if per_int not in LIST_PAGE_SIZES:
+        per_int = LIST_PAGE_DEFAULT
+
+    paginator = Paginator(queryset, per_int)
+    raw_page = request.GET.get("page") or "1"
+    try:
+        pnum = int(raw_page)
+    except ValueError:
+        pnum = 1
+    try:
+        page_obj = paginator.page(pnum)
+    except EmptyPage:
+        last = max(1, paginator.num_pages)
+        page_obj = paginator.page(last)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+
+    return {
+        "page_obj": page_obj,
+        "paginator": paginator,
+        "pagination_hrefs": _pagination_hrefs(request, page_obj, viewname),
+        "per_page": str(per_int),
+        "total_count": total,
+        "all_allowed": total <= LIST_ALL_RESULTS_MAX,
+        "items": page_obj.object_list,
+    }
 
 
 def get_cages_export_rows(user) -> list[list]:
@@ -194,12 +285,13 @@ def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
 
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
-    if mouse.genotype_summary:
+    stored = (mouse.genotype_summary or "").strip()
+    if stored and stored != "-":
         return mouse.genotype_summary
     genotype_records = list(mouse.genotype_components.select_related("strain_line").all())
     if genotype_records:
         mouse.rebuild_genotype_summary(save=True)
-        return mouse.genotype_summary or "-"
+        return (mouse.genotype_summary or "").strip()
     # Backward compatibility fallback to legacy assay-oriented genotype rows.
     legacy_records = list(mouse.genotypes.all())
     parts = []
@@ -208,7 +300,7 @@ def build_short_genotype_summary(mouse: Mouse) -> str:
         genotype_part = gt.zygosity_display or "/".join([p for p in [gt.allele_1, gt.allele_2] if p])
         parts.append(f"{locus}:{genotype_part}" if genotype_part else locus)
     if not parts:
-        return "-"
+        return ""
     summary = ", ".join(parts)
     return f"{summary}..." if len(legacy_records) > 3 else summary
 
@@ -225,10 +317,11 @@ def build_cage_genotype_overview(mice: list[Mouse], *, sample_size: int = 3) -> 
         return "-"
     preview_parts: list[str] = []
     for mouse in mice[:sample_size]:
-        preview_parts.append(f"{mouse.mouse_uid}:{build_short_genotype_summary(mouse)}")
+        g = build_short_genotype_summary(mouse)
+        preview_parts.append(f"{mouse.mouse_uid}:{g if g else '—'}")
     if len(mice) > sample_size:
         preview_parts.append(f"... (+{len(mice) - sample_size} more)")
-    return "; ".join(preview_parts)
+    return "\n".join(preview_parts)
 
 
 def _normalize_name(value: str | None) -> str:
@@ -588,13 +681,14 @@ def cage_list(request: HttpRequest) -> HttpResponse:
             "current_mice__genotypes__gene",
         )
     )
-    cages = list(cages)
-    for cage in cages:
+    page_ctx = paginate_queryset_for_list(request, cages, viewname="colony:cage_list")
+    cages_page = list(page_ctx.pop("items"))
+    for cage in cages_page:
         cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
         cage.current_mouse_count = len(cage_mice)
         cage.genotype_overview = build_cage_genotype_overview(cage_mice)
     context = {
-        "cages": cages,
+        "cages": cages_page,
         "q": q,
         "room": room,
         "rack": rack,
@@ -608,6 +702,8 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "cage_type_options": Cage.CageType.choices,
         "purpose_options": Cage.Purpose.choices,
         "status_options": Cage.Status.choices,
+        "list_all_max": LIST_ALL_RESULTS_MAX,
+        **page_ctx,
     }
     return render(request, "colony/cage_list.html", context)
 
@@ -1029,6 +1125,15 @@ def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     return build_xlsx_response(f"cage_{cage.cage_id}_inventory.xlsx", "CageInventory", headers, rows)
 
 
+def _mouse_list_age_sort_querystring(request: HttpRequest, new_age_sort: str | None) -> str:
+    q = request.GET.copy()
+    if new_age_sort in ("old", "young"):
+        q["age_sort"] = new_age_sort
+    else:
+        q.pop("age_sort", None)
+    return q.urlencode()
+
+
 @authenticated_required
 def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
@@ -1038,7 +1143,14 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
-    mice = _scoped_mouse_queryset(request.user)
+    age_sort = (request.GET.get("age_sort") or "").strip()
+    if age_sort not in ("", "old", "young"):
+        age_sort = ""
+
+    mice = _scoped_mouse_queryset(request.user).select_related(
+        "project__owner",
+        "project__owner__profile",
+    )
     if include_inactive != "yes":
         mice = mice.filter(status=Mouse.Status.ACTIVE)
 
@@ -1061,9 +1173,39 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     if project:
         mice = mice.filter(project_id=project)
 
-    mice = mice.order_by("-birth_date", "mouse_uid")
+    if age_sort == "old":
+        mice = mice.order_by(F("birth_date").asc(nulls_last=True), "mouse_uid")
+    elif age_sort == "young":
+        mice = mice.order_by(F("birth_date").desc(nulls_last=True), "mouse_uid")
+    else:
+        mice = mice.order_by("-birth_date", "mouse_uid")
+
+    mice = mice.prefetch_related(
+        "genotype_components__strain_line",
+        "genotypes__gene",
+    )
+
+    if age_sort == "":
+        next_age_sort: str | None = "old"
+    elif age_sort == "old":
+        next_age_sort = "young"
+    else:
+        next_age_sort = None
+    age_sort_qs = _mouse_list_age_sort_querystring(request, next_age_sort)
+    age_sort_href = reverse("mice:mouse_list")
+    if age_sort_qs:
+        age_sort_href = f"{age_sort_href}?{age_sort_qs}"
+
+    current_cage_options = Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id")
+    project_options = (
+        Project.objects.filter(id__in=mice.values_list("project_id", flat=True)).distinct().order_by("name")
+    )
+
+    page_ctx = paginate_queryset_for_list(request, mice, viewname="mice:mouse_list")
+    mice_page = list(page_ctx.pop("items"))
+
     context = {
-        "mice": mice,
+        "mice": mice_page,
         "query": query,
         "sex": sex,
         "status": status,
@@ -1071,16 +1213,19 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "current_cage": current_cage,
         "project": project,
         "include_inactive": include_inactive,
+        "age_sort": age_sort,
+        "age_sort_href": age_sort_href,
         "sex_options": Mouse.Sex.choices,
         "status_options": Mouse.Status.choices,
         "strain_line_options": Mouse._meta.get_field("strain_line").related_model.objects.order_by("line_name"),
-        "current_cage_options": Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id"),
-        "project_options": Project.objects.filter(id__in=mice.values_list("project_id", flat=True)).distinct().order_by("name"),
+        "current_cage_options": current_cage_options,
+        "project_options": project_options,
+        "list_all_max": LIST_ALL_RESULTS_MAX,
+        **page_ctx,
     }
     today = timezone.localdate()
-    for m in mice:
-        if not m.genotype_summary:
-            m.genotype_summary = build_short_genotype_summary(m)
+    for m in mice_page:
+        m.genotype_summary = build_short_genotype_summary(m)
         m.list_age_band = mouse_list_age_band(m.birth_date, today)
         if m.birth_date:
             age_days = (today - m.birth_date).days

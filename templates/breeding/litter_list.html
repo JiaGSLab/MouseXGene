@@ -14,35 +14,35 @@
     </div>
 </section>
 
-<section class="card">
+<section class="card card--filters">
     <form method="get" class="filter-grid filter-grid-litter">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search litter id, breeding, sire/dam UID" class="search-input">
-        <select name="weaned">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search litter id, breeding, sire/dam UID" class="search-input filter-control">
+        <select name="weaned" class="filter-control">
             <option value="">Weaned / Not weaned</option>
             <option value="yes" {% if weaned == "yes" %}selected{% endif %}>Weaned</option>
             <option value="no" {% if weaned == "no" %}selected{% endif %}>Not weaned</option>
         </select>
-        <select name="litter_status">
+        <select name="litter_status" class="filter-control">
             <option value="">All statuses</option>
             {% for value, label in litter_status_options %}
                 <option value="{{ value }}" {% if litter_status == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
-        <select name="breeding">
+        <select name="breeding" class="filter-control">
             <option value="">All breedings</option>
             {% for item in breeding_options %}
                 <option value="{{ item.pk }}" {% if breeding == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.breeding_code }}</option>
             {% endfor %}
         </select>
-        <input type="date" name="birth_date_from" value="{{ birth_date_from }}" title="Birth from">
-        <input type="date" name="birth_date_to" value="{{ birth_date_to }}" title="Birth to">
-        <select name="include_inactive">
+        <input type="date" name="birth_date_from" value="{{ birth_date_from }}" title="Birth from" class="filter-control">
+        <input type="date" name="birth_date_to" value="{{ birth_date_to }}" title="Birth to" class="filter-control">
+        <select name="include_inactive" class="filter-control">
             <option value="">Open workflow only</option>
             <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include ended / archived</option>
         </select>
-        <div class="form-actions">
+        <div class="form-actions filter-actions">
             <button type="submit" class="button">Apply</button>
-            <a href="{% url 'litters:litter_list' %}" class="button button-light">Reset</a>
+            <a href="{% url 'litters:litter_list' %}" class="button button-reset">Reset</a>
         </div>
     </form>
 </section>

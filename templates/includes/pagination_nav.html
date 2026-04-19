@@ -1,0 +1,17 @@
+{% if page_obj and page_obj.paginator.num_pages > 1 and pagination_hrefs %}
+<nav class="pagination-nav" aria-label="Page navigation">
+    {% if pagination_hrefs.first %}
+        <a class="button button-ghost pagination-nav__edge" href="{{ pagination_hrefs.first }}">First</a>
+    {% endif %}
+    {% if pagination_hrefs.prev %}
+        <a class="button button-ghost" href="{{ pagination_hrefs.prev }}">Previous</a>
+    {% endif %}
+    <span class="pagination-nav__status muted">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if pagination_hrefs.next %}
+        <a class="button button-ghost" href="{{ pagination_hrefs.next }}">Next</a>
+    {% endif %}
+    {% if pagination_hrefs.last %}
+        <a class="button button-ghost pagination-nav__edge" href="{{ pagination_hrefs.last }}">Last</a>
+    {% endif %}
+</nav>
+{% endif %}

@@ -75,26 +75,105 @@ def home(request: HttpRequest) -> HttpResponse:
     )
 
     dashboard_list_limit = 8
+    total_cages = cages_queryset.count()
+    active_cages = cages_queryset.filter(status=Cage.Status.ACTIVE).count()
+    total_mice = mice_queryset.count()
+    active_mice = active_mice_qs.count()
+    mice_without_cage_count = mice_without_cage_qs.count()
+    mice_without_genotype_count = mice_without_genotype_qs.count()
+    cages_without_mice_count = cages_without_mice_qs.count()
+    weaning_due_soon_count = weaning_due_soon_qs.count()
+    breeding_without_litter_count = breeding_without_litter_qs.count()
+    pups_lacking_genotype_count = pups_lacking_genotype_qs.count()
+    empty_active_cages_long_count = empty_active_cages_long_qs.count()
+
+    weaning_due_soon = list(weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit])
+    mice_without_cage = list(mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit])
+    mice_without_genotype = list(mice_without_genotype_qs.order_by("mouse_uid")[:dashboard_list_limit])
+    cages_without_mice = list(cages_without_mice_qs[:dashboard_list_limit])
+    breeding_without_litter = list(breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit])
+    pups_lacking_genotype = list(pups_lacking_genotype_qs[:dashboard_list_limit])
+    empty_active_cages_long = list(empty_active_cages_long_qs[:dashboard_list_limit])
+
+    dashboard_alerts = [
+        {
+            "kind": "weaning",
+            "title": "Weaning Due Soon",
+            "list_url": "litters:litter_list",
+            "count": weaning_due_soon_count,
+            "items": weaning_due_soon,
+        },
+        {
+            "kind": "mice_no_cage",
+            "title": "Mice Without Current Cage",
+            "list_url": "mice:mouse_list",
+            "count": mice_without_cage_count,
+            "items": mice_without_cage,
+        },
+        {
+            "kind": "mice_no_genotype",
+            "title": "Mice Without Genotype Records",
+            "list_url": "mice:mouse_list",
+            "count": mice_without_genotype_count,
+            "items": mice_without_genotype,
+        },
+        {
+            "kind": "cages_no_mice",
+            "title": "Cages With No Current Mice",
+            "list_url": "colony:cage_list",
+            "count": cages_without_mice_count,
+            "items": cages_without_mice,
+        },
+        {
+            "kind": "breeding_no_litter",
+            "title": "Active/Plugged Breedings Without Litters",
+            "list_url": "breeding:breeding_list",
+            "count": breeding_without_litter_count,
+            "items": breeding_without_litter,
+        },
+        {
+            "kind": "pups_no_genotype",
+            "title": "Tail-tagged Pups Missing Genotype",
+            "list_url": "litters:litter_list",
+            "count": pups_lacking_genotype_count,
+            "items": pups_lacking_genotype,
+        },
+        {
+            "kind": "empty_cages_long",
+            "title": "Active Cages Empty >14 Days",
+            "list_url": "colony:cage_list",
+            "count": empty_active_cages_long_count,
+            "items": empty_active_cages_long,
+        },
+    ]
+    dashboard_alerts.sort(key=lambda a: (0 if a["count"] > 0 else 1, -a["count"]))
+
+    inactive_cages = total_cages - active_cages
+    inactive_mice = total_mice - active_mice
+
     context = {
         "dashboard_list_limit": dashboard_list_limit,
-        "total_cages": cages_queryset.count(),
-        "active_cages": cages_queryset.filter(status=Cage.Status.ACTIVE).count(),
-        "total_mice": mice_queryset.count(),
-        "active_mice": active_mice_qs.count(),
-        "mice_without_cage_count": mice_without_cage_qs.count(),
-        "mice_without_genotype_count": mice_without_genotype_qs.count(),
-        "cages_without_mice_count": cages_without_mice_qs.count(),
-        "weaning_due_soon_count": weaning_due_soon_qs.count(),
-        "breeding_without_litter_count": breeding_without_litter_qs.count(),
-        "pups_lacking_genotype_count": pups_lacking_genotype_qs.count(),
-        "empty_active_cages_long_count": empty_active_cages_long_qs.count(),
-        "mice_without_cage": mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit],
-        "mice_without_genotype": mice_without_genotype_qs.order_by("mouse_uid")[:dashboard_list_limit],
-        "cages_without_mice": cages_without_mice_qs[:dashboard_list_limit],
-        "weaning_due_soon": weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit],
-        "breeding_without_litter": breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit],
-        "pups_lacking_genotype": pups_lacking_genotype_qs[:dashboard_list_limit],
-        "empty_active_cages_long": empty_active_cages_long_qs[:dashboard_list_limit],
+        "total_cages": total_cages,
+        "active_cages": active_cages,
+        "total_mice": total_mice,
+        "active_mice": active_mice,
+        "inactive_cages": inactive_cages,
+        "inactive_mice": inactive_mice,
+        "mice_without_cage_count": mice_without_cage_count,
+        "mice_without_genotype_count": mice_without_genotype_count,
+        "cages_without_mice_count": cages_without_mice_count,
+        "weaning_due_soon_count": weaning_due_soon_count,
+        "breeding_without_litter_count": breeding_without_litter_count,
+        "pups_lacking_genotype_count": pups_lacking_genotype_count,
+        "empty_active_cages_long_count": empty_active_cages_long_count,
+        "mice_without_cage": mice_without_cage,
+        "mice_without_genotype": mice_without_genotype,
+        "cages_without_mice": cages_without_mice,
+        "weaning_due_soon": weaning_due_soon,
+        "breeding_without_litter": breeding_without_litter,
+        "pups_lacking_genotype": pups_lacking_genotype,
+        "empty_active_cages_long": empty_active_cages_long,
+        "dashboard_alerts": dashboard_alerts,
         "recent_mice": mice_queryset.select_related("strain_line", "current_cage").order_by("-created_at")[
             :dashboard_list_limit
         ],

@@ -1,0 +1,79 @@
+{% if alert.kind == "weaning" %}
+    <ul class="mini-list">
+        {% for litter in alert.items %}
+            <li>
+                <a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_code|default:litter.pk }}</a>
+                - {{ litter.birth_date }}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "mice_no_cage" %}
+    <ul class="mini-list">
+        {% for mouse in alert.items %}
+            <li>
+                <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
+                {% if mouse.strain_line %} - {{ mouse.strain_line }}{% endif %}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "mice_no_genotype" %}
+    <ul class="mini-list">
+        {% for mouse in alert.items %}
+            <li>
+                <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
+                {% if mouse.current_cage %}
+                    -
+                    <a href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                {% endif %}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "cages_no_mice" %}
+    <ul class="mini-list">
+        {% for cage in alert.items %}
+            <li>
+                <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
+                {% if cage.room %} - {{ cage.room }}{% endif %}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "breeding_no_litter" %}
+    <ul class="mini-list">
+        {% for breeding in alert.items %}
+            <li>
+                <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
+                - {{ breeding.get_status_display }}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "pups_no_genotype" %}
+    <ul class="mini-list">
+        {% for pup in alert.items %}
+            <li>
+                <a href="{% url 'litters:litter_detail' pup.litter.pk %}">{{ pup.litter.litter_id_display }}</a>
+                - {% if pup.mouse %}<a href="{% url 'mice:mouse_detail' pup.mouse.pk %}">{{ pup.mouse.mouse_uid }}</a>{% else %}Unlinked pup{% endif %}
+                - tail-tag {{ pup.tail_tag_date|date:"Y-m-d" }}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "empty_cages_long" %}
+    <ul class="mini-list">
+        {% for cage in alert.items %}
+            <li><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a> - updated {{ cage.updated_at|date:"Y-m-d" }}</li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% endif %}

@@ -5,45 +5,94 @@
 {% block content %}
 <section class="page-header">
     <h1>Guide</h1>
-    <p class="muted">MouseXGene 使用指南（中文）</p>
+    <p class="muted">MouseXGene 使用指南（中文）：面向日常进笼、繁殖与数据维护的实操说明。</p>
 </section>
 
 <section class="card guide-card">
-    <h2>A. 系统概览</h2>
+    <h2>1. 系统能做什么</h2>
     <p>
-        MouseXGene 用于实验室日常协作管理，覆盖 <strong>Projects</strong>、<strong>Mice</strong>、<strong>Cages</strong>、
-        <strong>Breedings</strong>、<strong>Litters</strong>、<strong>Strain Lines</strong>、
-        <strong>Genotypes</strong> 等核心对象。系统强调数据可追溯、状态可管理（active / archived / euthanized / retired）、
-        以及 import / export 的批量处理能力。
+        MouseXGene 把实验室里常用的对象串成一条可追溯的链路：
+        <strong>Projects</strong>（课题与归属）、<strong>Strain Lines</strong>（品系命名）、<strong>Cages</strong>（笼位与位置）、
+        <strong>Mice</strong>（个体身份与状态）、<strong>Genotypes</strong>（基因型记录）、
+        <strong>Breedings</strong> 与 <strong>Litters</strong>（交配设置与产仔/离乳流程）。
+        列表页支持搜索与筛选；多数对象支持 <strong>CSV / Excel 导出</strong>；有权限的用户可使用 <strong>批量导入</strong>。
     </p>
 </section>
 
 <section class="card guide-card">
-    <h2>B. 推荐使用流程</h2>
-    <ol class="guide-list">
-        <li>先确认或新建 <strong>Strain Line</strong>，保证后续 Mouse 和 Genotype 记录有统一命名基础。</li>
-        <li>新建 <strong>Cage</strong>；如果使用 import Mouse 且开启自动创建，也可在导入时自动补齐 Cage。</li>
-        <li>新建或 import <strong>Mouse</strong>，优先保证核心身份字段完整。</li>
-        <li>补录或 import <strong>Genotype</strong>，完善每只 Mouse 的遗传信息。</li>
-        <li>记录 <strong>Breeding</strong> 和 <strong>Litter</strong>，形成连续繁殖与后代追踪链路。</li>
-    </ol>
-</section>
-
-<section class="card guide-card">
-    <h2>C. Import 说明</h2>
+    <h2>2. 首页（Dashboard）</h2>
     <ul class="guide-list">
-        <li>支持 import <strong>Cage</strong>、import <strong>Mouse</strong>、import <strong>Genotype</strong>。</li>
-        <li>Mouse 导入支持 mouse-centered import with genotype slots（单文件导入 Mouse + 分组基因型列）。</li>
-        <li>导入时可按选项自动创建依赖对象：<strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>。</li>
-        <li>常见失败原因：必填列缺失、日期格式不正确、重复主键、引用对象无法解析、字段取值超出允许范围。</li>
-        <li>涉及 sire / dam 时，父母需要已存在，或与当前 Mouse 在同一个导入文件中可被解析。</li>
+        <li><strong>统计卡片</strong>：总笼位数、活跃笼位、总小鼠数、活跃小鼠数；图标分别对应笼架与小鼠，便于一眼区分。</li>
+        <li><strong>数据质量提示</strong>：例如缺基因型摘要、缺出生日期等，用于提醒补录。</li>
+        <li><strong>Quick Actions</strong>：新建小鼠、笼位、（有权限时）新建交配、导入与导出入口集中在「更多」折叠区，避免首屏过于拥挤。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
-    <h2>D. 权限说明</h2>
+    <h2>3. 列表页通用操作（Mice / Cages / 等）</h2>
+    <ul class="guide-list">
+        <li><strong>搜索与筛选</strong>：顶栏为常用条件；「More filters」里是次要条件（例如是否包含非活跃记录）。字号与主筛选区一致，避免误点。</li>
+        <li><strong>Mice / Cages 列表</strong>：筛选区底部可选择<strong>每页条数</strong>（25 / 50 / 100），变更后会自动刷新；当筛选结果总数 ≤500 时可选<strong>全部</strong>一次展示；超过 500 条时「全部」不可用并会提示改用筛选或导出。表格下方有分页链接（多于 1 页时显示）。</li>
+        <li><strong>Mice 列表</strong>：<strong>Mouse UID</strong> 为进入个体详情页的链接；<strong>Age</strong> 列标题可点击，在「最年长优先 → 最年幼优先 → 恢复默认排序」之间循环；无出生日期的个体会排在同模式下的末尾。</li>
+        <li><strong>Project / Owner</strong>：<strong>Project</strong> 与 <strong>Owner</strong>（课题负责人显示名）为两列，便于区分同名课题。</li>
+        <li><strong>年龄提示</strong>：缺生日会标「Age unknown」；高龄阈值（如 ≥6 月 / ≥1 年）在表头说明中有解释。</li>
+        <li><strong>More actions</strong>：导出、基因型相关入口等放在工具栏折叠区，与主按钮区分层级。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>4. Breedings 与 Litters</h2>
+    <ul class="guide-list">
+        <li><strong>Breedings</strong>：描述一对（或多雌）交配设置、笼位、状态与关键日期；搜索框与下拉框样式与 Mice/Cages 列表对齐，便于跨页切换时视觉一致。</li>
+        <li><strong>Litters</strong>：对应一次分娩批次；可记录离乳、尾标、与 workflow 状态。日期范围、是否已离乳等筛选项与主列表控件高度、字号一致。</li>
+        <li>两页之间可用页头按钮互相跳转；具体编辑权限以服务器端校验为准。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>5. Strain Lines</h2>
     <p>
-        系统采用基于角色（role）的权限控制。不同角色在“查看、编辑、导入、归档、项目管理、用户管理、审计查看”等方面拥有不同权限。下表用于快速说明各角色的主要能力范围。
+        品系行是基因命名与统计的「锚点」。列表顶部为单行搜索 + 状态下拉 + 应用/重置，布局与 Mice/Cages 的筛选条一致。
+        行内数字可链到对应小鼠、笼位、交配或产仔列表，用于从品系下钻到个体。
+    </p>
+</section>
+
+<section class="card guide-card">
+    <h2>6. Pedigree（谱系）</h2>
+    <p>
+        从小鼠详情进入 <strong>View Pedigree</strong> 后，页面以<strong>树状结构</strong>展示：上方为父母节点，经竖线汇聚到中间的<strong>焦点个体</strong>，下方分支列出同窝与后代，并用横线模拟树枝连接，便于快速扫读关系。
+        所有 UID 仍可点击进入对应小鼠详情。
+    </p>
+</section>
+
+<section class="card guide-card">
+    <h2>7. 推荐录入顺序（新课题）</h2>
+    <ol class="guide-list">
+        <li>确认或新建 <strong>Strain Line</strong>，保证命名与统计口径统一。</li>
+        <li>新建 <strong>Project</strong> 并指定 <strong>Owner</strong>；后续小鼠、导出与协作范围常与此挂钩。</li>
+        <li>新建 <strong>Cage</strong>；若使用导入且开启自动创建，也可在导入小鼠时补笼。</li>
+        <li>新建或导入 <strong>Mouse</strong>，优先保证 UID、性别、品系、笼位、课题等核心字段。</li>
+        <li>补录或导入 <strong>Genotype</strong>，完善遗传信息。</li>
+        <li>按实验记录 <strong>Breeding</strong> / <strong>Litter</strong>，形成繁殖与后代链路。</li>
+    </ol>
+</section>
+
+<section class="card guide-card">
+    <h2>8. Import / Export</h2>
+    <ul class="guide-list">
+        <li>支持导入 <strong>Cage</strong>、<strong>Mouse</strong>、<strong>Genotype</strong>；小鼠导入可采用「单文件含基因型列」的格式。</li>
+        <li>导入选项可自动创建缺失的 <strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>，减少手工前置维护。</li>
+        <li>常见失败原因：必填列缺失、日期格式错误、主键重复、引用无法解析、枚举值越界。</li>
+        <li>父母（sire/dam）须已存在，或与当前小鼠出现在同一导入文件中以便解析。</li>
+        <li>导出：在对应列表或首页「更多」中使用 CSV/Excel；导出范围仍受权限与数据范围约束。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>9. 权限说明（摘要）</h2>
+    <p>
+        系统按角色控制「谁能看、谁能改、谁能导入/归档、谁能管课题成员、谁能看审计」等。
+        下表为常见能力对比；若与贵实验室策略不一致，以管理员配置为准。
     </p>
     <div class="table-wrap guide-table-wrap">
         <table class="data-table guide-table">
@@ -57,90 +106,70 @@
             </thead>
             <tbody>
                 <tr>
-                    <td>查看全部业务数据（Mice / Cages / Breedings / Litters / Genotypes / Strain Lines）</td>
+                    <td>查看业务数据（Mice / Cages / Breedings / Litters / Genotypes / Strain Lines 等）</td>
                     <td>是</td><td>是</td><td>是</td>
                 </tr>
                 <tr>
-                    <td>新建普通业务记录</td>
+                    <td>新建 / 编辑常规业务记录</td>
                     <td>是</td><td>是</td><td>是</td>
                 </tr>
                 <tr>
-                    <td>编辑普通业务记录</td>
+                    <td>导入（import）</td>
+                    <td>是</td><td>是</td><td>否</td>
+                </tr>
+                <tr>
+                    <td>导出（export）</td>
                     <td>是</td><td>是</td><td>是</td>
                 </tr>
                 <tr>
-                    <td>导入数据（import）</td>
+                    <td>归档 / 停用（archive / deactivate 等终态）</td>
                     <td>是</td><td>是</td><td>否</td>
                 </tr>
                 <tr>
-                    <td>导出数据（export）</td>
-                    <td>是</td><td>是</td><td>是</td>
-                </tr>
-                <tr>
-                    <td>归档 / 停用记录（archive / deactivate）</td>
+                    <td>新建 / 编辑 Project，管理课题成员</td>
                     <td>是</td><td>是</td><td>否</td>
                 </tr>
                 <tr>
-                    <td>新建 Project</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>编辑 Project</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>管理 Project 成员</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>查看 Audit</td>
+                    <td>查看 Audit（审计日志）</td>
                     <td>是</td><td>否</td><td>否</td>
                 </tr>
                 <tr>
-                    <td>管理全局 Users / roles</td>
-                    <td>是</td><td>否</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>进入 Django Admin</td>
+                    <td>管理全局用户与角色、进入 Django Admin</td>
                     <td>是</td><td>否</td><td>否</td>
                 </tr>
             </tbody>
         </table>
     </div>
-    <p><strong>说明：</strong></p>
-    <ol class="guide-list">
-        <li>“普通业务记录”通常包括 Mouse、Cage、Breeding、Litter、Genotype 等实验室日常数据。</li>
-        <li>Manager 和 Member 均可参与日常协作录入，但高风险操作（如 import、archive、权限管理、Audit 查看）会受到限制。</li>
-        <li>Admin 负责系统级管理；Manager 负责业务管理；Member 主要负责日常使用与记录维护。</li>
-    </ol>
 </section>
 
 <section class="card guide-card">
-    <h2>E. 状态说明</h2>
+    <h2>10. 状态与列表中的灰色行</h2>
     <ul class="guide-list">
-        <li><strong>active</strong>：正常在用状态，默认优先展示。</li>
-        <li><strong>inactive</strong>：非活跃状态，通常表示暂不使用或待观察。</li>
-        <li><strong>archived</strong>：已归档，保留历史记录但不作为日常工作重点。</li>
-        <li><strong>euthanized</strong>：Mouse 已执行安乐，记录仍保留用于追溯。</li>
-        <li><strong>retired</strong>：Cage 或其他对象已退役，不再用于当前流程。</li>
+        <li><strong>active</strong>：日常默认展示的主状态。</li>
+        <li><strong>inactive</strong>：非活跃，可能暂停使用或待处理。</li>
+        <li><strong>archived</strong>：归档保留历史，通常不作为当前工作重点。</li>
+        <li><strong>euthanized</strong>：小鼠已安乐，记录保留用于追溯。</li>
+        <li><strong>retired</strong> 等：笼位或其它对象已退役。列表中灰色行多表示非活跃/归档类状态。</li>
     </ul>
-    <p>列表中灰色显示通常表示对象处于 inactive / archived / retired 等非活跃状态。</p>
 </section>
 
 <section class="card guide-card">
-    <h2>F. 常见问题</h2>
+    <h2>11. 常见问题</h2>
     <dl class="guide-faq">
-        <dt>为什么有些对象不会被真正删除？</dt>
-        <dd>系统采用历史保留策略，优先使用 archive / deactivate，避免影响审计和追溯链路。</dd>
+        <dt>为什么很少「硬删除」记录？</dt>
+        <dd>优先使用归档或终态标记，避免破坏审计与谱系链条。</dd>
 
-        <dt>为什么 sire / dam 需要先存在或在同一个 import 文件中？</dt>
-        <dd>因为父母关系需要在导入流程中解析到具体 Mouse，系统才能建立正确谱系。</dd>
+        <dt>导入时为什么父母找不到？</dt>
+        <dd>系统要把 sire/dam 解析成已存在的小鼠记录；请预先录入或放在同一导入文件中解析。</dd>
 
-        <dt>为什么 Strain Line / Project / Cage 可能会自动创建？</dt>
-        <dd>当导入选项开启自动创建时，系统会补齐缺失依赖，减少手工前置维护。</dd>
+        <dt>为什么会自动创建 Strain Line / Project / Cage？</dt>
+        <dd>开启对应导入选项时，会为缺失依赖自动建占位对象，减少打断导入流程。</dd>
 
-        <dt>为什么有些记录会显示为灰色？</dt>
-        <dd>灰色通常表示记录不是 active 状态（例如 archived / inactive / retired），用于提醒非日常主流程对象。</dd>
+        <dt>列表里有些行发灰是什么意思？</dt>
+        <dd>多表示非活跃或归档状态，提醒不要与当前主流程混淆。</dd>
+
+        <dt>Project 后面的人名是谁？</dt>
+        <dd>一般为课题 <strong>Owner</strong> 的显示名（或全名/用户名），用于识别负责人。</dd>
     </dl>
 </section>
 {% endblock %}

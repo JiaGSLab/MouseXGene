@@ -8,43 +8,40 @@
         <h1>Strain Lines</h1>
         <p class="muted">Master genetic components for compound/multi-line crosses.</p>
     </div>
-    <div class="action-links">
+    <div class="action-links action-links--primary">
         <a href="{% url 'colony:strain_line_create' %}" class="button">New Strain Line</a>
     </div>
 </section>
 
-<section class="card">
-    <form method="get" class="filter-grid">
-        <div>
-            <label for="id_q">Search</label>
-            <input id="id_q" class="search-input" type="text" name="q" value="{{ q }}" placeholder="name, short_name, category, locus">
-        </div>
-        <div>
-            <label for="id_active">Status</label>
-            <select id="id_active" name="active">
-                <option value="">All</option>
+<section class="card card--filters">
+    <form method="get" class="filter-form">
+        <div class="filter-row filter-row--primary">
+            <input id="id_q" class="search-input filter-control" type="text" name="q" value="{{ q }}" placeholder="Search name, short name, category, locus" aria-label="Search strain lines">
+            <select id="id_active" name="active" class="filter-control" aria-label="Strain line status">
+                <option value="">All status</option>
                 <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
                 <option value="no" {% if active == "no" %}selected{% endif %}>Inactive</option>
             </select>
-        </div>
-        <div>
-            <button type="submit" class="button">Apply</button>
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'colony:strain_line_list' %}" class="button button-reset">Reset</a>
+            </div>
         </div>
     </form>
 </section>
 
-<section class="table-wrap">
-    <table class="data-table">
+<section class="table-wrap table-wrap--data">
+    <table class="data-table data-table--compact data-table--striped">
         <thead>
             <tr>
                 <th>Name</th>
                 <th>Short Name</th>
                 <th>Category</th>
                 <th>Gene/Locus</th>
-                <th>Active Mice</th>
-                <th>Active Cages</th>
-                <th>Active Breedings</th>
-                <th>Active Litters</th>
+                <th class="col-num-right">Active Mice</th>
+                <th class="col-num-right">Active Cages</th>
+                <th class="col-num-right">Active Breedings</th>
+                <th class="col-num-right">Active Litters</th>
                 <th>Status</th>
                 <th></th>
             </tr>
@@ -53,19 +50,19 @@
             {% for line in lines %}
                 <tr class="{% if not line.is_active %}row-inactive{% endif %}">
                     <td>
-                        <a href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">
+                        <a class="table-link table-link--strong" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">
                             {{ line.name|default:line.line_name }}
                         </a>
                     </td>
                     <td>{{ line.short_name|default:line.display_name|default:line.line_name }}</td>
                     <td>{{ line.get_category_display }}</td>
                     <td>{{ line.gene_or_locus|default:"-" }}</td>
-                    <td><a href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
-                    <td><a href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
-                    <td><a href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
-                    <td><a href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
-                    <td><span class="status-pill">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
-                    <td><a href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
+                    <td class="col-num-right"><a class="table-link" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
+                    <td class="col-num-right"><a class="table-link" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
+                    <td class="col-num-right"><a class="table-link" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
+                    <td class="col-num-right"><a class="table-link" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
+                    <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
+                    <td><a class="table-link" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
                 </tr>
             {% empty %}
                 <tr>
