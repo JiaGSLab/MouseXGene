@@ -25,19 +25,22 @@
         <thead>
             <tr>
                 <th>Mouse</th>
-                <th>Sire</th>
-                <th>Dam</th>
+                <th>Sire (Father)</th>
+                <th>Dam (Mother)</th>
                 <th>Cage</th>
                 <th>Strain</th>
+                <th>Genotype</th>
+                <th>Project</th>
+                <th>Owner</th>
                 <th>Pedigree</th>
             </tr>
         </thead>
         <tbody>
             {% for m in mice %}
                 <tr>
-                    <td><a href="{% url 'mice:mouse_detail' m.pk %}">{{ m.mouse_uid }}</a></td>
-                    <td>{% if m.sire %}<a href="{% url 'mice:mouse_detail' m.sire.pk %}">{{ m.sire.mouse_uid }}</a>{% else %}-{% endif %}</td>
-                    <td>{% if m.dam %}<a href="{% url 'mice:mouse_detail' m.dam.pk %}">{{ m.dam.mouse_uid }}</a>{% else %}-{% endif %}</td>
+                    <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">{{ m.mouse_uid }}</a></td>
+                    <td>{% if m.sire %}<a class="link-primary" href="{% url 'mice:mouse_pedigree' m.sire.pk %}">{{ m.sire.mouse_uid }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if m.dam %}<a class="link-primary" href="{% url 'mice:mouse_pedigree' m.dam.pk %}">{{ m.dam.mouse_uid }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if m.current_cage %}
                             <a href="{% url 'colony:cage_detail' m.current_cage.pk %}">{{ m.current_cage }}</a>
@@ -47,15 +50,30 @@
                     </td>
                     <td>
                         {% if m.strain_line %}
-                            <a href="{% url 'mice:mouse_list' %}?strain_line_id={{ m.strain_line.pk }}">{{ m.strain_line }}</a>
+                            <a class="link-primary" href="{% url 'colony:strain_line_detail' m.strain_line.pk %}">{{ m.strain_line }}</a>
                         {% else %}
                             -
                         {% endif %}
                     </td>
-                    <td><a href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
+                    <td>
+                        {% if m.family_genotype_summary %}
+                            {{ m.family_genotype_summary }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if m.project %}
+                            <a class="link-primary" href="{% url 'project_detail' m.project.pk %}">{{ m.project.name }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>{% if m.project %}{{ m.project.owner_display }}{% else %}-{% endif %}</td>
+                    <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="6" class="empty-row">No mice matched your query.</td></tr>
+                <tr><td colspan="9" class="empty-row">No mice matched your query.</td></tr>
             {% endfor %}
         </tbody>
     </table>

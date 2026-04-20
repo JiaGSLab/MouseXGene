@@ -1736,10 +1736,24 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def family_tree(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
-    mice = _scoped_mouse_queryset(request.user).select_related("sire", "dam", "current_cage", "strain_line")
+    mice = (
+        _scoped_mouse_queryset(request.user)
+        .select_related(
+            "sire",
+            "dam",
+            "current_cage",
+            "strain_line",
+            "project",
+            "project__owner",
+            "project__owner__profile",
+        )
+        .prefetch_related("genotype_components__strain_line", "genotypes__gene")
+    )
     if q:
         mice = mice.filter(Q(mouse_uid__icontains=q) | Q(ear_tag__icontains=q) | Q(toe_tag__icontains=q))
-    mice = mice.order_by("-birth_date", "mouse_uid")[:80]
+    mice = list(mice.order_by("-birth_date", "mouse_uid")[:80])
+    for m in mice:
+        m.family_genotype_summary = build_short_genotype_summary(m)
     return render(
         request,
         "colony/family_tree.html",

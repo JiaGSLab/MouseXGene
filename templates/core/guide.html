@@ -5,52 +5,82 @@
 {% block content %}
 <section class="page-header">
     <h1>Guide</h1>
-    <p class="muted">MouseXGene 使用指南（中文）：面向日常进笼、繁殖与数据维护的实操说明。</p>
+    <p class="muted">面向一线使用者的 MouseXGene 实操指南：今天该点哪个页面、先填什么、为什么要这样做。</p>
 </section>
 
 <section class="card guide-card">
-    <h2>1. 系统能做什么</h2>
+    <h2>1. 先理解：你每天在系统里做什么</h2>
     <p>
-        MouseXGene 把实验室里常用的对象串成一条可追溯的链路：
-        <strong>Projects</strong>（课题与归属）、<strong>Strain Lines</strong>（品系命名）、<strong>Cages</strong>（笼位与位置）、
-        <strong>Mice</strong>（个体身份与状态）、<strong>Genotypes</strong>（基因型记录）、
-        <strong>Breedings</strong> 与 <strong>Litters</strong>（交配设置与产仔/离乳流程）。
-        列表页支持搜索与筛选；多数对象支持 <strong>CSV / Excel 导出</strong>；有权限的用户可使用 <strong>批量导入</strong>。
+        把它想成一条实验链路：先有 <strong>Project</strong>（属于哪个课题）、再有 <strong>Strain Line</strong>（品系定义）、
+        再到 <strong>Cage</strong>（笼位）、<strong>Mouse</strong>（个体）、<strong>Genotype</strong>（基因型）、
+        最后是 <strong>Breeding</strong> 与 <strong>Litter</strong>（繁殖过程与后代批次）。
+        系统的核心价值是：<strong>能追溯、能筛选、能导出</strong>，并把每次关键修改记录在履历里。
     </p>
 </section>
 
 <section class="card guide-card">
-    <h2>2. 首页（Dashboard）</h2>
+    <h2>2. 首页（Dashboard）怎么用</h2>
     <ul class="guide-list">
-        <li><strong>统计卡片</strong>：总笼位数、活跃笼位、总小鼠数、活跃小鼠数；图标分别对应笼架与小鼠，便于一眼区分。</li>
-        <li><strong>数据质量提示</strong>：例如缺基因型摘要、缺出生日期等，用于提醒补录。</li>
-        <li><strong>Quick Actions</strong>：新建小鼠、笼位、（有权限时）新建交配、导入与导出入口集中在「更多」折叠区，避免首屏过于拥挤。</li>
+        <li><strong>先看统计</strong>：Total/Active Mice 与 Cages 用于确认库存与在用状态。</li>
+        <li><strong>再看告警</strong>：缺基因型、缺出生日期、繁殖流程异常等，优先补齐“会影响后续判断”的数据。</li>
+        <li><strong>最后执行动作</strong>：Quick Actions 进入新建、导入、导出；“More actions”放低频操作。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
     <h2>3. 列表页通用操作（Mice / Cages / 等）</h2>
     <ul class="guide-list">
-        <li><strong>搜索与筛选</strong>：顶栏为常用条件；「More filters」里是次要条件（例如是否包含非活跃记录）。字号与主筛选区一致，避免误点。</li>
-        <li><strong>Mice / Cages 列表</strong>：筛选区底部可选择<strong>每页条数</strong>（25 / 50 / 100），变更后会自动刷新；当筛选结果总数 ≤500 时可选<strong>全部</strong>一次展示；超过 500 条时「全部」不可用并会提示改用筛选或导出。表格下方有分页链接（多于 1 页时显示）。</li>
-        <li><strong>Mice 列表</strong>：<strong>Mouse UID</strong> 为进入个体详情页的链接；<strong>Age</strong> 列标题可点击，在「最年长优先 → 最年幼优先 → 恢复默认排序」之间循环；无出生日期的个体会排在同模式下的末尾。</li>
-        <li><strong>Project / Owner</strong>：<strong>Project</strong> 与 <strong>Owner</strong>（课题负责人显示名）为两列，便于区分同名课题。</li>
-        <li><strong>年龄提示</strong>：缺生日会标「Age unknown」；高龄阈值（如 ≥6 月 / ≥1 年）在表头说明中有解释。</li>
-        <li><strong>More actions</strong>：导出、基因型相关入口等放在工具栏折叠区，与主按钮区分层级。</li>
+        <li><strong>先筛选再操作</strong>：先缩小范围（q、status、project 等），再编辑/导出，避免误改。</li>
+        <li><strong>More filters</strong>：放次要条件；主筛选区放高频条件，降低误点。</li>
+        <li><strong>分页</strong>：Mice/Cages 支持每页 25/50/100；结果 ≤500 时可选 All。</li>
+        <li><strong>可点击列</strong>：链接一般表示“下钻查看详情”或“带筛选跳转到相关列表”。</li>
+        <li><strong>导出建议</strong>：批量分析或做备份时用导出，单条核对优先在详情页看最新状态。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
-    <h2>4. Breedings 与 Litters</h2>
+    <h2>4. 重点：Breedings 页面到底做什么（交配计划层）</h2>
+    <p>
+        <strong>Breeding</strong> 是“一个交配设置”的记录，不是“已经出生的后代”。
+        你可以把它理解为：<strong>计划与执行中的配对单</strong>。后续是否产仔、产了几窝，都会挂在这个配对单下面。
+    </p>
     <ul class="guide-list">
-        <li><strong>Breedings</strong>：描述一对（或多雌）交配设置、笼位、状态与关键日期；搜索框与下拉框样式与 Mice/Cages 列表对齐，便于跨页切换时视觉一致。</li>
-        <li><strong>Litters</strong>：对应一次分娩批次；可记录离乳、尾标、与 workflow 状态。日期范围、是否已离乳等筛选项与主列表控件高度、字号一致。</li>
-        <li>两页之间可用页头按钮互相跳转；具体编辑权限以服务器端校验为准。</li>
+        <li><strong>什么时候建 Breeding</strong>：当你确认了 male / female（或双母）组合，并开始配对时就建。</li>
+        <li><strong>核心字段意义</strong>：`Breeding code` 是唯一标识；`Cage` 记录配对所在笼；`start_date / plug_date / expected_birth_date` 用于时间管理与提醒。</li>
+        <li><strong>状态怎么理解</strong>：常见是 active/planned/plugged/closed（具体以系统枚举为准）；关闭后通常表示该配对已结束，不再产生新的 workflow 主动作。</li>
+        <li><strong>页面怎么用</strong>：列表页用于看“当前有哪些配对在跑”；详情页用于核对配对信息并进入该 breeding 下的 litter 操作。</li>
+        <li><strong>常见错误</strong>：把“每一窝”当成 Breeding 新建；正确做法是同一对持续配对下，按实际分娩创建多个 litter。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
-    <h2>5. Strain Lines</h2>
+    <h2>5. 重点：Litters 页面到底做什么（后代批次层）</h2>
+    <p>
+        <strong>Litter</strong> 是“某次分娩产生的一批后代”的记录。
+        它是 Breeding 的下游对象，关注的是：<strong>这窝什么时候生、多少只、什么时候离乳、后续是否完成尾标/分拣</strong>。
+    </p>
+    <ul class="guide-list">
+        <li><strong>什么时候建 Litter</strong>：确认有一窝出生时，从对应 breeding 建 litter（而不是反过来）。</li>
+        <li><strong>核心字段意义</strong>：`birth_date` 决定后续离乳时间管理；`litter_size / males / females` 支持资源评估；`wean_date` 标记是否完成离乳节点。</li>
+        <li><strong>状态的业务意义</strong>：active/tailed/weaned/ended/archived（以系统枚举为准）反映流程节点，便于筛选“还要做什么”。</li>
+        <li><strong>页面怎么用</strong>：Litters 列表是“待办看板”——先筛 `not weaned` 看近期任务，再按日期范围或 breeding 缩小到当天工作范围。</li>
+        <li><strong>与 Mice 的关系</strong>：Litter 是“批次层”，Mouse 是“个体层”；通常先把批次流程跑通，再逐只完善个体记录。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>6. Breeding + Litter 的推荐操作流程（用户视角）</h2>
+    <ol class="guide-list">
+        <li>在 <strong>Breedings</strong> 创建/确认配对，检查配对笼与父母个体是否正确。</li>
+        <li>出现分娩后，在该 breeding 下创建 <strong>Litter</strong>，立即补 `birth_date`。</li>
+        <li>日常在 <strong>Litters</strong> 页面按 `not weaned` 与日期筛选，推进离乳、尾标、分拣节点。</li>
+        <li>离乳后更新 litter 状态，并在需要时进入 Mice 逐只补全基因型与归属信息。</li>
+        <li>配对结束后回到 <strong>Breedings</strong> 关闭该 breeding，保持流程闭环。</li>
+    </ol>
+</section>
+
+<section class="card guide-card">
+    <h2>7. Strain Lines</h2>
     <p>
         品系行是基因命名与统计的「锚点」。列表顶部为单行搜索 + 状态下拉 + 应用/重置，布局与 Mice/Cages 的筛选条一致。
         行内数字可链到对应小鼠、笼位、交配或产仔列表，用于从品系下钻到个体。
@@ -58,7 +88,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>6. Pedigree（谱系）</h2>
+    <h2>8. Pedigree（谱系）</h2>
     <p>
         从小鼠详情进入 <strong>View Pedigree</strong> 后，页面以<strong>树状结构</strong>展示：上方为父母节点，经竖线汇聚到中间的<strong>焦点个体</strong>，下方分支列出同窝与后代，并用横线模拟树枝连接，便于快速扫读关系。
         所有 UID 仍可点击进入对应小鼠详情。
@@ -66,7 +96,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>7. 推荐录入顺序（新课题）</h2>
+    <h2>9. 推荐录入顺序（新课题）</h2>
     <ol class="guide-list">
         <li>确认或新建 <strong>Strain Line</strong>，保证命名与统计口径统一。</li>
         <li>新建 <strong>Project</strong> 并指定 <strong>Owner</strong>；后续小鼠、导出与协作范围常与此挂钩。</li>
@@ -78,18 +108,18 @@
 </section>
 
 <section class="card guide-card">
-    <h2>8. Import / Export</h2>
+    <h2>10. Import / Export</h2>
     <ul class="guide-list">
         <li>支持导入 <strong>Cage</strong>、<strong>Mouse</strong>、<strong>Genotype</strong>；小鼠导入可采用「单文件含基因型列」的格式。</li>
         <li>导入选项可自动创建缺失的 <strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>，减少手工前置维护。</li>
         <li>常见失败原因：必填列缺失、日期格式错误、主键重复、引用无法解析、枚举值越界。</li>
         <li>父母（sire/dam）须已存在，或与当前小鼠出现在同一导入文件中以便解析。</li>
-        <li>导出：在对应列表或首页「更多」中使用 CSV/Excel；导出范围仍受权限与数据范围约束。</li>
+        <li>导出：Mice/Cages 导出已按导入字段顺序优先输出，并可附带扩展列（owner、summary、timestamps 等）。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
-    <h2>9. 权限说明（摘要）</h2>
+    <h2>11. 权限说明（摘要）</h2>
     <p>
         系统按角色控制「谁能看、谁能改、谁能导入/归档、谁能管课题成员、谁能看审计」等。
         下表为常见能力对比；若与贵实验室策略不一致，以管理员配置为准。
@@ -143,7 +173,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>10. 状态与列表中的灰色行</h2>
+    <h2>12. 状态与列表中的灰色行</h2>
     <ul class="guide-list">
         <li><strong>active</strong>：日常默认展示的主状态。</li>
         <li><strong>inactive</strong>：非活跃，可能暂停使用或待处理。</li>
@@ -154,7 +184,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>11. 常见问题</h2>
+    <h2>13. 常见问题</h2>
     <dl class="guide-faq">
         <dt>为什么很少「硬删除」记录？</dt>
         <dd>优先使用归档或终态标记，避免破坏审计与谱系链条。</dd>
@@ -170,6 +200,54 @@
 
         <dt>Project 后面的人名是谁？</dt>
         <dd>一般为课题 <strong>Owner</strong> 的显示名（或全名/用户名），用于识别负责人。</dd>
+    </dl>
+</section>
+
+<section class="card guide-card">
+    <h2>14. 新手速查卡（30 秒）</h2>
+    <ol class="guide-list">
+        <li>先看 <strong>Dashboard</strong> 告警，处理“缺关键字段”的数据。</li>
+        <li>建新繁殖：进 <strong>Breedings</strong>，先建配对（不是先建 litter）。</li>
+        <li>有分娩：进该 breeding 下建 <strong>Litter</strong>，先填 `birth_date`。</li>
+        <li>每天任务：在 <strong>Litters</strong> 按 `not weaned` + 日期筛选推进流程。</li>
+        <li>查个体：在 <strong>Mice</strong> 用 UID 搜索，必要时进 pedigree 看家系。</li>
+        <li>批量分析或备份：优先用导出，避免在列表里手工逐条复制。</li>
+        <li>看不懂当前是谁登录：点顶栏 <strong>User: xxx</strong> 进入个人页确认账号。</li>
+    </ol>
+</section>
+
+<section class="card guide-card">
+    <h2>15. 常见报错 FAQ（原因与处理）</h2>
+    <dl class="guide-faq">
+        <dt>导入时报 “Missing required columns”</dt>
+        <dd>文件缺少必需列或列名拼写不一致。请先下载系统模板，对齐列名后再导入。</dd>
+
+        <dt>导入时报 “invalid date ... Use YYYY-MM-DD format”</dt>
+        <dd>日期格式不符合要求。把 Excel/CSV 日期统一成 <code>YYYY-MM-DD</code>（例如 2026-04-20）。</dd>
+
+        <dt>导入时报 “duplicate ... in uploaded file”</dt>
+        <dd>同一个文件里出现重复主键（如重复 cage_id / mouse_uid）。去重后再导入。</dd>
+
+        <dt>导入时报 “... already exists in database”</dt>
+        <dd>数据库已有同名主键。可换新 ID，或按业务先归档旧记录再调整导入策略。</dd>
+
+        <dt>导入时报 “invalid status / invalid cage_type / invalid purpose”</dt>
+        <dd>枚举值超出系统允许范围。请使用下拉页面里可见的标准值，不要自定义拼写。</dd>
+
+        <dt>保存时报权限错误（例如不能编辑/归档）</dt>
+        <dd>当前账号权限不足。请联系 Admin/Manager，或用有权限账号执行该操作。</dd>
+
+        <dt>页面上显示 “No audit entries for this record yet.”</dt>
+        <dd>该记录目前没有可展示的审计条目（可能是老数据或仅有批量汇总日志）。不是系统故障。</dd>
+
+        <dt>导出后再导入失败</dt>
+        <dd>请确认你导入的是“包含导入必需列”的文件；扩展列可以有，但必需列不能删或改名。</dd>
+
+        <dt>为什么筛选结果和预期不一致？</dt>
+        <dd>先点 Reset 清空旧筛选，再逐个条件重新勾选；特别注意 `include inactive` 与分页设置。</dd>
+
+        <dt>为什么改了数据但页面像没更新？</dt>
+        <dd>先刷新并清缓存；若是服务器部署后未更新，优先检查代码同步、容器重建与 collectstatic 是否成功。</dd>
     </dl>
 </section>
 {% endblock %}
