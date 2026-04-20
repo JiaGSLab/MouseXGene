@@ -1,6 +1,4 @@
 {% extends "base.html" %}
-{% load mouse_age_tags %}
-
 {% block title %}Breeding {{ breeding.breeding_code }} | MouseXGene{% endblock %}
 
 {% block content %}
@@ -10,13 +8,14 @@
         <p class="muted">Breeding setup details and status.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'breeding:breeding_list' %}">Back to Breedings</a>
+        <a class="button" href="{% url 'breeding:breeding_list' %}">Back to Breedings</a>
         {% if can_manage_breeding %}
+            <a class="button" href="{% url 'breeding:breeding_edit' breeding.pk %}">Edit Breeding</a>
             <a class="button" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
             {% if breeding.status != "closed" or breeding.active %}
                 <form method="post" action="{% url 'breeding:breeding_end' breeding.pk %}" class="action-inline-form">
                     {% csrf_token %}
-                    <button type="submit" class="button button-light">End Breeding</button>
+                    <button type="submit" class="button">End Breeding</button>
                 </form>
             {% endif %}
         {% endif %}
@@ -27,36 +26,89 @@
     <h2>Basic Information</h2>
     <dl class="detail-grid">
         <dt>Breeding Code</dt><dd>{{ breeding.breeding_code }}</dd>
-        <dt>Cage</dt><dd>{{ breeding.cage }}</dd>
-        <dt>Breeding Type</dt><dd>{{ breeding.get_breeding_type_display }}</dd>
-        <dt>Status</dt><dd>{{ breeding.get_status_display }}</dd>
-        <dt>Active</dt><dd>{{ breeding.active|yesno:"Yes,No" }}</dd>
-    </dl>
-</section>
-
-<section class="card">
-    <h2>Mice</h2>
-    <dl class="detail-grid">
-        <dt>Male</dt>
+        <dt>Cage</dt>
         <dd>
-            <a href="{% url 'mice:mouse_detail' breeding.male.pk %}">{{ breeding.male }}</a>
-            {% mouse_breeding_age_chip breeding.male %}
-        </dd>
-        <dt>Female 1</dt>
-        <dd>
-            <a href="{% url 'mice:mouse_detail' breeding.female_1.pk %}">{{ breeding.female_1 }}</a>
-            {% mouse_breeding_age_chip breeding.female_1 %}
-        </dd>
-        <dt>Female 2</dt>
-        <dd>
-            {% if breeding.female_2 %}
-                <a href="{% url 'mice:mouse_detail' breeding.female_2.pk %}">{{ breeding.female_2 }}</a>
-                {% mouse_breeding_age_chip breeding.female_2 %}
+            {% if breeding.cage %}
+                <a href="{% url 'colony:cage_detail' breeding.cage.pk %}">{{ breeding.cage.cage_id }}</a>
             {% else %}
                 -
             {% endif %}
         </dd>
+        <dt>Breeding Type</dt><dd>{{ breeding.get_breeding_type_display }}</dd>
+        <dt>Status</dt>
+        <dd>
+            <span class="status-pill status-pill-{{ breeding.status }}">{{ breeding.get_status_display }}</span>
+        </dd>
+        <dt>Active</dt>
+        <dd>
+            {% if breeding.active %}
+                <span class="status-pill status-pill-active">Active</span>
+            {% else %}
+                <span class="status-pill status-pill--muted">Inactive</span>
+            {% endif %}
+        </dd>
     </dl>
+    {% if litter_timing_alert %}
+        <p class="muted">
+            <strong>{{ litter_timing_alert.label }}</strong> -
+            {% if latest_litter_date %}
+                latest litter: {{ latest_litter_date }}; {{ litter_timing_alert.days_without_litter }} days since.
+            {% else %}
+                no litter yet; {{ litter_timing_alert.days_without_litter }} days since setup.
+            {% endif %}
+        </p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <h2>Breeder Members</h2>
+    <div class="table-wrap">
+        <table class="data-table data-table--compact">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Mouse UID</th>
+                    <th>Sex</th>
+                    <th>Age (days)</th>
+                    <th>Strain Line</th>
+                    <th>Genotype</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in breeder_member_rows %}
+                    <tr>
+                        <td>{{ row.role }}</td>
+                        <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
+                        <td>{{ row.mouse.get_sex_display }}</td>
+                        <td>{{ row.age_days|default:"-" }}</td>
+                        <td>{{ row.mouse.strain_line|default:"-" }}</td>
+                        <td>{{ row.genotype_summary|default:"-" }}</td>
+                        <td>{{ row.status }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="empty-row">No breeder members recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Expected Offspring Loci (Combined Template)</h2>
+    <p class="muted">
+        Union of loci from sire and dam strain-line templates. These loci are pre-populated as empty genotype rows for offspring.
+        Final genotype values are entered manually after real genotyping.
+    </p>
+    {% if expected_offspring_loci %}
+        <ul class="mini-list">
+            {% for locus in expected_offspring_loci %}
+                <li><code>{{ locus }}</code></li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">No loci template configured on sire/dam strain lines.</p>
+    {% endif %}
 </section>
 
 <section class="card">
@@ -64,42 +116,109 @@
     <dl class="detail-grid">
         <dt>Start Date</dt><dd>{{ breeding.start_date|default:"-" }}</dd>
         <dt>Plug Date</dt><dd>{{ breeding.plug_date|default:"-" }}</dd>
-        <dt>Expected Birth Date</dt><dd>{{ breeding.expected_birth_date|default:"-" }}</dd>
+        <dt>Expected Birth Date</dt><dd>{{ display_expected_birth_date|default:"-" }}</dd>
     </dl>
 </section>
 
 <section class="card">
     <h2>Linked Litters</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Litter ID</th>
-                <th>Birth date</th>
-                <th>Total born</th>
-                <th>Alive</th>
-                <th>Dead</th>
-                <th>Wean date</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for litter in litters %}
-            <tr>
-                <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_id_display }}</a></td>
-                <td>{{ litter.birth_date|default:"-" }}</td>
-                <td>{{ litter.total_born|default:"-" }}</td>
-                <td>{{ litter.alive_count|default:"-" }}</td>
-                <td>{{ litter.dead_count|default:"-" }}</td>
-                <td>{{ litter.wean_date|default:"-" }}</td>
-                <td><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="7" class="empty-row">No litters recorded for this breeding.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table class="data-table data-table--compact">
+            <thead>
+                <tr>
+                    <th>Litter ID</th>
+                    <th>Birth date</th>
+                    <th>Pups</th>
+                    <th>Alive / Dead</th>
+                    <th>Weaning</th>
+                    <th>Tagging</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for litter in litters %}
+                <tr>
+                    <td><a href="{% url 'litters:litter_detail' litter.pk %}">{{ litter.litter_id_display }}</a></td>
+                    <td>{{ litter.birth_date|default:"-" }}</td>
+                    <td>{% if litter.total_born is not None %}{{ litter.total_born }}{% elif litter.alive_count is not None %}{{ litter.alive_count }}{% else %}-{% endif %}</td>
+                    <td>{{ litter.alive_count|default:"-" }} / {{ litter.dead_count|default:"-" }}</td>
+                    <td>
+                        {% if litter.wean_date %}
+                            <span class="status-pill status-pill-active">Weaned</span>
+                            <div class="muted small-print">{{ litter.wean_date }}</div>
+                        {% else %}
+                            <span class="status-pill status-pill--muted">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if litter.tail_tag_date %}
+                            <span class="status-pill status-pill-active">Completed</span>
+                            <div class="muted small-print">{{ litter.tail_tag_date }}</div>
+                        {% else %}
+                            <span class="status-pill status-pill--muted">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="empty-row">No litters recorded for this breeding.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Mendelian Ratio Review (single-locus autosomal)</h2>
+    <p class="muted">
+        Only shown where parent genotypes are sufficiently clear. This is a review aid, not a definitive statistical conclusion.
+    </p>
+    {% if mendelian_reviews %}
+        {% if mendelian_flag_count %}
+            <p><strong>{{ mendelian_flag_count }}</strong> locus/loci flagged for review.</p>
+        {% endif %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Locus</th>
+                    <th>Parents</th>
+                    <th>Expected ratio</th>
+                    <th>Observed counts</th>
+                    <th>Observed %</th>
+                    <th>Review</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in mendelian_reviews %}
+                    <tr>
+                        <td><code>{{ r.locus }}</code></td>
+                        <td>Sire {{ r.parent_genotype.sire }} / Dam {{ r.parent_genotype.dam }}</td>
+                        <td>
+                            {% for k, v in r.expected_ratio.items %}
+                                <div><code>{{ k }}</code>: {{ v|floatformat:2 }}</div>
+                            {% endfor %}
+                        </td>
+                        <td>
+                            {% for k, v in r.observed_counts.items %}
+                                <div><code>{{ k }}</code>: {{ v }}</div>
+                            {% endfor %}
+                            <div class="muted small-print">n={{ r.observed_total }}</div>
+                        </td>
+                        <td>
+                            {% for k, v in r.observed_pct.items %}
+                                <div><code>{{ k }}</code>: {{ v|floatformat:1 }}%</div>
+                            {% endfor %}
+                        </td>
+                        <td>{{ r.message }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="muted">No eligible single-locus autosomal cases for Mendelian review.</p>
+    {% endif %}
 </section>
 
 <section class="card">

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import breeding_create, breeding_detail, breeding_end, breeding_list, litter_create
+from .views import breeding_create, breeding_detail, breeding_edit, breeding_end, breeding_list, litter_create
 
 
 app_name = "breeding"
@@ -8,6 +8,7 @@ app_name = "breeding"
 urlpatterns = [
     path("", breeding_list, name="breeding_list"),
     path("new/", breeding_create, name="breeding_create"),
+    path("<int:pk>/edit/", breeding_edit, name="breeding_edit"),
     path("<int:pk>/end/", breeding_end, name="breeding_end"),
     path("<int:breeding_pk>/litters/new/", litter_create, name="litter_create"),
     path("<int:pk>/", breeding_detail, name="breeding_detail"),

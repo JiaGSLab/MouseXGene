@@ -12,16 +12,16 @@
         {% if can_edit_litter %}
             <a class="button" href="{% url 'litters:litter_edit' litter.pk %}">Edit litter &amp; pups</a>
             {% if not litter.wean_date and litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
-                <a class="button button-light" href="{% url 'litters:litter_wean' litter.pk %}">Wean litter</a>
+                <a class="button" href="{% url 'litters:litter_wean' litter.pk %}">Wean litter</a>
             {% endif %}
             {% if litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
                 <form method="post" action="{% url 'litters:litter_end' litter.pk %}" class="action-inline-form" onsubmit="return confirm('End this litter workflow? You can still view it from archived filters.');">
                     {% csrf_token %}
-                    <button type="submit" class="button button-light">End litter</button>
+                    <button type="submit" class="button">End litter</button>
                 </form>
             {% endif %}
         {% endif %}
-        <a class="button button-light" href="{% url 'litters:litter_list' %}">All litters</a>
+        <a class="button" href="{% url 'litters:litter_list' %}">All litters</a>
     </div>
 </section>
 
@@ -53,26 +53,43 @@
 </section>
 
 <section class="card">
-    <h2>Parents</h2>
-    <dl class="detail-grid">
-        <dt>Sire</dt><dd><a href="{% url 'mice:mouse_detail' litter.breeding.male.pk %}">{{ litter.breeding.male }}</a></dd>
-        <dt>Sire cage</dt>
-        <dd>
-            {% if litter.breeding.male.current_cage %}
-                <a href="{% url 'colony:cage_detail' litter.breeding.male.current_cage.pk %}">{{ litter.breeding.male.current_cage.cage_id }}</a>
-            {% else %}—{% endif %}
-        </dd>
-        <dt>Sire genotype</dt><dd>{{ sire_genotype_summary|default:"-" }}</dd>
-        <dt>Dam</dt><dd><a href="{% url 'mice:mouse_detail' litter.breeding.female_1.pk %}">{{ litter.breeding.female_1 }}</a></dd>
-        <dt>Dam cage</dt>
-        <dd>
-            {% if litter.breeding.female_1.current_cage %}
-                <a href="{% url 'colony:cage_detail' litter.breeding.female_1.current_cage.pk %}">{{ litter.breeding.female_1.current_cage.cage_id }}</a>
-            {% else %}—{% endif %}
-        </dd>
-        <dt>Dam strain</dt><dd>{{ litter.breeding.female_1.strain_line|default:"-" }}</dd>
-        <dt>Dam genotype</dt><dd>{{ dam_genotype_summary|default:"-" }}</dd>
-    </dl>
+    <h2>Breeder members</h2>
+    <div class="table-wrap">
+        <table class="data-table data-table--compact">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Mouse</th>
+                    <th>Cage</th>
+                    <th>Age (days)</th>
+                    <th>Strain line</th>
+                    <th>Genotype</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in breeder_member_rows %}
+                    <tr>
+                        <td>{{ row.role }}</td>
+                        <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
+                        <td>
+                            {% if row.cage %}
+                                <a href="{% url 'colony:cage_detail' row.cage.pk %}">{{ row.cage.cage_id }}</a>
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>{{ row.age_days|default:"-" }}</td>
+                        <td>{{ row.mouse.strain_line|default:"-" }}</td>
+                        <td>{{ row.genotype_summary|default:"-" }}</td>
+                        <td>{{ row.status }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="empty-row">No breeder members recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </section>
 
 <section class="card">

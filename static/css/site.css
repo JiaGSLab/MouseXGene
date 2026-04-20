@@ -1,19 +1,19 @@
 :root {
-    --bg: #f5f7fb;
+    --bg: #edf3f9;
     --card: #ffffff;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --line: #e5e7eb;
-    --primary: #2563eb;
-    --primary-hover: #1d4ed8;
-    --link-table: #4f46e5;
-    --link-table-hover: #4338ca;
-    --success: #16a34a;
-    --success-bg: #f0fdf4;
-    --warning: #d97706;
-    --warning-bg: #fffbeb;
-    --danger: #dc2626;
-    --danger-bg: #fef2f2;
+    --text: #334155;
+    --muted: #64748b;
+    --line: #d2dfef;
+    --primary: #7393b8;
+    --primary-hover: #6483a8;
+    --link-table: #668ab2;
+    --link-table-hover: #567aa2;
+    --success: #5f8a73;
+    --success-bg: #ebf5ef;
+    --warning: #a88958;
+    --warning-bg: #f9f1df;
+    --danger: #b97876;
+    --danger-bg: #faeceb;
     --radius: 8px;
     --font-title: 1.5rem;
     --font-section: 1rem;
@@ -91,9 +91,9 @@ a.link-primary:hover {
 }
 
 .topbar {
-    background: #0f172a;
+    background: #84a2c5;
     color: #fff;
-    border-bottom: 1px solid #111827;
+    border-bottom: 1px solid #7592b4;
 }
 
 .topbar-inner {
@@ -121,7 +121,7 @@ a.link-primary:hover {
 }
 
 .nav a {
-    color: #e5e7eb;
+    color: #f3f4f6;
     font-weight: 500;
 }
 
@@ -139,7 +139,7 @@ a.link-primary:hover {
 .nav-link-button {
     background: none;
     border: none;
-    color: #e5e7eb;
+    color: #f3f4f6;
     font-weight: 500;
     font-family: inherit;
     font-size: inherit;
@@ -152,11 +152,11 @@ a.link-primary:hover {
 }
 
 .nav-current-user {
-    color: #cbd5e1;
+    color: #eef2f7;
     font-weight: 600;
     font-size: 0.8125rem;
     padding: 2px 8px;
-    border: 1px solid rgba(203, 213, 225, 0.35);
+    border: 1px solid rgba(238, 242, 247, 0.4);
     border-radius: 999px;
     white-space: nowrap;
 }
@@ -211,7 +211,7 @@ a.link-primary:hover {
 }
 
 .required-mark {
-    color: #b91c1c;
+    color: #b97876;
     margin-left: 2px;
 }
 
@@ -303,7 +303,7 @@ a.link-primary:hover {
     padding: 9px 14px;
     border-radius: var(--radius);
     background: var(--primary);
-    color: white;
+    color: #ffffff;
     font-weight: 600;
     font-size: var(--font-body);
     border: 1px solid transparent;
@@ -316,10 +316,21 @@ a.link-primary:hover {
 }
 
 .button-light {
-    background: #eef2ff;
-    color: #1e3a8a;
-    border-color: #c7d2fe;
+    background: #e5eef9;
+    color: #456282;
+    border-color: #bfd1e9;
     margin-left: 0;
+}
+
+.button-export {
+    background: #d6e5f6;
+    color: #3f5f86;
+    border-color: #b9d0ea;
+}
+
+.button-export:hover {
+    background: #c9dbf1;
+    color: #355578;
 }
 
 .button-secondary {
@@ -387,7 +398,7 @@ a.link-primary:hover {
 }
 
 .data-table th {
-    background: #f3f4f6;
+    background: #eaf2fb;
     font-weight: 700;
     font-size: 0.8125rem;
     color: #374151;
@@ -395,7 +406,7 @@ a.link-primary:hover {
 }
 
 .data-table tbody tr:hover td {
-    background: #fafafa;
+    background: #edf4fc;
 }
 
 .data-table tbody tr.row-inactive:hover td {
@@ -441,8 +452,13 @@ a.col-uid-link {
 }
 
 .col-genotype {
-    max-width: 220px;
+    min-width: 220px;
+    max-width: 320px;
     white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+    vertical-align: top;
     font-size: 0.8125rem;
     color: #374151;
 }
@@ -498,6 +514,51 @@ a.col-uid-link {
     background: #f3f4f6;
     border-color: #d1d5db;
     color: #4b5563;
+}
+
+.breeding-badge-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.breeding-badge {
+    display: inline-block;
+    margin: 2px 6px 2px 0;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e40af;
+    font-size: 0.76rem;
+    font-weight: 600;
+}
+
+.breeder-members {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.breeder-member-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) minmax(260px, 1fr) auto;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #f8fbff;
+}
+
+.breeder-member-meta,
+.breeder-member-warning {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+.breeder-member-warning {
+    margin-top: -2px;
 }
 
 .status-pill--cage-active {
@@ -713,9 +774,9 @@ a.col-uid-link {
 
 .field-error,
 .form-errors {
-    color: #b91c1c;
-    background: #fef2f2;
-    border: 1px solid #fecaca;
+    color: #915b59;
+    background: #faeceb;
+    border: 1px solid #eac6c4;
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 0.92rem;
@@ -876,9 +937,9 @@ a.col-uid-link {
     margin-left: 8px;
     padding: 2px 8px;
     border-radius: 999px;
-    border: 1px solid #fca5a5;
-    background: #fef2f2;
-    color: #b91c1c;
+    border: 1px solid #e7bbb9;
+    background: #faeceb;
+    color: #915b59;
     font-size: 0.78rem;
     font-weight: 600;
 }
@@ -1058,21 +1119,21 @@ a.col-uid-link {
 }
 
 .age-tier--elevated {
-    background: #fef9c3;
-    color: #854d0e;
-    border: 1px solid #fde047;
+    background: #f9f1df;
+    color: #8e6d3f;
+    border: 1px solid #e8d5b1;
 }
 
 .age-tier--caution {
-    background: #ffedd5;
-    color: #9a3412;
-    border: 1px solid #fdba74;
+    background: #f7ead2;
+    color: #916645;
+    border: 1px solid #e8c79d;
 }
 
 .age-tier--high {
-    background: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background: #faeceb;
+    color: #915b59;
+    border: 1px solid #eac6c4;
 }
 
 .breeding-age-hint {
@@ -1095,13 +1156,13 @@ a.col-uid-link {
 }
 
 .mouse-age-banner {
-    border: 1px solid #fecaca;
-    background: #fef2f2;
+    border: 1px solid #eac6c4;
+    background: #faeceb;
 }
 
 .mouse-age-banner__text {
     margin: 0;
-    color: #7f1d1d;
+    color: #915b59;
     font-size: 0.95rem;
 }
 

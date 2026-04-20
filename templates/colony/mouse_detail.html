@@ -7,46 +7,31 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Mouse {{ mouse.mouse_uid }}</h1>
-        <p class="muted">Workflow hub for this mouse: identity, cage, family, and genotype records.</p>
+        <p class="muted">Workflow hub for this mouse: status, genotype, family, and full record history.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        <a class="button" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
         {% if can_import %}
-            <a class="button button-light" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
+            <a class="button" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
             {% if mouse.status != "euthanized" and mouse.status != "archived" %}
                 <form method="post" action="{% url 'mice:mouse_end' mouse.pk %}" class="action-inline-form">
                     {% csrf_token %}
-                    <button type="submit" class="button button-light">End / Euthanize Mouse</button>
+                    <button type="submit" class="button">End / Euthanize Mouse</button>
                 </form>
             {% endif %}
         {% endif %}
-        <a class="button button-light" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
+        <a class="button" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
     </div>
 </section>
 
 {% mouse_breeding_high_age_banner mouse %}
 
 <section class="card">
-    <h2>Genotype Workspace</h2>
-    <p class="muted">
-        Use this area as the primary place for genotype operations. You can edit structured Genotype Components,
-        review assay-style Genotype Records, and export records for this mouse.
-    </p>
-    <div class="action-links">
-        <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotype Components</a>
-        <a class="button button-light" href="{% url 'genotypes:mouse_genotype_create' %}?mouse={{ mouse.pk }}">Add Genotype Record</a>
-        {% if user.is_authenticated %}
-            <a class="button button-light" href="{% url 'mice:mouse_genotypes_export' mouse.pk %}">Export Genotype Records (CSV)</a>
-            <a class="button button-light" href="{% url 'mice:mouse_genotypes_export_xlsx' mouse.pk %}">Export Genotype Records (Excel)</a>
-        {% endif %}
-    </div>
-</section>
-
-<section class="card">
-    <h2>Basic Information</h2>
+    <h2>Current Status</h2>
     <dl class="detail-grid">
         <dt>Sex</dt><dd>{{ mouse.get_sex_display }}</dd>
-        <dt>Status</dt><dd><span class="status-pill">{{ mouse.get_status_display }}</span></dd>
+        <dt>Status</dt><dd><span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span></dd>
         <dt>Birth Date</dt><dd>{{ mouse.birth_date|default:"-" }}</dd>
         <dt>Death Date</dt><dd>{{ mouse.death_date|default:"-" }}</dd>
         <dt>Euthanasia Date</dt><dd>{{ mouse.euthanasia_date|default:"-" }}</dd>
@@ -60,7 +45,34 @@
                 —
             {% endif %}
         </dd>
-        <dt>Owner</dt><dd>{% if mouse.project %}{{ mouse.project.owner_display }}{% else %}—{% endif %}</dd>
+        <dt>Owner</dt>
+        <dd>
+            {% if mouse.project %}
+                <a class="link-primary" href="{% url 'accounts:user_detail' mouse.project.owner_id %}">{{ mouse.project.owner_display }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Current Cage</dt>
+        <dd>
+            {% if mouse.current_cage %}
+                <a class="link-primary" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+            {% else %}
+                No current cage assigned.
+            {% endif %}
+        </dd>
+        <dt>Active Breeding</dt>
+        <dd>
+            {% if active_breeding_badges %}
+                <div class="breeding-badge-list">
+                    {% for b in active_breeding_badges %}
+                        <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <span class="muted">Not currently assigned to an active breeding.</span>
+            {% endif %}
+        </dd>
         <dt>Ear Tag</dt><dd>{{ mouse.ear_tag|default:"-" }}</dd>
         <dt>Toe Tag</dt><dd>{{ mouse.toe_tag|default:"-" }}</dd>
         <dt>Origin</dt><dd>{{ mouse.origin|default:"-" }}</dd>
@@ -69,71 +81,109 @@
 </section>
 
 <section class="card">
-    <h2>Genotype Summary</h2>
-    <p>{{ genotype_summary|default:"-" }}</p>
-</section>
-
-<section class="cards">
-    <article class="card">
-        <h2>Current Cage</h2>
-        <p>{{ mouse.current_cage|default:"No current cage assigned." }}</p>
-    </article>
-    <article class="card">
-        <h2>Parents</h2>
-        <p><strong>Sire:</strong> {{ mouse.sire|default:"-" }}</p>
-        <p><strong>Dam:</strong> {{ mouse.dam|default:"-" }}</p>
-    </article>
+    <h2>Genotype</h2>
+    <p><strong>Genotype Summary:</strong> {{ genotype_summary|default:"-" }}</p>
+    <div class="action-links">
+        <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
+    </div>
+    <h3>Genotype Components (Current Truth)</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Locus</th>
+                <th>Chromosome</th>
+                <th>Zygosity</th>
+                <th>Zygosity Class</th>
+                <th>Allele 1</th>
+                <th>Allele 2</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for component in genotype_components %}
+            <tr>
+                <td>{{ component.sort_order }}</td>
+                <td>{{ component.locus_name|default:"-" }}</td>
+                <td>{{ component.get_chromosome_type_display }}</td>
+                <td>{{ component.zygosity|default:"-" }}</td>
+                <td>{{ component.get_zygosity_class_display }}</td>
+                <td>{{ component.allele_display_1|default:"-" }}</td>
+                <td>{{ component.allele_display_2|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="7" class="empty-row">No structured genotype components recorded.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <h3>Genotype History</h3>
+    <p class="muted small-print">Genotype history now logs exact locus-level changes (added, updated with before/after, removed).</p>
+    {% if genotype_history_entries %}
+        <div class="table-wrap">
+            <table class="data-table data-table--compact">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in genotype_history_entries %}
+                        <tr>
+                            <td>{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{% if entry.user %}{{ entry.user.get_username }}{% else %}—{% endif %}</td>
+                            <td class="audit-msg">{% if entry.message %}{{ entry.message|linebreaksbr }}{% else %}—{% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">No genotype change entries yet.</p>
+    {% endif %}
 </section>
 
 <section class="card">
     <h2>Family</h2>
-
-    <h3>Father (Sire)</h3>
-    {% if family_sire %}
-        <p>
-            <a href="{% url 'mice:mouse_detail' family_sire.mouse.pk %}">{{ family_sire.mouse.mouse_uid }}</a>
-            - {{ family_sire.mouse.get_sex_display }} - {{ family_sire.mouse.birth_date|default:"-" }}
-            - Cage: {{ family_sire.mouse.current_cage|default:"-" }}
-            - Genotype: {{ family_sire.genotype_summary }}
-        </p>
-    {% else %}
-        <p class="muted">No sire recorded.</p>
-    {% endif %}
-
-    <h3>Mother (Dam)</h3>
-    {% if family_dam %}
-        <p>
-            <a href="{% url 'mice:mouse_detail' family_dam.mouse.pk %}">{{ family_dam.mouse.mouse_uid }}</a>
-            - {{ family_dam.mouse.get_sex_display }} - {{ family_dam.mouse.birth_date|default:"-" }}
-            - Cage: {{ family_dam.mouse.current_cage|default:"-" }}
-            - Genotype: {{ family_dam.genotype_summary }}
-        </p>
-    {% else %}
-        <p class="muted">No dam recorded.</p>
-    {% endif %}
-
+    <dl class="detail-grid">
+        <dt>Sire</dt>
+        <dd>
+            {% if family_sire %}
+                <a href="{% url 'mice:mouse_detail' family_sire.mouse.pk %}">{{ family_sire.mouse.mouse_uid }}</a>
+                · {{ family_sire.genotype_summary }}
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Dam</dt>
+        <dd>
+            {% if family_dam %}
+                <a href="{% url 'mice:mouse_detail' family_dam.mouse.pk %}">{{ family_dam.mouse.mouse_uid }}</a>
+                · {{ family_dam.genotype_summary }}
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+    </dl>
     <h3>Littermates</h3>
     <ul class="mini-list">
         {% for rel in family_littermates %}
             <li>
                 <a href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
-                - {{ rel.mouse.get_sex_display }} - {{ rel.mouse.birth_date|default:"-" }}
-                - Cage: {{ rel.mouse.current_cage|default:"-" }}
-                - Genotype: {{ rel.genotype_summary }}
+                · {{ rel.mouse.get_sex_display }} · {{ rel.genotype_summary }}
             </li>
         {% empty %}
             <li class="muted">No littermates found.</li>
         {% endfor %}
     </ul>
-
     <h3>Offspring</h3>
     <ul class="mini-list">
         {% for rel in family_offspring %}
             <li>
                 <a href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
-                - {{ rel.mouse.get_sex_display }} - {{ rel.mouse.birth_date|default:"-" }}
-                - Cage: {{ rel.mouse.current_cage|default:"-" }}
-                - Genotype: {{ rel.genotype_summary }}
+                · {{ rel.mouse.get_sex_display }} · {{ rel.genotype_summary }}
             </li>
         {% empty %}
             <li class="muted">No offspring found.</li>
@@ -142,7 +192,13 @@
 </section>
 
 <section class="card">
-    <h2>Cage History</h2>
+    <h2>Notes</h2>
+    <p>{{ mouse.notes|default:"No notes." }}</p>
+</section>
+
+<section class="card">
+    <h2>History</h2>
+    <h3>Cage History</h3>
     <table class="data-table">
         <thead>
             <tr>
@@ -171,80 +227,6 @@
             {% endfor %}
         </tbody>
     </table>
+    {% include "includes/record_timeline.html" with created_at=mouse.created_at updated_at=mouse.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by only %}
 </section>
-
-<section class="card">
-    <h2>Genotype Components</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Order</th>
-                <th>Component</th>
-                <th>Category</th>
-                <th>Zygosity</th>
-                <th>Allele 1</th>
-                <th>Allele 2</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for component in genotype_components %}
-            <tr>
-                <td>{{ component.sort_order }}</td>
-                <td>{{ component.strain_line }}</td>
-                <td>{{ component.strain_line.get_category_display }}</td>
-                <td>{{ component.zygosity|default:"-" }}</td>
-                <td>{{ component.allele_display_1|default:"-" }}</td>
-                <td>{{ component.allele_display_2|default:"-" }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="6" class="empty-row">No structured genotype components recorded.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</section>
-
-<section class="card">
-    <h2>Genotype Records</h2>
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th>Gene</th>
-                <th>Locus</th>
-                <th>Allele 1</th>
-                <th>Allele 2</th>
-                <th>Zygosity</th>
-                <th>Confirmed</th>
-                <th>Assay Date</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for gt in genotype_records %}
-            <tr>
-                <td>{{ gt.gene|default:"-" }}</td>
-                <td>{{ gt.locus_name|default:"-" }}</td>
-                <td>{{ gt.allele_1|default:"-" }}</td>
-                <td>{{ gt.allele_2|default:"-" }}</td>
-                <td>{{ gt.zygosity_display|default:"-" }}</td>
-                <td>{{ gt.is_confirmed|yesno:"Yes,No" }}</td>
-                <td>{{ gt.assay_date|default:"-" }}</td>
-                <td><a href="{% url 'genotypes:mouse_genotype_edit' gt.pk %}">Edit</a></td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="8" class="empty-row">No genotype records.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</section>
-
-<section class="card">
-    <h2>Notes</h2>
-    <p>{{ mouse.notes|default:"No notes." }}</p>
-</section>
-
-{% include "includes/record_timeline.html" with created_at=mouse.created_at updated_at=mouse.updated_at audit_entries=audit_entries only %}
 {% endblock %}

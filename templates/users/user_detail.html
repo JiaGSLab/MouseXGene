@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}User Detail | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>User Detail</h1>
+        <p class="muted">Read-only account information for project ownership reference.</p>
+    </div>
+    <div class="toolbar-actions">
+        <a class="button button-light" href="{% url 'mice:mouse_list' %}">Back to Mice</a>
+    </div>
+</section>
+
+<section class="card">
+    <dl class="meta-list">
+        <dt>Username</dt><dd>{{ target_user.username }}</dd>
+        <dt>Display name</dt><dd>{% if target_user.profile %}{{ target_user.profile.display_name|default:"—" }}{% else %}—{% endif %}</dd>
+        <dt>Full name</dt><dd>{{ target_user.get_full_name|default:"—" }}</dd>
+        <dt>Role</dt><dd>{% if target_user.profile %}{{ target_user.profile.get_role_display }}{% else %}Member{% endif %}</dd>
+    </dl>
+</section>
+{% endblock %}

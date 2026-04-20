@@ -65,22 +65,55 @@
         <li><strong>状态的业务意义</strong>：active/tailed/weaned/ended/archived（以系统枚举为准）反映流程节点，便于筛选“还要做什么”。</li>
         <li><strong>页面怎么用</strong>：Litters 列表是“待办看板”——先筛 `not weaned` 看近期任务，再按日期范围或 breeding 缩小到当天工作范围。</li>
         <li><strong>与 Mice 的关系</strong>：Litter 是“批次层”，Mouse 是“个体层”；通常先把批次流程跑通，再逐只完善个体记录。</li>
+        <li><strong>Wean 时要决定 pups 归属项目</strong>：支持三种方式——归父方 project、归母方 project、或新建 project（详见下一节）。</li>
     </ul>
 </section>
 
 <section class="card guide-card">
-    <h2>6. Breeding + Litter 的推荐操作流程（用户视角）</h2>
+    <h2>6. Wean Litter 怎么处理（重点）</h2>
+    <p>
+        在 <strong>Litter detail → Wean</strong> 页面，系统会创建这窝 pups 对应的 <strong>Mouse</strong> 记录，并写入 cage membership。
+        你需要先确认目标笼位，再决定 pups 的项目归属。
+    </p>
+    <ul class="guide-list">
+        <li><strong>Use sire project</strong>：pups 全部归父方项目；适合课题归属明确以父系线为主的场景。</li>
+        <li><strong>Use dam project</strong>：pups 全部归母方项目；适合母系承担主课题或实际饲养归属在母方组的场景。</li>
+        <li><strong>Create a new project</strong>：为这批后代建一个新项目；常用于跨项目配对后独立跟踪下一代。</li>
+        <li><strong>新建项目的 owner</strong>：默认是当前操作用户；系统会给该用户该项目的 manager membership，保证后续可编辑。</li>
+        <li><strong>权限校验</strong>：你选哪个项目，系统就校验你是否有该项目编辑权限；无权限会直接阻止提交。</li>
+        <li><strong>不再要求父母同项目</strong>：父方与母方来自不同项目也可以 wean，关键在于你给 pups 选择了合法的目标项目。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>7. Wean 真实示例（跨项目配对）</h2>
+    <p>
+        例子：父鼠在 <code>project1</code>，母鼠在 <code>project2</code>，现在要给这一窝 pups 做 wean。
+        进入 <strong>Litter detail → Wean</strong> 后，可按实际管理需求选择：
+    </p>
+    <ul class="guide-list">
+        <li><strong>归父方项目</strong>：选 <code>Use sire project (project1)</code>，新生鼠全部写入 project1。</li>
+        <li><strong>归母方项目</strong>：选 <code>Use dam project (project2)</code>，新生鼠全部写入 project2。</li>
+        <li><strong>独立新项目</strong>：选 <code>Create a new project</code>，填写如 <code>project3</code>，新生鼠全部写入 project3。</li>
+        <li><strong>怎么选更稳妥</strong>：若后续由某一课题组持续维护，优先归该组项目；若是联合课题并准备独立追踪后代，优先新建项目。</li>
+        <li><strong>提交前检查</strong>：确认目标笼位、pup 数量、UID 不重复、目标项目你有编辑权限。</li>
+    </ul>
+</section>
+
+<section class="card guide-card">
+    <h2>7. Breeding + Litter 的推荐操作流程（用户视角）</h2>
     <ol class="guide-list">
         <li>在 <strong>Breedings</strong> 创建/确认配对，检查配对笼与父母个体是否正确。</li>
         <li>出现分娩后，在该 breeding 下创建 <strong>Litter</strong>，立即补 `birth_date`。</li>
         <li>日常在 <strong>Litters</strong> 页面按 `not weaned` 与日期筛选，推进离乳、尾标、分拣节点。</li>
-        <li>离乳后更新 litter 状态，并在需要时进入 Mice 逐只补全基因型与归属信息。</li>
+        <li>进入 Wean 页面时，明确 pups 要归到父方/母方/新建项目，再批量生成个体鼠记录。</li>
+        <li>离乳后检查 litter 状态，并在需要时进入 Mice 逐只补全基因型与标签信息。</li>
         <li>配对结束后回到 <strong>Breedings</strong> 关闭该 breeding，保持流程闭环。</li>
     </ol>
 </section>
 
 <section class="card guide-card">
-    <h2>7. Strain Lines</h2>
+    <h2>9. Strain Lines</h2>
     <p>
         品系行是基因命名与统计的「锚点」。列表顶部为单行搜索 + 状态下拉 + 应用/重置，布局与 Mice/Cages 的筛选条一致。
         行内数字可链到对应小鼠、笼位、交配或产仔列表，用于从品系下钻到个体。
@@ -88,7 +121,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>8. Pedigree（谱系）</h2>
+    <h2>10. Pedigree（谱系）</h2>
     <p>
         从小鼠详情进入 <strong>View Pedigree</strong> 后，页面以<strong>树状结构</strong>展示：上方为父母节点，经竖线汇聚到中间的<strong>焦点个体</strong>，下方分支列出同窝与后代，并用横线模拟树枝连接，便于快速扫读关系。
         所有 UID 仍可点击进入对应小鼠详情。
@@ -96,7 +129,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>9. 推荐录入顺序（新课题）</h2>
+    <h2>11. 推荐录入顺序（新课题）</h2>
     <ol class="guide-list">
         <li>确认或新建 <strong>Strain Line</strong>，保证命名与统计口径统一。</li>
         <li>新建 <strong>Project</strong> 并指定 <strong>Owner</strong>；后续小鼠、导出与协作范围常与此挂钩。</li>
@@ -108,7 +141,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>10. Import / Export</h2>
+    <h2>12. Import / Export</h2>
     <ul class="guide-list">
         <li>支持导入 <strong>Cage</strong>、<strong>Mouse</strong>、<strong>Genotype</strong>；小鼠导入可采用「单文件含基因型列」的格式。</li>
         <li>导入选项可自动创建缺失的 <strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>，减少手工前置维护。</li>
@@ -119,7 +152,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>11. 权限说明（摘要）</h2>
+    <h2>13. 权限说明（摘要）</h2>
     <p>
         系统按角色控制「谁能看、谁能改、谁能导入/归档、谁能管课题成员、谁能看审计」等。
         下表为常见能力对比；若与贵实验室策略不一致，以管理员配置为准。
@@ -170,10 +203,13 @@
             </tbody>
         </table>
     </div>
+    <p class="muted small-print">
+        补充：跨项目 breeding 时，操作人需要对涉及的每个项目都具备编辑权限；项目成员添加通常由该项目 owner、项目 manager 或 lab admin 执行。
+    </p>
 </section>
 
 <section class="card guide-card">
-    <h2>12. 状态与列表中的灰色行</h2>
+    <h2>14. 状态与列表中的灰色行</h2>
     <ul class="guide-list">
         <li><strong>active</strong>：日常默认展示的主状态。</li>
         <li><strong>inactive</strong>：非活跃，可能暂停使用或待处理。</li>
@@ -184,7 +220,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>13. 常见问题</h2>
+    <h2>15. 常见问题</h2>
     <dl class="guide-faq">
         <dt>为什么很少「硬删除」记录？</dt>
         <dd>优先使用归档或终态标记，避免破坏审计与谱系链条。</dd>
@@ -204,12 +240,13 @@
 </section>
 
 <section class="card guide-card">
-    <h2>14. 新手速查卡（30 秒）</h2>
+    <h2>16. 新手速查卡（30 秒）</h2>
     <ol class="guide-list">
         <li>先看 <strong>Dashboard</strong> 告警，处理“缺关键字段”的数据。</li>
         <li>建新繁殖：进 <strong>Breedings</strong>，先建配对（不是先建 litter）。</li>
         <li>有分娩：进该 breeding 下建 <strong>Litter</strong>，先填 `birth_date`。</li>
         <li>每天任务：在 <strong>Litters</strong> 按 `not weaned` + 日期筛选推进流程。</li>
+        <li>Wean 前先决定 pups 归属项目（父方/母方/新建），再提交创建。</li>
         <li>查个体：在 <strong>Mice</strong> 用 UID 搜索，必要时进 pedigree 看家系。</li>
         <li>批量分析或备份：优先用导出，避免在列表里手工逐条复制。</li>
         <li>看不懂当前是谁登录：点顶栏 <strong>User: xxx</strong> 进入个人页确认账号。</li>
@@ -217,7 +254,7 @@
 </section>
 
 <section class="card guide-card">
-    <h2>15. 常见报错 FAQ（原因与处理）</h2>
+    <h2>17. 常见报错 FAQ（原因与处理）</h2>
     <dl class="guide-faq">
         <dt>导入时报 “Missing required columns”</dt>
         <dd>文件缺少必需列或列名拼写不一致。请先下载系统模板，对齐列名后再导入。</dd>
@@ -236,6 +273,12 @@
 
         <dt>保存时报权限错误（例如不能编辑/归档）</dt>
         <dd>当前账号权限不足。请联系 Admin/Manager，或用有权限账号执行该操作。</dd>
+
+        <dt>Wean 时提示没有项目编辑权限</dt>
+        <dd>你选择了某个 pups 归属项目，但当前账号对该项目无编辑权限。可改选你有权限的项目，或请项目 owner/manager/admin 先把你加入该项目。</dd>
+
+        <dt>Wean 选择“Create a new project”后提示项目名重复</dt>
+        <dd>项目名是全局唯一。请换一个新名称，或改选已有的父方/母方项目归属。</dd>
 
         <dt>页面上显示 “No audit entries for this record yet.”</dt>
         <dd>该记录目前没有可展示的审计条目（可能是老数据或仅有批量汇总日志）。不是系统故障。</dd>

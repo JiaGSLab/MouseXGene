@@ -8,7 +8,8 @@
     <p class="muted">
         Fields marked <span class="required-mark">*</span> are required. Create dependencies first:
         <a href="{% url 'colony:strain_line_list' %}">Strain Lines</a>.
-        Compound genotype components can be edited after saving the mouse.
+        After save, genotype components are auto pre-populated from the selected strain line template (if configured),
+        then you can fill actual alleles from genotyping results.
     </p>
 </section>
 
@@ -41,6 +42,17 @@
                     </div>
                 {% endif %}
             </div>
+            {% if field.name == "strain_line" %}
+                <section class="card">
+                    <h2>Genotype Rows (from Strain Line)</h2>
+                    <p class="muted">
+                        When you choose a strain line, expected loci are shown below. Fill the actual genotype display for this mouse
+                        (for example <code>Cre/+</code>, <code>fl/fl</code>, <code>+/Y</code>).
+                    </p>
+                    <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
+                    <div id="genotype-template-rows"></div>
+                </section>
+            {% endif %}
         {% endfor %}
 
         <div class="form-actions">
@@ -53,4 +65,215 @@
         </div>
     </form>
 </section>
+
+{{ strain_template_loci_map|json_script:"strain-template-loci-map" }}
+{{ mouse_strain_line_map|json_script:"mouse-strain-line-map" }}
+{{ existing_genotype_map|json_script:"existing-genotype-map" }}
+{{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
+<script>
+(() => {
+    const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
+    const mouseStrainMap = JSON.parse(document.getElementById("mouse-strain-line-map").textContent || "{}");
+    const existingMap = JSON.parse(document.getElementById("existing-genotype-map").textContent || "{}");
+    const postedRows = JSON.parse(document.getElementById("posted-genotype-rows").textContent || "[]");
+    const strainSelect = document.getElementById("id_strain_line");
+    const sireSelect = document.getElementById("id_sire");
+    const damSelect = document.getElementById("id_dam");
+    const rowCountInput = document.getElementById("id_genotype_row_count");
+    const container = document.getElementById("genotype-template-rows");
+
+    const AUTOSOMAL_OPTIONS = {
+        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
+        flox: ["+/+", "fl/+", "fl/fl", "+/-", "-/-", "Custom"],
+        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "Custom"],
+        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
+        custom: ["Custom"],
+    };
+    const X_LINKED_FEMALE_OPTIONS = {
+        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
+        flox: ["+/+", "fl/+", "fl/fl", "Custom"],
+        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "Custom"],
+        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
+        custom: ["+/+", "Cre/+", "Cre/Cre", "fl/+", "fl/fl", "KI/+", "KI/KI", "Custom"],
+    };
+    const X_LINKED_MALE_OPTIONS = {
+        standard_autosomal: ["+/Y", "-/Y", "Custom"],
+        flox: ["+/Y", "fl/Y", "-/Y", "Custom"],
+        cre_transgene: ["+/Y", "Cre/Y", "-/Y", "Custom"],
+        reporter_ki: ["+/Y", "KI/Y", "-/Y", "Custom"],
+        custom: ["+/Y", "Cre/Y", "-/Y", "fl/Y", "KI/Y", "Custom"],
+    };
+    const Y_LINKED_MALE_OPTIONS = ["+/Y", "-/Y", "KI/Y", "Custom"];
+
+    function postedMap() {
+        const out = {};
+        if (!Array.isArray(postedRows)) return out;
+        for (const row of postedRows) {
+            if (!row || !row.locus) continue;
+            out[row.locus] = row.genotype || "";
+        }
+        return out;
+    }
+
+    function dedupeLoci(entries) {
+        const out = [];
+        const seen = new Set();
+        for (const raw of entries) {
+            const text = String(raw?.locus_name || "").trim();
+            if (!text) continue;
+            const key = text.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push({
+                locus_name: text,
+                locus_type: String(raw?.locus_type || "custom").trim() || "custom",
+                chromosome_type: String(raw?.chromosome_type || "autosomal").trim() || "autosomal",
+            });
+        }
+        return out;
+    }
+
+    function lociForStrainId(strainId) {
+        const value = strainMap[strainId];
+        return Array.isArray(value) ? value : [];
+    }
+
+    function parentLoci(parentSelect) {
+        if (!parentSelect || !parentSelect.value) return [];
+        const strainId = mouseStrainMap[parentSelect.value];
+        if (!strainId) return [];
+        return lociForStrainId(strainId);
+    }
+
+    function optionsFor(item, sex) {
+        const locusType = item.locus_type || "custom";
+        const chromosomeType = item.chromosome_type || "autosomal";
+        if (chromosomeType === "autosomal") {
+            return { options: AUTOSOMAL_OPTIONS[locusType] || AUTOSOMAL_OPTIONS.custom, disabled: false };
+        }
+        if (chromosomeType === "x_linked") {
+            if (sex === "M") {
+                return { options: X_LINKED_MALE_OPTIONS[locusType] || X_LINKED_MALE_OPTIONS.custom, disabled: false };
+            }
+            return { options: X_LINKED_FEMALE_OPTIONS[locusType] || X_LINKED_FEMALE_OPTIONS.custom, disabled: false };
+        }
+        // y_linked
+        if (sex === "F") {
+            return { options: ["N/A"], disabled: true };
+        }
+        return { options: Y_LINKED_MALE_OPTIONS, disabled: false };
+    }
+
+    function renderRows() {
+        const strainId = strainSelect ? strainSelect.value : "";
+        const sex = document.getElementById("id_sex")?.value || "U";
+        const loci = dedupeLoci([
+            ...lociForStrainId(strainId),
+            ...parentLoci(sireSelect),
+            ...parentLoci(damSelect),
+        ]);
+        const pMap = postedMap();
+        container.innerHTML = "";
+        if (!loci.length) {
+            rowCountInput.value = "0";
+            const p = document.createElement("p");
+            p.className = "muted";
+            p.textContent = "No expected loci template on this strain line.";
+            container.appendChild(p);
+            return;
+        }
+        loci.forEach((item, idx) => {
+            const locus = item.locus_name;
+            const locusType = item.locus_type;
+            const chromosomeType = item.chromosome_type;
+            const current = (pMap[locus] ?? existingMap[locus] ?? "").trim();
+            const optionPack = optionsFor(item, sex);
+            const options = optionPack.options;
+            const row = document.createElement("div");
+            row.className = "form-row";
+            const label = document.createElement("label");
+            label.setAttribute("for", `id_genotype_display_${idx}`);
+            label.textContent = `${locus} (${locusType}, ${chromosomeType})`;
+            const hidden = document.createElement("input");
+            hidden.type = "hidden";
+            hidden.name = `genotype_locus_${idx}`;
+            hidden.value = locus;
+
+            const valueHidden = document.createElement("input");
+            valueHidden.type = "hidden";
+            valueHidden.name = `genotype_display_${idx}`;
+            valueHidden.id = `id_genotype_display_${idx}`;
+
+            const select = document.createElement("select");
+            select.name = `genotype_choice_${idx}`;
+            const customInput = document.createElement("input");
+            customInput.type = "text";
+            customInput.placeholder = "Custom genotype (e.g. del/Y)";
+
+            let hasMatched = false;
+            options.forEach((optValue) => {
+                const opt = document.createElement("option");
+                opt.value = optValue;
+                opt.textContent = optValue;
+                if (current && current === optValue) {
+                    opt.selected = true;
+                    hasMatched = true;
+                }
+                select.appendChild(opt);
+            });
+
+            if (current && !hasMatched) {
+                select.value = "Custom";
+                customInput.value = current;
+            } else if (!current && options[0] !== "Custom") {
+                select.value = options[0];
+            } else {
+                select.value = "Custom";
+            }
+
+            function syncValue() {
+                if (optionPack.disabled) {
+                    customInput.style.display = "none";
+                    valueHidden.value = "";
+                    return;
+                }
+                if (select.value === "Custom") {
+                    customInput.style.display = "";
+                    valueHidden.value = (customInput.value || "").trim();
+                } else {
+                    customInput.style.display = "none";
+                    valueHidden.value = select.value;
+                }
+            }
+            select.disabled = optionPack.disabled;
+            select.addEventListener("change", syncValue);
+            customInput.addEventListener("input", syncValue);
+            syncValue();
+
+            row.appendChild(label);
+            row.appendChild(hidden);
+            row.appendChild(select);
+            row.appendChild(customInput);
+            row.appendChild(valueHidden);
+            container.appendChild(row);
+        });
+        rowCountInput.value = String(loci.length);
+    }
+
+    if (strainSelect) {
+        strainSelect.addEventListener("change", renderRows);
+    }
+    if (sireSelect) {
+        sireSelect.addEventListener("change", renderRows);
+    }
+    if (damSelect) {
+        damSelect.addEventListener("change", renderRows);
+    }
+    const sexSelect = document.getElementById("id_sex");
+    if (sexSelect) {
+        sexSelect.addEventListener("change", renderRows);
+    }
+    renderRows();
+})();
+</script>
 {% endblock %}

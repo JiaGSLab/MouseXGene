@@ -9,6 +9,10 @@
         Upload a CSV or XLSX file. Import runs in all-or-nothing mode.
         Required fields are marked <span class="required-mark">*</span>.
     </p>
+    <p class="muted">
+        上传 CSV 或 XLSX 文件。导入采用“全成或全失败（all-or-nothing）”模式。
+        必填字段用 <span class="required-mark">*</span> 标记。
+    </p>
 </section>
 
 <section id="import-prefix" class="card">
@@ -55,7 +59,14 @@
             <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
         {% endfor %}
     </p>
+    <p class="muted">
+        期望列（Expected columns）：
+        {% for col in expected_columns %}
+            <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+    </p>
     <p class="muted">Example row: <code>C001,2026-04-10,Room-A,Rack-1,A1,standard,holding,active,Example note</code></p>
+    <p class="muted">示例行（Example row）：<code>C001,2026-04-10,Room-A,Rack-1,A1,standard,holding,active,Example note</code></p>
 
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}

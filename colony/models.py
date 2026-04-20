@@ -1,3 +1,5 @@
+import re
+
 from django.db import models
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -13,6 +15,18 @@ class TimeStampedModel(models.Model):
 
 
 class StrainLine(TimeStampedModel):
+    class LocusType(models.TextChoices):
+        STANDARD_AUTOSOMAL = "standard_autosomal", "Standard autosomal"
+        FLOX = "flox", "Flox"
+        CRE_TRANSGENE = "cre_transgene", "Cre transgene"
+        REPORTER_KI = "reporter_ki", "Reporter KI"
+        CUSTOM = "custom", "Custom"
+
+    class ChromosomeType(models.TextChoices):
+        AUTOSOMAL = "autosomal", "Autosomal"
+        X_LINKED = "x_linked", "X-linked"
+        Y_LINKED = "y_linked", "Y-linked"
+
     class Category(models.TextChoices):
         CRE = "cre", "Cre"
         CRE_ERT2 = "creERT2", "CreERT2"
@@ -38,6 +52,8 @@ class StrainLine(TimeStampedModel):
     species = models.CharField(max_length=20, choices=Species.choices, default=Species.MOUSE)
     background = models.CharField(max_length=128, blank=True)
     source = models.CharField(max_length=128, blank=True)
+    expected_loci_template = models.TextField(blank=True)
+    expected_loci_config = models.JSONField(default=list, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -60,6 +76,82 @@ class StrainLine(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.short_name or self.display_name or self.name or self.line_name
+
+    @classmethod
+    def normalize_locus_name(cls, raw_name: str) -> str:
+        text = (raw_name or "").strip()
+        if not text:
+            return ""
+        # Keep one stable logical locus name; construct/locus-type metadata should be separate.
+        # Examples:
+        # - "Tet2 flox" -> "Tet2"
+        # - "Gpr82 KO" -> "Gpr82"
+        # - "Lyz2-Cre" stays unchanged
+        text = re.sub(r"\s+", " ", text)
+        suffix_pattern = r"(?:\s+(?:flox|fl|ko|ki|reporter|transgene|knockout|knock-in))+$"
+        cleaned = re.sub(suffix_pattern, "", text, flags=re.IGNORECASE).strip()
+        return cleaned or text
+
+    def expected_loci_entries(self) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        if isinstance(self.expected_loci_config, list) and self.expected_loci_config:
+            for raw in self.expected_loci_config:
+                if not isinstance(raw, dict):
+                    continue
+                name = self.normalize_locus_name(str(raw.get("locus_name", "")).strip())
+                if not name:
+                    continue
+                key = name.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                raw_locus_type = str(raw.get("locus_type", self.LocusType.CUSTOM)).strip()
+                chromosome_type = str(raw.get("chromosome_type", self.ChromosomeType.AUTOSOMAL)).strip()
+
+                # Backward-compat: old config may have locus_type=x_linked.
+                if raw_locus_type == "x_linked":
+                    raw_locus_type = self.LocusType.CUSTOM
+                    chromosome_type = self.ChromosomeType.X_LINKED
+
+                if raw_locus_type not in self.LocusType.values:
+                    raw_locus_type = self.LocusType.CUSTOM
+                if chromosome_type not in self.ChromosomeType.values:
+                    chromosome_type = self.ChromosomeType.AUTOSOMAL
+                out.append(
+                    {
+                        "locus_name": name,
+                        "locus_type": raw_locus_type,
+                        "chromosome_type": chromosome_type,
+                    }
+                )
+            if out:
+                return out
+
+        raw = (self.expected_loci_template or "").strip()
+        if not raw:
+            return out
+        tokens = [t.strip() for t in re.split(r"[,\n;]+", raw)]
+        for token in tokens:
+            if not token:
+                continue
+            normalized = self.normalize_locus_name(token)
+            key = normalized.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "locus_name": normalized,
+                    "locus_type": self.LocusType.CUSTOM,
+                    "chromosome_type": self.ChromosomeType.AUTOSOMAL,
+                }
+            )
+        return out
+
+    def expected_loci_list(self) -> list[str]:
+        return [entry["locus_name"] for entry in self.expected_loci_entries()]
 
 
 class Cage(TimeStampedModel):
@@ -175,27 +267,112 @@ class Mouse(TimeStampedModel):
         components = self.genotype_components.select_related("strain_line").order_by("sort_order", "id")
         parts: list[str] = []
         for component in components:
-            label = (
+            fallback_label = (
                 component.strain_line.short_name
                 or component.strain_line.display_name
                 or component.strain_line.name
                 or component.strain_line.line_name
             )
-            if component.zygosity:
-                parts.append(f"{label}{component.zygosity}")
-            else:
-                parts.append(label)
+            label = (component.locus_name or "").strip() or fallback_label
+            allele_1 = (component.allele_display_1 or "").strip()
+            allele_2 = (component.allele_display_2 or "").strip()
+            genotype_part = ""
+            if allele_1 and allele_2:
+                genotype_part = f"{allele_1}/{allele_2}"
+            elif component.zygosity:
+                genotype_part = component.zygosity.strip()
+            if genotype_part:
+                parts.append(f"{label}{genotype_part}")
         summary = "; ".join(parts)
         self.genotype_summary = summary
         if save:
             self.save(update_fields=["genotype_summary", "updated_at"])
         return summary
 
+    def ensure_template_genotype_components(
+        self,
+        *,
+        extra_loci: list[str] | None = None,
+        include_strain_template: bool = True,
+    ) -> int:
+        loci = self.strain_line.expected_loci_list() if (include_strain_template and self.strain_line_id) else []
+        loci = [self.strain_line.normalize_locus_name(l) for l in loci if self.strain_line.normalize_locus_name(l)]
+        if extra_loci:
+            seen = {l.casefold() for l in loci}
+            for locus in extra_loci:
+                text = self.strain_line.normalize_locus_name((locus or "").strip())
+                if not text:
+                    continue
+                key = text.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                loci.append(text)
+        if not loci:
+            return 0
+        existing: set[str] = set()
+        for c in self.genotype_components.all():
+            raw = (c.locus_name or "").strip()
+            if not raw:
+                continue
+            normalized = self.strain_line.normalize_locus_name(raw)
+            if normalized and raw != normalized:
+                c.locus_name = normalized
+                c.save(update_fields=["locus_name", "updated_at"])
+            if normalized:
+                existing.add(normalized.casefold())
+        current_max_sort = self.genotype_components.aggregate(models.Max("sort_order")).get("sort_order__max") or 0
+        to_create: list["MouseGenotypeComponent"] = []
+        next_sort = current_max_sort + 1
+        for locus in loci:
+            if locus.casefold() in existing:
+                continue
+            to_create.append(
+                MouseGenotypeComponent(
+                    mouse=self,
+                    strain_line=self.strain_line,
+                    locus_name=locus,
+                    chromosome_type=MouseGenotypeComponent.ChromosomeType.UNKNOWN,
+                    zygosity_class=MouseGenotypeComponent.ZygosityClass.UNKNOWN,
+                    sort_order=next_sort,
+                )
+            )
+            next_sort += 1
+        if not to_create:
+            return 0
+        MouseGenotypeComponent.objects.bulk_create(to_create)
+        self.rebuild_genotype_summary(save=True)
+        return len(to_create)
+
 
 class MouseGenotypeComponent(TimeStampedModel):
+    class ChromosomeType(models.TextChoices):
+        AUTOSOMAL = "autosomal", "Autosomal"
+        X_LINKED = "x_linked", "X-linked"
+        Y_LINKED = "y_linked", "Y-linked"
+        UNKNOWN = "unknown", "Unknown"
+
+    class ZygosityClass(models.TextChoices):
+        WT = "wt", "WT"
+        HET = "het", "Heterozygous"
+        HOM = "hom", "Homozygous"
+        HEMIZYGOUS = "hemizygous", "Hemizygous"
+        UNKNOWN = "unknown", "Unknown"
+
     mouse = models.ForeignKey(Mouse, on_delete=models.CASCADE, related_name="genotype_components")
     strain_line = models.ForeignKey(StrainLine, on_delete=models.PROTECT, related_name="mouse_components")
+    locus_name = models.CharField(max_length=128, blank=True)
+    chromosome_type = models.CharField(
+        max_length=16,
+        choices=ChromosomeType.choices,
+        default=ChromosomeType.UNKNOWN,
+    )
     zygosity = models.CharField(max_length=32, blank=True)
+    zygosity_class = models.CharField(
+        max_length=16,
+        choices=ZygosityClass.choices,
+        default=ZygosityClass.UNKNOWN,
+    )
     allele_display_1 = models.CharField(max_length=64, blank=True)
     allele_display_2 = models.CharField(max_length=64, blank=True)
     sort_order = models.PositiveIntegerField(default=0)
@@ -203,6 +380,51 @@ class MouseGenotypeComponent(TimeStampedModel):
 
     class Meta:
         ordering = ("sort_order", "id")
+
+    def clean(self) -> None:
+        allele_1 = (self.allele_display_1 or "").strip()
+        allele_2 = (self.allele_display_2 or "").strip()
+        sex = self.mouse.sex
+
+        # Keep explicit zygosity display synchronized with allele fields when both are present.
+        if allele_1 and allele_2:
+            self.zygosity = f"{allele_1}/{allele_2}"
+
+        if self.chromosome_type == self.ChromosomeType.AUTOSOMAL:
+            if (allele_1 and not allele_2) or (allele_2 and not allele_1):
+                raise ValidationError("Autosomal loci require two alleles or both left blank.")
+            if allele_2.upper() == "Y":
+                raise ValidationError("Autosomal loci cannot use Y as allele_2.")
+            return
+
+        if self.chromosome_type == self.ChromosomeType.X_LINKED:
+            if sex == Mouse.Sex.MALE:
+                if allele_1 and not allele_2:
+                    self.allele_display_2 = "Y"
+                elif allele_2 and not allele_1:
+                    raise ValidationError("For X-linked male records, allele_1 is required.")
+                elif allele_2 and allele_2.upper() != "Y":
+                    raise ValidationError("For X-linked male records, allele_2 should be 'Y'.")
+                if self.allele_display_1 and self.allele_display_2:
+                    self.zygosity = f"{self.allele_display_1}/{self.allele_display_2}"
+            elif sex == Mouse.Sex.FEMALE:
+                if (allele_1 and not allele_2) or (allele_2 and not allele_1):
+                    raise ValidationError("For X-linked female records, provide both alleles.")
+                if allele_2.upper() == "Y":
+                    raise ValidationError("Female X-linked records cannot use Y as allele_2.")
+            return
+
+        if self.chromosome_type == self.ChromosomeType.Y_LINKED:
+            if sex == Mouse.Sex.FEMALE:
+                raise ValidationError("Female mice cannot carry Y-linked loci.")
+            if allele_1 and not allele_2:
+                self.allele_display_2 = "Y"
+            elif allele_2 and not allele_1:
+                raise ValidationError("For Y-linked records, allele_1 is required.")
+            elif allele_2 and allele_2.upper() != "Y":
+                raise ValidationError("For Y-linked records, allele_2 should be 'Y'.")
+            if self.allele_display_1 and self.allele_display_2:
+                self.zygosity = f"{self.allele_display_1}/{self.allele_display_2}"
 
     def __str__(self) -> str:
         return f"{self.mouse.mouse_uid} - {self.strain_line} {self.zygosity}".strip()

@@ -11,8 +11,8 @@
     <div class="action-links">
         <a class="button button-light" href="{% url 'colony:cage_edit' cage.pk %}">Edit Cage</a>
         {% if user.is_authenticated %}
-            <a class="button button-light" href="{% url 'colony:cage_inventory_export' cage.pk %}">Export Inventory (CSV)</a>
-            <a class="button button-light" href="{% url 'colony:cage_inventory_export_xlsx' cage.pk %}">Export Inventory (Excel)</a>
+            <a class="button button-export" href="{% url 'colony:cage_inventory_export' cage.pk %}">Export Inventory (CSV)</a>
+            <a class="button button-export" href="{% url 'colony:cage_inventory_export_xlsx' cage.pk %}">Export Inventory (Excel)</a>
         {% endif %}
         <a class="button button-light" href="{% url 'colony:cage_print' cage.pk %}">Print Cage Card</a>
         <a class="button button-light" href="{% url 'colony:cage_history' cage.pk %}">View Cage History</a>
@@ -43,7 +43,10 @@
                 {% for pr in cage_project_rows %}
                     <li>
                         <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
-                        <span class="muted"> · Owner: {{ pr.owner_display }}</span>
+                        <span class="muted">
+                            · Owner:
+                            <a class="link-primary" href="{% url 'accounts:user_detail' pr.project.owner_id %}">{{ pr.owner_display }}</a>
+                        </span>
                         <span class="muted"> ({{ pr.n }} mouse{% if pr.n != 1 %}s{% endif %})</span>
                     </li>
                 {% endfor %}
@@ -66,6 +69,7 @@
                 <th>Mouse UID</th>
                 <th>Sex</th>
                 <th>Status</th>
+                <th>Breeding</th>
                 <th>Strain Line</th>
                 <th>Project</th>
                 <th>Owner</th>
@@ -78,7 +82,16 @@
             <tr>
                 <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
                 <td>{{ row.mouse.get_sex_display }}</td>
-                <td>{{ row.mouse.get_status_display }}</td>
+                <td><span class="status-pill status-pill--mouse status-pill--mouse-{{ row.mouse.status }}">{{ row.mouse.get_status_display }}</span></td>
+                <td>
+                    {% if row.active_breeding_badges %}
+                        {% for b in row.active_breeding_badges %}
+                            <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="cell-empty">—</span>
+                    {% endif %}
+                </td>
                 <td>{{ row.mouse.strain_line }}</td>
                 <td>
                     {% if row.mouse.project %}
@@ -87,13 +100,19 @@
                         —
                     {% endif %}
                 </td>
-                <td>{% if row.mouse.project %}{{ row.mouse.project.owner_display }}{% else %}—{% endif %}</td>
+                <td>
+                    {% if row.mouse.project %}
+                        <a class="link-primary" href="{% url 'accounts:user_detail' row.mouse.project.owner_id %}">{{ row.mouse.project.owner_display }}</a>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
                 <td>{{ row.mouse.birth_date|default:"-" }}</td>
                 <td>{{ row.genotype_summary|default:"-" }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="8" class="empty-row">No current mice in this cage.</td>
+                <td colspan="9" class="empty-row">No current mice in this cage.</td>
             </tr>
             {% endfor %}
         </tbody>

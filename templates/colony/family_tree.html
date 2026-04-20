@@ -69,7 +69,13 @@
                             -
                         {% endif %}
                     </td>
-                    <td>{% if m.project %}{{ m.project.owner_display }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% if m.project %}
+                            <a class="link-primary" href="{% url 'accounts:user_detail' m.project.owner_id %}">{{ m.project.owner_display }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
                     <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
                 </tr>
             {% empty %}

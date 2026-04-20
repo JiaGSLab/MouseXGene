@@ -10,11 +10,30 @@
         Required fields are marked <span class="required-mark">*</span>.
     </p>
     <p class="muted">
-        One row = one mouse. You can include up to 4 genotype components per row via
-        <code>genotype_1_*</code> ... <code>genotype_4_*</code> columns.
+        上传 CSV 或 XLSX。导入采用“全成或全失败（all-or-nothing）”模式。
+        必填字段用 <span class="required-mark">*</span> 标记。
     </p>
     <p class="muted">
+        One row = one mouse. Preferred format is per-locus columns (for example: <code>Gpr82</code>, <code>Foxp3-Cre</code>,
+        <code>Tet2</code>, <code>Lyz2-Cre</code>) where each cell stores a genotype display (such as <code>+/+</code>, <code>fl/fl</code>, <code>Cre/Y</code>).
+    </p>
+    <p class="muted">
+        一行代表一只小鼠。推荐使用“每个 locus 一列”的格式（例如：<code>Gpr82</code>、<code>Foxp3-Cre</code>、
+        <code>Tet2</code>、<code>Lyz2-Cre</code>），每个单元格填写基因型展示值（如 <code>+/+</code>、<code>fl/fl</code>、<code>Cre/Y</code>）。
+    </p>
+    <p class="muted">
+        This import supports more loci per file. You can keep adding locus columns as needed (practically unlimited in normal usage).
+    </p>
+    <p class="muted">
+        本导入支持更多基因位点。你可以按需持续增加 locus 列（在常规使用中基本不限数量）。
+    </p>
+    <p class="muted">
+        Legacy <code>genotype_N_*</code> slot columns are still supported for backward compatibility.
         After import, review genotype results in each Mouse detail page under <strong>Genotype Workspace</strong>.
+    </p>
+    <p class="muted">
+        旧版 <code>genotype_N_*</code> 槽位列仍可兼容导入。
+        导入后请在每只鼠的详情页 <strong>Genotype Workspace</strong> 中复核结果。
     </p>
 </section>
 
@@ -67,12 +86,26 @@
         {% endfor %}
     </p>
     <p class="muted">
-        Example row includes core mouse fields + genotype slots:
-        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Tet2,fl,fl,fl/fl,yes,2026-04-14,Validated...</code>
+        期望列（Expected columns）：
+        {% for col in expected_columns %}
+            <code>{{ col }}</code>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
     </p>
     <p class="muted">
-        If you need more than 4 genotype components, extend the spreadsheet with additional
-        <code>genotype_N_*</code> groups or use the separate genotype import.
+        Example row (per-locus columns):
+        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
+    </p>
+    <p class="muted">
+        示例行（每个 locus 一列）：
+        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
+    </p>
+    <p class="muted">
+        You can add any number of locus columns in this format. For X-linked male loci, use forms like
+        <code>+/Y</code>, <code>Cre/Y</code>, or <code>-/Y</code>.
+    </p>
+    <p class="muted">
+        可按此格式添加任意数量的 locus 列。对于 X 连锁雄鼠位点，可使用
+        <code>+/Y</code>、<code>Cre/Y</code>、<code>-/Y</code>。
     </p>
 
     <form method="post" enctype="multipart/form-data" class="form-layout">

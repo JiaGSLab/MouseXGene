@@ -9,41 +9,65 @@
         <p class="muted">Track active and historical breeding setups.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'litters:litter_list' %}">View Litters</a>
         {% if can_manage_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
+        <a class="button button-export" href="{% url 'breeding:breeding_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=csv">Export Breedings (CSV)</a>
+        <a class="button button-export" href="{% url 'breeding:breeding_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Breedings (Excel)</a>
     </div>
 </section>
 
 <section class="card card--filters">
-    <form method="get" class="filter-grid">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or male/female mouse_uid" class="search-input filter-control">
-        <select name="status" class="filter-control">
-            <option value="">All Status</option>
-            {% for value, label in status_options %}
-                <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <select name="breeding_type" class="filter-control">
-            <option value="">All Types</option>
-            {% for value, label in breeding_type_options %}
-                <option value="{{ value }}" {% if breeding_type == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <select name="cage" class="filter-control">
-            <option value="">All Cages</option>
-            {% for item in cage_options %}
-                <option value="{{ item.pk }}" {% if cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
-            {% endfor %}
-        </select>
-        <select name="include_inactive" class="filter-control">
-            <option value="">Active Only</option>
-            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Closed</option>
-        </select>
-        <div class="form-actions filter-actions">
-            <button type="submit" class="button">Apply</button>
-            <a href="{% url 'breeding:breeding_list' %}" class="button button-reset">Reset</a>
+    <form method="get" class="filter-form" id="breeding-list-filters">
+        <div class="filter-row filter-row--primary">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or sire/dam UID" class="search-input filter-control">
+            <select name="status" class="filter-control">
+                <option value="">All Status</option>
+                {% for value, label in status_options %}
+                    <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="breeding_type" class="filter-control">
+                <option value="">All Types</option>
+                {% for value, label in breeding_type_options %}
+                    <option value="{{ value }}" {% if breeding_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="cage" class="filter-control">
+                <option value="">All Cages</option>
+                {% for item in cage_options %}
+                    <option value="{{ item.pk }}" {% if cage == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.cage_id }}</option>
+                {% endfor %}
+            </select>
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'breeding:breeding_list' %}" class="button button-reset">Reset</a>
+            </div>
+        </div>
+        <div class="filter-row filter-row--secondary filter-row--per-page">
+            <label class="filter-label" for="id_include_inactive_breeding">Include inactive</label>
+            <select name="include_inactive" id="id_include_inactive_breeding" class="filter-control">
+                <option value="">Active Only</option>
+                <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Closed</option>
+            </select>
+            <label class="filter-label" for="id_per_page_breedings">Per page</label>
+            <select name="per_page" id="id_per_page_breedings" class="filter-control" onchange="this.form.requestSubmit()">
+                <option value="25" {% if per_page == "25" %}selected{% endif %}>25</option>
+                <option value="50" {% if per_page == "50" %}selected{% endif %}>50</option>
+                <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
+                <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
+            </select>
+            {% if total_count %}
+                <p class="list-range-meta muted">
+                    {% if page_obj and per_page != "all" %}
+                        Rows {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ total_count }}
+                    {% elif per_page == "all" %}
+                        Showing all {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% else %}
+                        {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% endif %}
+                </p>
+            {% endif %}
         </div>
     </form>
 </section>
@@ -55,35 +79,82 @@
                 <th>Breeding Code</th>
                 <th>Cage</th>
                 <th>Breeding Type</th>
-                <th>Male</th>
-                <th>Female 1</th>
-                <th>Female 2</th>
+                <th>Sire</th>
+                <th>Dams</th>
                 <th>Start Date</th>
                 <th>Plug Date</th>
                 <th>Expected Birth Date</th>
                 <th>Status</th>
+                <th>Litter Alert</th>
             </tr>
         </thead>
         <tbody>
             {% for breeding in breedings %}
             <tr class="{% if not breeding.active or breeding.status == 'closed' %}row-inactive{% endif %}">
                 <td><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
-                <td>{{ breeding.cage }}</td>
+                <td>
+                    {% if breeding.cage %}
+                        <a href="{% url 'colony:cage_detail' breeding.cage.pk %}">{{ breeding.cage.cage_id }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>{{ breeding.get_breeding_type_display }}</td>
-                <td>{{ breeding.male }}</td>
-                <td>{{ breeding.female_1 }}</td>
-                <td>{{ breeding.female_2|default:"-" }}</td>
+                <td>
+                    {% if breeding.display_sire %}
+                        <div><a href="{% url 'mice:mouse_detail' breeding.display_sire.pk %}">{{ breeding.display_sire.mouse_uid }}</a></div>
+                        <div class="muted small-print">Age: {{ breeding.display_sire_age_days|default:"-" }}d</div>
+                        <div class="muted small-print">Genotype: {{ breeding.display_sire_genotype|default:"-" }}</div>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if breeding.display_dam_rows %}
+                        <div class="table-wrap">
+                            <table class="data-table data-table--compact">
+                                <thead>
+                                    <tr>
+                                        <th>Mouse</th>
+                                        <th>Age</th>
+                                        <th>Genotype</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in breeding.display_dam_rows %}
+                                        <tr>
+                                            <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
+                                            <td>{{ row.age_days|default:"-" }}d</td>
+                                            <td>{{ row.genotype|default:"-" }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>{{ breeding.start_date|default:"-" }}</td>
                 <td>{{ breeding.plug_date|default:"-" }}</td>
-                <td>{{ breeding.expected_birth_date|default:"-" }}</td>
+                <td>{{ breeding.display_expected_birth_date|default:"-" }}</td>
                 <td><span class="status-pill">{{ breeding.get_status_display }}</span></td>
+                <td>
+                    {% if breeding.litter_timing_alert %}
+                        <span class="status-pill status-pill--mouse status-pill--mouse-archived">{{ breeding.litter_timing_alert.label }}</span>
+                        <div class="muted small-print">{{ breeding.litter_timing_alert.days_without_litter }}d without litter</div>
+                    {% else %}
+                        <span class="muted">-</span>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="10" class="empty-row">No breeding records found.</td>
+                <td colspan="11" class="empty-row">No breeding records found.</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </section>
+{% include "includes/pagination_nav.html" %}
 {% endblock %}

@@ -74,29 +74,12 @@
         <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
         {% if can_import %}
             <a class="button" href="{% url 'mice:mouse_import' %}">Import Mice</a>
+            <a class="button" href="{% url 'colony:cage_import' %}">Import Cages</a>
         {% endif %}
         {% if can_manage_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
     </div>
-    <div class="action-links action-links--secondary">
-        <a class="button button-secondary" href="{% url 'genotypes:mouse_genotype_create' %}">New Genotype Record</a>
-        {% if can_import %}
-            <a class="button button-secondary" href="{% url 'colony:cage_import' %}">Import Cages</a>
-            <a class="button button-secondary" href="{% url 'genotypes:genotype_import' %}">Import Genotypes</a>
-        {% endif %}
-    </div>
-    {% if user.is_authenticated %}
-        <details class="more-actions">
-            <summary class="more-actions__summary">Export &amp; more</summary>
-            <div class="action-links action-links--tertiary">
-                <a class="button button-ghost" href="{% url 'colony:cages_export' %}">Export All Cages (CSV)</a>
-                <a class="button button-ghost" href="{% url 'colony:cages_export_xlsx' %}">Export All Cages (Excel)</a>
-                <a class="button button-ghost" href="{% url 'mice:mice_export' %}">Export All Mice (CSV)</a>
-                <a class="button button-ghost" href="{% url 'mice:mice_export_xlsx' %}">Export All Mice (Excel)</a>
-            </div>
-        </details>
-    {% endif %}
 </section>
 
 <section class="page-header">

@@ -6,7 +6,7 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Strain Lines</h1>
-        <p class="muted">Master genetic components for compound/multi-line crosses.</p>
+        <p class="muted">Breeding-line definitions with included loci for mouse workflows.</p>
     </div>
     <div class="action-links action-links--primary">
         <a href="{% url 'colony:strain_line_create' %}" class="button">New Strain Line</a>
@@ -16,7 +16,7 @@
 <section class="card card--filters">
     <form method="get" class="filter-form">
         <div class="filter-row filter-row--primary">
-            <input id="id_q" class="search-input filter-control" type="text" name="q" value="{{ q }}" placeholder="Search name, short name, category, locus" aria-label="Search strain lines">
+            <input id="id_q" class="search-input filter-control" type="text" name="q" value="{{ q }}" placeholder="Search strain line name or included loci" aria-label="Search strain lines">
             <select id="id_active" name="active" class="filter-control" aria-label="Strain line status">
                 <option value="">All status</option>
                 <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
@@ -35,9 +35,7 @@
         <thead>
             <tr>
                 <th>Name</th>
-                <th>Short Name</th>
-                <th>Category</th>
-                <th>Gene/Locus</th>
+                <th>Included loci</th>
                 <th class="col-num-right">Active Mice</th>
                 <th class="col-num-right">Active Cages</th>
                 <th class="col-num-right">Active Breedings</th>
@@ -54,9 +52,15 @@
                             {{ line.name|default:line.line_name }}
                         </a>
                     </td>
-                    <td>{{ line.short_name|default:line.display_name|default:line.line_name }}</td>
-                    <td>{{ line.get_category_display }}</td>
-                    <td>{{ line.gene_or_locus|default:"-" }}</td>
+                    <td>
+                        {% with loci=line.expected_loci_list %}
+                            {% if loci %}
+                                {{ loci|join:", " }}
+                            {% else %}
+                                <span class="cell-empty">—</span>
+                            {% endif %}
+                        {% endwith %}
+                    </td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
@@ -66,7 +70,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td class="empty-row" colspan="10">No strain lines yet. Create one before mouse data entry/import.</td>
+                    <td class="empty-row" colspan="8">No strain lines yet. Create one before mouse data entry/import.</td>
                 </tr>
             {% endfor %}
         </tbody>

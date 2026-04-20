@@ -9,40 +9,64 @@
         <p class="muted">Workflow hub between breedings and individual mice: birth cohorts, weaning, and tail-tag milestones.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'breeding:breeding_list' %}">Breedings</a>
-        <a class="button" href="{% url 'litters:litter_list' %}">Refresh</a>
+        <a class="button" href="{% url 'litters:litter_create_from_breeding' %}">Create from Breeding</a>
+        <a class="button button-export" href="{% url 'litters:litter_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=csv">Export Litters (CSV)</a>
+        <a class="button button-export" href="{% url 'litters:litter_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Litters (Excel)</a>
     </div>
 </section>
 
 <section class="card card--filters">
-    <form method="get" class="filter-grid filter-grid-litter">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search litter id, breeding, sire/dam UID" class="search-input filter-control">
-        <select name="weaned" class="filter-control">
-            <option value="">Weaned / Not weaned</option>
-            <option value="yes" {% if weaned == "yes" %}selected{% endif %}>Weaned</option>
-            <option value="no" {% if weaned == "no" %}selected{% endif %}>Not weaned</option>
-        </select>
-        <select name="litter_status" class="filter-control">
-            <option value="">All statuses</option>
-            {% for value, label in litter_status_options %}
-                <option value="{{ value }}" {% if litter_status == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-        <select name="breeding" class="filter-control">
-            <option value="">All breedings</option>
-            {% for item in breeding_options %}
-                <option value="{{ item.pk }}" {% if breeding == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.breeding_code }}</option>
-            {% endfor %}
-        </select>
-        <input type="date" name="birth_date_from" value="{{ birth_date_from }}" title="Birth from" class="filter-control">
-        <input type="date" name="birth_date_to" value="{{ birth_date_to }}" title="Birth to" class="filter-control">
-        <select name="include_inactive" class="filter-control">
-            <option value="">Open workflow only</option>
-            <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include ended / archived</option>
-        </select>
-        <div class="form-actions filter-actions">
-            <button type="submit" class="button">Apply</button>
-            <a href="{% url 'litters:litter_list' %}" class="button button-reset">Reset</a>
+    <form method="get" class="filter-form" id="litter-list-filters">
+        <div class="filter-row filter-row--primary">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search litter id, breeding, sire/dam UID" class="search-input filter-control">
+            <select name="weaned" class="filter-control">
+                <option value="">Weaned / Not weaned</option>
+                <option value="yes" {% if weaned == "yes" %}selected{% endif %}>Weaned</option>
+                <option value="no" {% if weaned == "no" %}selected{% endif %}>Not weaned</option>
+            </select>
+            <select name="litter_status" class="filter-control">
+                <option value="">All statuses</option>
+                {% for value, label in litter_status_options %}
+                    <option value="{{ value }}" {% if litter_status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="breeding" class="filter-control">
+                <option value="">All breedings</option>
+                {% for item in breeding_options %}
+                    <option value="{{ item.pk }}" {% if breeding == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.breeding_code }}</option>
+                {% endfor %}
+            </select>
+            <input type="date" name="birth_date_from" value="{{ birth_date_from }}" title="Birth from" class="filter-control">
+            <input type="date" name="birth_date_to" value="{{ birth_date_to }}" title="Birth to" class="filter-control">
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'litters:litter_list' %}" class="button button-reset">Reset</a>
+            </div>
+        </div>
+        <div class="filter-row filter-row--secondary filter-row--per-page">
+            <label class="filter-label" for="id_include_inactive_litter">Include inactive</label>
+            <select name="include_inactive" id="id_include_inactive_litter" class="filter-control">
+                <option value="">Open workflow only</option>
+                <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include ended / archived</option>
+            </select>
+            <label class="filter-label" for="id_per_page_litters">Per page</label>
+            <select name="per_page" id="id_per_page_litters" class="filter-control" onchange="this.form.requestSubmit()">
+                <option value="25" {% if per_page == "25" %}selected{% endif %}>25</option>
+                <option value="50" {% if per_page == "50" %}selected{% endif %}>50</option>
+                <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
+                <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
+            </select>
+            {% if total_count %}
+                <p class="list-range-meta muted">
+                    {% if page_obj and per_page != "all" %}
+                        Rows {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ total_count }}
+                    {% elif per_page == "all" %}
+                        Showing all {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% else %}
+                        {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% endif %}
+                </p>
+            {% endif %}
         </div>
     </form>
 </section>
@@ -53,20 +77,18 @@
         <thead>
             <tr>
                 <th>Litter ID</th>
+                <th>Breeding</th>
                 <th>Birth date</th>
-                <th>Wean date</th>
-                <th>Tail tag</th>
-                <th>Strain (dam)</th>
-                <th>Litter size</th>
-                <th>Males</th>
-                <th>Females</th>
-                <th>Sire</th>
-                <th>Dam</th>
-                <th>Sire genotype</th>
-                <th>Dam genotype</th>
-                <th>Dam cage</th>
+                <th>Age</th>
+                <th>Pups count</th>
+                <th>Wean due</th>
+                <th>Weaning status</th>
+                <th>Tagging status</th>
+                <th>Mice created</th>
+                <th>Parent lines</th>
+                <th>Breeder Members</th>
                 <th>Status</th>
-                <th>Notes</th>
+                <th>Alerts</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -74,26 +96,86 @@
             {% for litter in litters %}
             <tr class="{% if litter.litter_status == 'archived' or litter.litter_status == 'ended' %}row-inactive{% endif %}">
                 <td><a href="{% url 'litters:litter_detail' litter.pk %}"><strong>{{ litter.litter_id_display }}</strong></a></td>
-                <td>{{ litter.birth_date|default:"-" }}</td>
-                <td>{{ litter.wean_date|default:"—" }}</td>
-                <td>{{ litter.tail_tag_display|default:"—" }}</td>
-                <td>{{ litter.breeding.female_1.strain_line.short_name|default:litter.breeding.female_1.strain_line.line_name|default:"-" }}</td>
-                <td>{{ litter.litter_size_display|default:"—" }}</td>
-                <td>{{ litter.males_display|default:"—" }}</td>
-                <td>{{ litter.females_display|default:"—" }}</td>
-                <td><a href="{% url 'mice:mouse_detail' litter.breeding.male.pk %}">{{ litter.breeding.male.mouse_uid }}</a></td>
-                <td><a href="{% url 'mice:mouse_detail' litter.breeding.female_1.pk %}">{{ litter.breeding.female_1.mouse_uid }}</a></td>
-                <td class="cell-ellipsis" title="{{ litter.sire_genotype_summary }}">{{ litter.sire_genotype_summary|default:"-" }}</td>
-                <td class="cell-ellipsis" title="{{ litter.dam_genotype_summary }}">{{ litter.dam_genotype_summary|default:"-" }}</td>
                 <td>
-                    {% if litter.breeding.female_1.current_cage %}
-                        <a href="{% url 'colony:cage_detail' litter.breeding.female_1.current_cage.pk %}">{{ litter.breeding.female_1.current_cage.cage_id }}</a>
+                    <div><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding.breeding_code }}</a></div>
+                    <div class="muted small-print">
+                        Cage:
+                        {% if litter.breeding.cage %}
+                            <a href="{% url 'colony:cage_detail' litter.breeding.cage.pk %}">{{ litter.breeding.cage.cage_id }}</a>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </div>
+                </td>
+                <td>{{ litter.birth_date|default:"-" }}</td>
+                <td>{% if litter.age_days is not None %}{{ litter.age_days }}d{% else %}—{% endif %}</td>
+                <td>{{ litter.pups_count_display|default:"—" }}</td>
+                <td>{{ litter.wean_due_date|default:"—" }}</td>
+                <td>
+                    {{ litter.weaning_status }}
+                    {% if litter.wean_overdue_days > 0 %}
+                        <span class="status-pill status-pill-archived">Overdue</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if litter.tagging_status == "Completed" %}
+                        <span class="status-pill status-pill-active">Completed</span>
+                    {% else %}
+                        <span class="status-pill status-pill--muted">Pending</span>
+                    {% endif %}
+                </td>
+                <td>{{ litter.created_mice_count }}/{{ litter.pups_count_display|default:"?" }}</td>
+                <td>
+                    {% if litter.parent_line_names %}
+                        {{ litter.parent_line_names|join:", " }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if litter.breeder_member_rows %}
+                        <div class="table-wrap">
+                            <table class="data-table data-table--compact">
+                                <thead>
+                                    <tr>
+                                        <th>Role</th>
+                                        <th>Mouse</th>
+                                        <th>Cage</th>
+                                        <th>Age</th>
+                                        <th>Genotype</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in litter.breeder_member_rows %}
+                                        <tr>
+                                            <td>{{ row.role }}</td>
+                                            <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
+                                            <td>
+                                                {% if row.cage %}
+                                                    <a href="{% url 'colony:cage_detail' row.cage.pk %}">{{ row.cage.cage_id }}</a>
+                                                {% else %}
+                                                    -
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ row.age_days|default:"-" }}d</td>
+                                            <td>{{ row.genotype_summary|default:"-" }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                     {% else %}
                         —
                     {% endif %}
                 </td>
                 <td><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></td>
-                <td class="cell-ellipsis" title="{{ litter.notes }}">{% if litter.notes %}{{ litter.notes|truncatechars:40 }}{% else %}—{% endif %}</td>
+                <td>
+                    {% if litter.workflow_alerts %}
+                        {{ litter.workflow_alerts|join:"; " }}
+                    {% else %}
+                        <span class="muted">No alerts</span>
+                    {% endif %}
+                </td>
                 <td class="nowrap">
                     <a href="{% url 'litters:litter_detail' litter.pk %}">View</a>
                     {% if litter.user_can_edit %}
@@ -106,11 +188,12 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="16" class="empty-row">No litter records match your filters.</td>
+                <td colspan="14" class="empty-row">No litter records match your filters.</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </section>
 </div>
+{% include "includes/pagination_nav.html" %}
 {% endblock %}

@@ -70,3 +70,9 @@ def user_role_edit(request, pk: int):
     else:
         form = UserRoleForm(instance=profile)
     return render(request, "users/user_role_form.html", {"form": form, "target_user": user_obj})
+
+
+@authenticated_required
+def user_detail(request, pk: int):
+    user_obj = get_object_or_404(get_user_model().objects.select_related("profile"), pk=pk)
+    return render(request, "users/user_detail.html", {"target_user": user_obj})

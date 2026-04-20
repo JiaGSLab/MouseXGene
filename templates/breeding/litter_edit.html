@@ -9,7 +9,7 @@
         <p class="muted">Update litter workflow fields and optional per-pup rows. Pups listed here can be linked to new <strong>Mouse</strong> records when you <a href="{% url 'litters:litter_wean' litter.pk %}">wean the litter</a> (matched in sort order).</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'litters:litter_detail' litter.pk %}">Back to Litter</a>
+        <a class="button" href="{% url 'litters:litter_detail' litter.pk %}">Back to Litter</a>
     </div>
 </section>
 
@@ -65,7 +65,7 @@
 
         <div class="form-actions">
             <button type="submit" class="button">Save</button>
-            <a href="{% url 'litters:litter_detail' litter.pk %}" class="button button-light">Cancel</a>
+            <a href="{% url 'litters:litter_detail' litter.pk %}" class="button">Cancel</a>
         </div>
     </form>
 </section>

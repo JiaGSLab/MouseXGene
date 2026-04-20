@@ -1,7 +1,7 @@
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
-from django.db.models import Q
+from django.db.models import Count, Max, Q
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -9,6 +9,7 @@ from datetime import timedelta
 from colony.models import Cage, Mouse
 from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
+from breeding.analytics import breeding_litter_timing_alert
 from core.audit import log_audit_event
 from core.history import actor_summary_for_audit_entries, audit_entries_for_object, summarize_modelform_changes
 from .forms import ProjectForm, ProjectMembershipFormSet
@@ -38,7 +39,7 @@ def home(request: HttpRequest) -> HttpResponse:
         "strain_line", "project"
     )
     mice_without_genotype_qs = (
-        mice_queryset.filter(genotypes__isnull=True)
+        mice_queryset.filter(genotype_components__isnull=True)
         .select_related("strain_line", "project", "current_cage")
         .distinct()
     )
@@ -86,6 +87,26 @@ def home(request: HttpRequest) -> HttpResponse:
     cages_without_mice_count = cages_without_mice_qs.count()
     weaning_due_soon_count = weaning_due_soon_qs.count()
     breeding_without_litter_count = breeding_without_litter_qs.count()
+    breeding_overdue_qs = (
+        breedings_queryset.filter(Q(active=True) & ~Q(status=Breeding.Status.CLOSED))
+        .select_related("cage", "male", "female_1")
+        .annotate(litter_count=Count("litters", distinct=True), latest_litter_date=Max("litters__birth_date"))
+        .order_by("-start_date")
+    )
+    breeding_overdue_all: list[Breeding] = []
+    for b in breeding_overdue_qs:
+        alert = breeding_litter_timing_alert(
+            start_date=b.start_date,
+            latest_litter_date=b.latest_litter_date,
+            litter_count=b.litter_count or 0,
+            is_active=b.active,
+            status=b.status,
+            today=today,
+        )
+        if alert:
+            b.litter_timing_alert = alert
+            breeding_overdue_all.append(b)
+    breeding_overdue_count = len(breeding_overdue_all)
     pups_lacking_genotype_count = pups_lacking_genotype_qs.count()
     empty_active_cages_long_count = empty_active_cages_long_qs.count()
 
@@ -94,6 +115,7 @@ def home(request: HttpRequest) -> HttpResponse:
     mice_without_genotype = list(mice_without_genotype_qs.order_by("mouse_uid")[:dashboard_list_limit])
     cages_without_mice = list(cages_without_mice_qs[:dashboard_list_limit])
     breeding_without_litter = list(breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit])
+    breeding_overdue = breeding_overdue_all[:dashboard_list_limit]
     pups_lacking_genotype = list(pups_lacking_genotype_qs[:dashboard_list_limit])
     empty_active_cages_long = list(empty_active_cages_long_qs[:dashboard_list_limit])
 
@@ -134,6 +156,13 @@ def home(request: HttpRequest) -> HttpResponse:
             "items": breeding_without_litter,
         },
         {
+            "kind": "breeding_overdue",
+            "title": "Breeding Overdue / Review Pair",
+            "list_url": "breeding:breeding_list",
+            "count": breeding_overdue_count,
+            "items": breeding_overdue,
+        },
+        {
             "kind": "pups_no_genotype",
             "title": "Tail-tagged Pups Missing Genotype",
             "list_url": "litters:litter_list",
@@ -148,7 +177,18 @@ def home(request: HttpRequest) -> HttpResponse:
             "items": empty_active_cages_long,
         },
     ]
-    dashboard_alerts.sort(key=lambda a: (0 if a["count"] > 0 else 1, -a["count"]))
+    # Keep a stable workflow-first layout: cage-related alerts first, then mouse, then breeding/litter.
+    alert_order = {
+        "cages_no_mice": 10,
+        "empty_cages_long": 20,
+        "mice_no_cage": 30,
+        "mice_no_genotype": 40,
+        "weaning": 50,
+        "pups_no_genotype": 60,
+        "breeding_no_litter": 70,
+        "breeding_overdue": 80,
+    }
+    dashboard_alerts.sort(key=lambda a: alert_order.get(a["kind"], 999))
 
     inactive_cages = total_cages - active_cages
     inactive_mice = total_mice - active_mice

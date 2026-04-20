@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Create Litter from Breeding | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Create Litter from Breeding</h1>
+    <p class="muted">Select a breeding, then continue to the litter record form.</p>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        <div class="form-row">
+            <label for="id_breeding_id">Breeding</label>
+            <select id="id_breeding_id" name="breeding_id" class="filter-control" required>
+                <option value="">Select breeding</option>
+                {% for breeding in breeding_options %}
+                    <option value="{{ breeding.pk }}" {% if selected_breeding_id == breeding.pk|stringformat:"s" %}selected{% endif %}>
+                        {{ breeding.breeding_code }}{% if breeding.cage %} · Cage {{ breeding.cage.cage_id }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="button">Continue</button>
+            <a href="{% url 'litters:litter_list' %}" class="button">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

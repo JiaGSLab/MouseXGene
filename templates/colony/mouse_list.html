@@ -15,22 +15,15 @@
         <div class="action-links action-links--primary">
             <a class="button" href="{% url 'mice:mouse_create' %}">New Mouse</a>
             {% if can_import %}
-                <a class="button button-secondary" href="{% url 'mice:mouse_import' %}">Import Mice</a>
+                <a class="button" href="{% url 'mice:mouse_import' %}">Import Mice</a>
             {% endif %}
         </div>
-        <details class="more-actions more-actions--inline">
-            <summary class="more-actions__summary">More actions</summary>
+        {% if user.is_authenticated %}
             <div class="action-links action-links--stack">
-                <a class="button button-secondary" href="{% url 'genotypes:mouse_genotype_create' %}">Add Genotype Record</a>
-                {% if can_import %}
-                    <a class="button button-secondary" href="{% url 'genotypes:genotype_import' %}">Import Genotype Records</a>
-                {% endif %}
-                {% if user.is_authenticated %}
-                    <a class="button button-ghost" href="{% url 'mice:mice_export' %}">Export Mice (CSV)</a>
-                    <a class="button button-ghost" href="{% url 'mice:mice_export_xlsx' %}">Export Mice (Excel)</a>
-                {% endif %}
+                <a class="button button-export" href="{% url 'mice:mice_export' %}">Export Mice (CSV)</a>
+                <a class="button button-export" href="{% url 'mice:mice_export_xlsx' %}">Export Mice (Excel)</a>
             </div>
-        </details>
+        {% endif %}
     </div>
 </section>
 
@@ -73,16 +66,13 @@
                 <a href="{% url 'mice:mouse_list' %}" class="button button-reset">Reset</a>
             </div>
         </div>
-        <details class="filter-more" {% if include_inactive == "yes" %}open{% endif %}>
-            <summary class="filter-more__summary">More filters</summary>
-            <div class="filter-row filter-row--secondary">
-                <label class="filter-label" for="id_include_inactive">Include inactive</label>
-                <select name="include_inactive" id="id_include_inactive" class="filter-control">
-                    <option value="">Active Only</option>
-                    <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
-                </select>
-            </div>
-        </details>
+        <div class="filter-row filter-row--secondary">
+            <label class="filter-label" for="id_include_inactive">Include inactive</label>
+            <select name="include_inactive" id="id_include_inactive" class="filter-control">
+                <option value="">Active Only</option>
+                <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
+            </select>
+        </div>
         <div class="filter-row filter-row--secondary filter-row--per-page">
             <label class="filter-label" for="id_per_page_mice">Per page</label>
             <select name="per_page" id="id_per_page_mice" class="filter-control" onchange="this.form.requestSubmit()">
@@ -118,6 +108,7 @@
                     <a href="{{ age_sort_href }}" class="table-sort-link" title="Cycle: oldest first → youngest first → default order">Age{% if age_sort == "old" %} <span class="table-sort-link__mark" aria-hidden="true">▲</span>{% elif age_sort == "young" %} <span class="table-sort-link__mark" aria-hidden="true">▼</span>{% endif %}</a>
                 </th>
                 <th>Status</th>
+                <th>Breeding</th>
                 <th>Strain Line</th>
                 <th>Current Cage</th>
                 <th>Project</th>
@@ -145,6 +136,15 @@
                 </td>
                 <td><span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span></td>
                 <td>
+                    {% if mouse.active_breeding_badges %}
+                        {% for b in mouse.active_breeding_badges %}
+                            <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="cell-empty">—</span>
+                    {% endif %}
+                </td>
+                <td>
                     {% if mouse.strain_line %}
                         <a class="table-link" href="{% url 'mice:mouse_list' %}?strain_line_id={{ mouse.strain_line_id }}">{{ mouse.strain_line }}</a>
                     {% else %}
@@ -167,7 +167,7 @@
                 </td>
                 <td>
                     {% if mouse.project %}
-                        <span class="owner-cell">{{ mouse.project.owner_display }}</span>
+                        <a class="link-primary owner-cell" href="{% url 'accounts:user_detail' mouse.project.owner_id %}">{{ mouse.project.owner_display }}</a>
                     {% else %}
                         <span class="cell-empty">—</span>
                     {% endif %}
@@ -175,7 +175,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="10" class="empty-row">No mice found.</td>
+                <td colspan="11" class="empty-row">No mice found.</td>
             </tr>
             {% endfor %}
         </tbody>

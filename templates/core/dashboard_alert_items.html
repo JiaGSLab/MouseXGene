@@ -24,11 +24,14 @@
     <ul class="mini-list">
         {% for mouse in alert.items %}
             <li>
-                <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
                 {% if mouse.current_cage %}
-                    -
                     <a href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                    -
+                {% else %}
+                    <span class="muted">No cage</span>
+                    -
                 {% endif %}
+                <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
             </li>
         {% empty %}
             <li class="dashboard-alert-empty">All clear</li>
@@ -51,6 +54,18 @@
             <li>
                 <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
                 - {{ breeding.get_status_display }}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
+{% elif alert.kind == "breeding_overdue" %}
+    <ul class="mini-list">
+        {% for breeding in alert.items %}
+            <li>
+                <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
+                - {{ breeding.litter_timing_alert.label }}
+                ({{ breeding.litter_timing_alert.days_without_litter }}d)
             </li>
         {% empty %}
             <li class="dashboard-alert-empty">All clear</li>

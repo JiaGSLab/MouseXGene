@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Confirm Strain Change | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Confirm Strain-line Change: {{ mouse.mouse_uid }}</h1>
+    <p class="muted">This mouse has existing genotype truth. Choose how loci should be handled before applying the new strain.</p>
+</section>
+
+<section class="card">
+    <dl class="detail-grid">
+        <dt>Current strain</dt><dd>{{ old_strain }}</dd>
+        <dt>New strain</dt><dd>{{ new_strain }}</dd>
+    </dl>
+
+    <h3>Overlap (keep candidates)</h3>
+    <p class="muted">{% if overlap_loci %}{{ overlap_loci|join:", " }}{% else %}None{% endif %}</p>
+
+    <h3>To add (new template only)</h3>
+    <p class="muted">{% if add_loci %}{{ add_loci|join:", " }}{% else %}None{% endif %}</p>
+
+    <h3>To remove (old template only)</h3>
+    <p class="muted">{% if remove_loci %}{{ remove_loci|join:", " }}{% else %}None{% endif %}</p>
+
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {% for k, v in post_payload %}
+            <input type="hidden" name="{{ k }}" value="{{ v }}">
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" name="strain_change_action" value="replace" class="button">Replace with new strain template</button>
+            <button type="submit" name="strain_change_action" value="overlap" class="button">Keep overlapping loci only</button>
+            <button type="submit" name="strain_change_action" value="cancel" class="button button-light">Cancel</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

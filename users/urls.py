@@ -1,7 +1,15 @@
 from django.contrib.auth.views import LogoutView, PasswordChangeDoneView
 from django.urls import path
 
-from .views import AppLoginView, AppPasswordChangeView, account_profile, account_profile_edit, user_role_edit, user_role_list
+from .views import (
+    AppLoginView,
+    AppPasswordChangeView,
+    account_profile,
+    account_profile_edit,
+    user_detail,
+    user_role_edit,
+    user_role_list,
+)
 
 app_name = "accounts"
 
@@ -18,4 +26,5 @@ urlpatterns = [
     ),
     path("roles/", user_role_list, name="user_role_list"),
     path("roles/<int:pk>/", user_role_edit, name="user_role_edit"),
+    path("users/<int:pk>/", user_detail, name="user_detail"),
 ]

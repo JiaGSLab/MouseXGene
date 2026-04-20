@@ -5,17 +5,12 @@
 {% block content %}
 <section class="page-header">
     <h1>{{ page_title }}</h1>
-    <p class="muted">
-        Age hints for breeders use days since birth date: ~3 months (90d), ~4 months (122d), ~6 months (183d).
-        They do not block saving.
-    </p>
+    <p class="muted">Simple breeding setup: choose 1 sire and 1-3 dams.</p>
 </section>
 
 <section class="card">
-    {{ breeding_age_tier_map|json_script:"breeding-age-tier-data" }}
-    {{ breeding_age_hints|json_script:"breeding-age-hint-data" }}
-
-    <form method="post" class="form-layout">
+    {{ breeder_mouse_choices|json_script:"breeder-mouse-choices" }}
+    <form method="post" class="form-layout" id="breeding-form">
         {% csrf_token %}
 
         {% if form.non_field_errors %}
@@ -26,73 +21,245 @@
             </div>
         {% endif %}
 
-        {% for field in form %}
-            <div class="form-row">
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {% if field.name == 'male' or field.name == 'female_1' or field.name == 'female_2' %}
-                    <p class="breeding-age-hint" id="hint-{{ field.name }}" aria-live="polite"></p>
-                {% endif %}
-                {% if field.errors %}
-                    <div class="field-error">
-                        {% for error in field.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+        <div class="card card-nested">
+            <h2>Breeder Selection</h2>
+            <p class="muted small-print">Choose sire and dams first. Use Project/Strain filters to narrow down mice.</p>
+            <div class="filter-grid">
+                <div class="form-row">
+                    <label for="id_mouse_project_filter">Filter by project</label>
+                    <select id="id_mouse_project_filter" class="filter-control">
+                        <option value="">All projects</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="id_mouse_strain_filter">Filter by strain line</label>
+                    <select id="id_mouse_strain_filter" class="filter-control">
+                        <option value="">All strain lines</option>
+                    </select>
+                </div>
             </div>
+            <div style="display:none;">
+                {{ form.sire }}
+                {{ form.dams }}
+            </div>
+            <div class="table-wrap">
+                <table class="data-table data-table--compact" id="breeder-picker-table">
+                    <thead>
+                        <tr>
+                            <th>Sire</th>
+                            <th>Dam</th>
+                            <th>Mouse UID</th>
+                            <th>Sex</th>
+                            <th>Age (days)</th>
+                            <th>Genotype</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="breeder-picker-body">
+                        <tr><td colspan="7" class="muted">Loading mice...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            {% if form.sire.errors %}
+                <div class="field-error">{% for error in form.sire.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+            {% if form.dams.errors %}
+                <div class="field-error">{% for error in form.dams.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+            <div class="muted small-print">
+                Sire is single-select (male). Dams are multi-select (female, up to 3).
+            </div>
+        </div>
+
+        {% for field in form %}
+            {% if field.name == 'male' or field.name == 'female_1' or field.name == 'female_2' or field.name == 'extra_females' %}
+                {# Hidden: legacy compatibility fields, replaced by dynamic breeder-member rows #}
+                {{ field.as_hidden }}
+            {% elif field.name == 'sire' or field.name == 'dams' %}
+                {# Rendered in breeder selection block #}
+            {% else %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.name == 'cage' %}
+                        <small class="muted">
+                            Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
+                        </small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
         {% endfor %}
+
+        {% if form.member_rows %}
+            <div class="table-wrap">
+                <table class="data-table data-table--compact">
+                    <thead>
+                        <tr>
+                            <th>Role</th>
+                            <th>Mouse</th>
+                            <th>Sex</th>
+                            <th>Age (days)</th>
+                            <th>Status</th>
+                            <th>Active breeding</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in form.member_rows %}
+                            <tr>
+                                <td>{{ row.role }}</td>
+                                <td>{{ row.mouse_uid }}</td>
+                                <td>{{ row.sex }}</td>
+                                <td>{% if row.age_days is not None %}{{ row.age_days }}{% else %}—{% endif %}</td>
+                                <td>{{ row.status }}</td>
+                                <td>{% if row.active_breeding_codes %}{{ row.active_breeding_codes|join:", " }}{% else %}—{% endif %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
 
         <div class="form-actions">
             <button type="submit" class="button">{{ submit_label }}</button>
-            <a href="{% url cancel_url %}" class="button button-light">Cancel</a>
+            {% if cancel_kwargs %}
+                <a href="{% url cancel_url pk=cancel_kwargs.pk %}" class="button">Cancel</a>
+            {% else %}
+                <a href="{% url cancel_url %}" class="button">Cancel</a>
+            {% endif %}
         </div>
     </form>
 </section>
-
 <script>
-(function () {
-    var tEl = document.getElementById("breeding-age-tier-data");
-    var hEl = document.getElementById("breeding-age-hint-data");
-    if (!tEl || !hEl) {
-        return;
+(() => {
+    const dataEl = document.getElementById("breeder-mouse-choices");
+    const projectFilter = document.getElementById("id_mouse_project_filter");
+    const strainFilter = document.getElementById("id_mouse_strain_filter");
+    const sireSelect = document.getElementById("id_sire");
+    const damsSelect = document.getElementById("id_dams");
+    const tableBody = document.getElementById("breeder-picker-body");
+    const breedingForm = document.getElementById("breeding-form");
+    if (!dataEl || !projectFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm) return;
+
+    const mice = JSON.parse(dataEl.textContent || "[]");
+    let selectedSireId = sireSelect.value || "";
+    let selectedDamIds = new Set(Array.from(damsSelect.selectedOptions || []).map((o) => o.value));
+
+    function sexLabel(sex) {
+        return sex === "M" ? "Male" : (sex === "F" ? "Female" : "Unknown");
     }
-    var tiers = JSON.parse(tEl.textContent);
-    var hints = JSON.parse(hEl.textContent);
-    var pairs = [
-        ["id_male", "hint-male"],
-        ["id_female_1", "hint-female_1"],
-        ["id_female_2", "hint-female_2"],
-    ];
-    function refresh(selectId, hintId) {
-        var sel = document.getElementById(selectId);
-        var hint = document.getElementById(hintId);
-        if (!sel || !hint) {
-            return;
-        }
-        var v = sel.value;
-        hint.textContent = "";
-        hint.className = "breeding-age-hint";
-        if (!v) {
-            return;
-        }
-        var tier = tiers[v];
-        if (!tier || tier === "none") {
-            return;
-        }
-        hint.textContent = hints[tier] || "";
-        hint.classList.add("is-" + tier);
-    }
-    pairs.forEach(function (pair) {
-        var sel = document.getElementById(pair[0]);
-        if (!sel) {
-            return;
-        }
-        sel.addEventListener("change", function () {
-            refresh(pair[0], pair[1]);
+    function uniqueBy(items, keyFn) {
+        const out = [];
+        const seen = new Set();
+        items.forEach((item) => {
+            const key = keyFn(item);
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            out.push(item);
         });
-        refresh(pair[0], pair[1]);
-    });
+        return out;
+    }
+    function fillFilters() {
+        const projects = uniqueBy(
+            mice.filter(m => m.project_id).map(m => ({ id: String(m.project_id), name: m.project_name })),
+            x => x.id
+        ).sort((a, b) => a.name.localeCompare(b.name));
+        const strains = uniqueBy(
+            mice.filter(m => m.strain_line_id).map(m => ({ id: String(m.strain_line_id), name: m.strain_line_name })),
+            x => x.id
+        ).sort((a, b) => a.name.localeCompare(b.name));
+        projects.forEach((p) => {
+            const opt = document.createElement("option");
+            opt.value = p.id;
+            opt.textContent = p.name;
+            projectFilter.appendChild(opt);
+        });
+        strains.forEach((s) => {
+            const opt = document.createElement("option");
+            opt.value = s.id;
+            opt.textContent = s.name;
+            strainFilter.appendChild(opt);
+        });
+    }
+    function filteredMice() {
+        const p = projectFilter.value;
+        const s = strainFilter.value;
+        return mice.filter((m) => {
+            if (p && String(m.project_id || "") !== p) return false;
+            if (s && String(m.strain_line_id || "") !== s) return false;
+            return true;
+        });
+    }
+    function syncHiddenSelects() {
+        Array.from(sireSelect.options).forEach((opt) => {
+            opt.selected = !!selectedSireId && opt.value === selectedSireId;
+        });
+        Array.from(damsSelect.options).forEach((opt) => {
+            opt.selected = selectedDamIds.has(opt.value);
+        });
+    }
+    function renderBreederTable() {
+        const items = filteredMice();
+        if (!items.length) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="muted">No mice match current filters.</td></tr>';
+            return;
+        }
+        const rows = items.map((m) => {
+            const id = String(m.id);
+            const sireCell = m.sex === "M"
+                ? `<input type="radio" name="sire_picker" value="${id}" ${selectedSireId === id ? "checked" : ""}>`
+                : '<span class="muted">—</span>';
+            const damsCell = m.sex === "F"
+                ? `<input type="checkbox" name="dam_picker" value="${id}" ${selectedDamIds.has(id) ? "checked" : ""}>`
+                : '<span class="muted">—</span>';
+            const age = m.age_days == null ? "—" : String(m.age_days);
+            const genotype = (m.genotype_summary || "").trim() || "—";
+            const status = m.status_label || m.status || "—";
+            return `
+                <tr data-mouse-id="${id}">
+                    <td>${sireCell}</td>
+                    <td>${damsCell}</td>
+                    <td>${m.uid || "—"}</td>
+                    <td>${sexLabel(m.sex)}</td>
+                    <td>${age}</td>
+                    <td>${genotype}</td>
+                    <td>${status}</td>
+                </tr>
+            `;
+        });
+        tableBody.innerHTML = rows.join("");
+    }
+    function onTableChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement)) return;
+        if (target.name === "sire_picker") {
+            selectedSireId = target.value || "";
+        } else if (target.name === "dam_picker") {
+            if (target.checked) {
+                if (selectedDamIds.size >= 3) {
+                    target.checked = false;
+                    return;
+                }
+                selectedDamIds.add(target.value);
+            } else {
+                selectedDamIds.delete(target.value);
+            }
+        }
+        syncHiddenSelects();
+    }
+    fillFilters();
+    renderBreederTable();
+    syncHiddenSelects();
+    tableBody.addEventListener("change", onTableChange);
+    projectFilter.addEventListener("change", renderBreederTable);
+    strainFilter.addEventListener("change", renderBreederTable);
+    breedingForm.addEventListener("submit", syncHiddenSelects);
 })();
 </script>
 {% endblock %}

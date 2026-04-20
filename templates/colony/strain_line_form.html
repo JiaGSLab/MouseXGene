@@ -6,8 +6,7 @@
 <section class="page-header">
     <h1>{{ page_title }}</h1>
     <p class="muted">
-        Examples: <code>Tet2 flox / Tet2fl</code>, <code>Lyz2-CreERT2 / Lyz2-CreERT2</code>,
-        <code>Rosa26-LSL-tdTomato / R26-LSL-tdT</code>.
+        Define a breeding-line template (line label + included loci). This page does not define final genotype truth.
     </p>
 </section>
 
@@ -21,28 +20,203 @@
                 {% endfor %}
             </div>
         {% endif %}
-        {% for field in form %}
-            <div class="form-row">
-                <label for="{{ field.id_for_label }}">
-                    {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
-                </label>
-                {{ field }}
-                {% if field.help_text %}
-                    <small class="muted">{{ field.help_text }}</small>
-                {% endif %}
-                {% if field.errors %}
-                    <div class="field-error">
-                        {% for error in field.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+
+        <div class="form-row">
+            <label for="{{ form.name.id_for_label }}">
+                {{ form.name.label }}{% if form.name.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.name }}
+            {% if form.name.help_text %}
+                <small class="muted">{{ form.name.help_text }}</small>
+            {% endif %}
+            {% if form.name.errors %}
+                <div class="field-error">
+                    {% for error in form.name.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label>
+                {{ form.expected_loci_template.label }}{% if form.expected_loci_template.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.expected_loci_template.as_hidden }}
+            {{ form.expected_loci_config }}
+            <div id="loci-rows"></div>
+            <div class="form-actions">
+                <button type="button" class="button button-light" id="add-locus-row">Add locus</button>
             </div>
-        {% endfor %}
+            {% if form.expected_loci_template.help_text %}
+                <small class="muted">{{ form.expected_loci_template.help_text }}</small>
+            {% endif %}
+            {% if form.expected_loci_template.errors %}
+                <div class="field-error">
+                    {% for error in form.expected_loci_template.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.notes.id_for_label }}">{{ form.notes.label }}</label>
+            {{ form.notes }}
+            {% if form.notes.help_text %}
+                <small class="muted">{{ form.notes.help_text }}</small>
+            {% endif %}
+            {% if form.notes.errors %}
+                <div class="field-error">
+                    {% for error in form.notes.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.is_active.id_for_label }}">{{ form.is_active }} {{ form.is_active.label }}</label>
+            {% if form.is_active.errors %}
+                <div class="field-error">
+                    {% for error in form.is_active.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
         <div class="form-actions">
             <button type="submit" class="button">{{ submit_label }}</button>
             <a href="{% url 'colony:strain_line_list' %}" class="button button-light">Cancel</a>
         </div>
     </form>
 </section>
+
+<script>
+(() => {
+    const hidden = document.getElementById("{{ form.expected_loci_template.id_for_label }}");
+    const hiddenConfig = document.getElementById("id_expected_loci_config");
+    const rows = document.getElementById("loci-rows");
+    const addBtn = document.getElementById("add-locus-row");
+    if (!hidden || !hiddenConfig || !rows || !addBtn) return;
+
+    const LOCUS_TYPES = [
+        ["standard_autosomal", "standard_autosomal"],
+        ["flox", "flox"],
+        ["cre_transgene", "cre_transgene"],
+        ["reporter_ki", "reporter_ki"],
+        ["custom", "custom"],
+    ];
+    const CHROMOSOME_TYPES = [
+        ["autosomal", "autosomal"],
+        ["x_linked", "x_linked"],
+        ["y_linked", "y_linked"],
+    ];
+
+    function valuesFromHidden() {
+        const raw = (hiddenConfig.value || "").trim();
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    return parsed
+                        .map(item => ({
+                            locus_name: String(item?.locus_name || "").trim(),
+                            locus_type: String(item?.locus_type || "custom").trim() || "custom",
+                            chromosome_type: String(item?.chromosome_type || "autosomal").trim() || "autosomal",
+                        }))
+                        .filter(item => item.locus_name);
+                }
+            } catch (_) {}
+        }
+        const text = (hidden.value || "").trim();
+        if (!text) return [];
+        return text
+            .split(/\n+/)
+            .map(v => ({ locus_name: v.trim(), locus_type: "custom", chromosome_type: "autosomal" }))
+            .filter(v => v.locus_name);
+    }
+
+    function syncHidden() {
+        const values = Array.from(rows.querySelectorAll("[data-locus-row]"))
+            .map((wrap) => {
+                const locusInput = wrap.querySelector("input[data-locus-name]");
+                const typeSelect = wrap.querySelector("select[data-locus-type]");
+                const chrSelect = wrap.querySelector("select[data-chromosome-type]");
+                const locus_name = (locusInput?.value || "").trim();
+                const locus_type = (typeSelect?.value || "custom").trim() || "custom";
+                const chromosome_type = (chrSelect?.value || "autosomal").trim() || "autosomal";
+                if (!locus_name) return null;
+                return { locus_name, locus_type, chromosome_type };
+            })
+            .filter(Boolean);
+        hidden.value = values.map(v => v.locus_name).join("\n");
+        hiddenConfig.value = JSON.stringify(values);
+    }
+
+    function appendRow(value = { locus_name: "", locus_type: "custom" }) {
+        const wrap = document.createElement("div");
+        wrap.className = "form-row";
+        wrap.setAttribute("data-locus-row", "1");
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "e.g. Lyz2-Cre";
+        input.value = value.locus_name || "";
+        input.setAttribute("data-locus-name", "1");
+        input.addEventListener("input", syncHidden);
+
+        const typeSelect = document.createElement("select");
+        typeSelect.setAttribute("data-locus-type", "1");
+        LOCUS_TYPES.forEach(([val, label]) => {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = label;
+            if ((value.locus_type || "custom") === val) {
+                opt.selected = true;
+            }
+            typeSelect.appendChild(opt);
+        });
+        typeSelect.addEventListener("change", syncHidden);
+
+            const chrSelect = document.createElement("select");
+            chrSelect.setAttribute("data-chromosome-type", "1");
+            CHROMOSOME_TYPES.forEach(([val, label]) => {
+                const opt = document.createElement("option");
+                opt.value = val;
+                opt.textContent = label;
+                if ((value.chromosome_type || "autosomal") === val) {
+                    opt.selected = true;
+                }
+                chrSelect.appendChild(opt);
+            });
+            chrSelect.addEventListener("change", syncHidden);
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "button button-light";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+            wrap.remove();
+            syncHidden();
+        });
+
+        wrap.appendChild(input);
+        wrap.appendChild(typeSelect);
+        wrap.appendChild(chrSelect);
+        wrap.appendChild(remove);
+        rows.appendChild(wrap);
+    }
+
+    const values = valuesFromHidden();
+    if (values.length) {
+        values.forEach(v => appendRow(v));
+    } else {
+        appendRow("");
+    }
+    addBtn.addEventListener("click", () => appendRow(""));
+    syncHidden();
+})();
+</script>
 {% endblock %}

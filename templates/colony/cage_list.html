@@ -12,17 +12,14 @@
         <div class="action-links action-links--primary">
             <a class="button" href="{% url 'colony:cage_create' %}">New Cage</a>
             {% if can_import %}
-                <a class="button button-secondary" href="{% url 'colony:cage_import' %}">Import Cages</a>
+                <a class="button" href="{% url 'colony:cage_import' %}">Import Cages</a>
             {% endif %}
         </div>
         {% if user.is_authenticated %}
-            <details class="more-actions more-actions--inline">
-                <summary class="more-actions__summary">Export</summary>
-                <div class="action-links action-links--stack">
-                    <a class="button button-ghost" href="{% url 'colony:cages_export' %}">Export Cages (CSV)</a>
-                    <a class="button button-ghost" href="{% url 'colony:cages_export_xlsx' %}">Export Cages (Excel)</a>
-                </div>
-            </details>
+            <div class="action-links action-links--stack">
+                <a class="button button-export" href="{% url 'colony:cages_export' %}">Export Cages (CSV)</a>
+                <a class="button button-export" href="{% url 'colony:cages_export_xlsx' %}">Export Cages (Excel)</a>
+            </div>
         {% endif %}
     </div>
 </section>
@@ -53,33 +50,30 @@
                 <a href="{% url 'colony:cage_list' %}" class="button button-reset">Reset</a>
             </div>
         </div>
-        <details class="filter-more" {% if room or rack or cage_type or include_inactive == "yes" or is_empty %}open{% endif %}>
-            <summary class="filter-more__summary">More filters</summary>
-            <div class="filter-row filter-row--secondary">
-                <select name="room" class="filter-control">
-                    <option value="">All Rooms</option>
-                    {% for value in room_options %}
-                        <option value="{{ value }}" {% if room == value %}selected{% endif %}>{{ value }}</option>
-                    {% endfor %}
-                </select>
-                <select name="rack" class="filter-control">
-                    <option value="">All Racks</option>
-                    {% for value in rack_options %}
-                        <option value="{{ value }}" {% if rack == value %}selected{% endif %}>{{ value }}</option>
-                    {% endfor %}
-                </select>
-                <select name="cage_type" class="filter-control">
-                    <option value="">All Cage Types</option>
-                    {% for value, label in cage_type_options %}
-                        <option value="{{ value }}" {% if cage_type == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                </select>
-                <select name="include_inactive" class="filter-control">
-                    <option value="">Active Only</option>
-                    <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
-                </select>
-            </div>
-        </details>
+        <div class="filter-row filter-row--secondary">
+            <select name="room" class="filter-control">
+                <option value="">All Rooms</option>
+                {% for value in room_options %}
+                    <option value="{{ value }}" {% if room == value %}selected{% endif %}>{{ value }}</option>
+                {% endfor %}
+            </select>
+            <select name="rack" class="filter-control">
+                <option value="">All Racks</option>
+                {% for value in rack_options %}
+                    <option value="{{ value }}" {% if rack == value %}selected{% endif %}>{{ value }}</option>
+                {% endfor %}
+            </select>
+            <select name="cage_type" class="filter-control">
+                <option value="">All Cage Types</option>
+                {% for value, label in cage_type_options %}
+                    <option value="{{ value }}" {% if cage_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="include_inactive" class="filter-control">
+                <option value="">Active Only</option>
+                <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
+            </select>
+        </div>
         <div class="filter-row filter-row--secondary filter-row--per-page">
             <label class="filter-label" for="id_per_page_cage">Per page</label>
             <select name="per_page" id="id_per_page_cage" class="filter-control" onchange="this.form.requestSubmit()">
@@ -116,7 +110,6 @@
                 <th class="col-num"># Mice</th>
                 <th>Project</th>
                 <th>Owner</th>
-                <th>Genotype Overview</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -134,7 +127,6 @@
                     {% for pr in cage.project_rows %}
                         <div class="cage-projects-cell__row">
                             <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
-                            <span class="muted"> ({{ pr.n }})</span>
                         </div>
                     {% empty %}
                         <span class="cell-empty">—</span>
@@ -143,18 +135,17 @@
                 <td class="cage-owners-cell">
                     {% for pr in cage.project_rows %}
                         <div class="cage-projects-cell__row">
-                            {{ pr.owner_display }}
+                            <a class="link-primary" href="{% url 'accounts:user_detail' pr.project.owner_id %}">{{ pr.owner_display }}</a>
                         </div>
                     {% empty %}
                         <span class="cell-empty">—</span>
                     {% endfor %}
                 </td>
-                <td class="cage-genotype-overview">{% if cage.genotype_overview and cage.genotype_overview != "-" %}{{ cage.genotype_overview }}{% else %}<span class="cell-empty">—</span>{% endif %}</td>
                 <td><span class="status-pill status-pill--cage status-pill--cage-{{ cage.status }}">{{ cage.get_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="11" class="empty-row">No cages found.</td>
+                <td colspan="10" class="empty-row">No cages found.</td>
             </tr>
             {% endfor %}
         </tbody>

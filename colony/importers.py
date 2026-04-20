@@ -162,7 +162,7 @@ def parse_cage_import(uploaded_file, *, id_prefix: str | None = None) -> CageImp
     return CageImportResult(rows=rows, errors=errors)
 
 
-MOUSE_EXPECTED_COLUMNS = [
+MOUSE_BASE_COLUMNS = [
     "mouse_uid",
     "sex",
     "birth_date",
@@ -211,10 +211,57 @@ GENOTYPE_EXPECTED_COLUMNS = [
     for col in _genotype_slot_columns(slot)
 ]
 
-MOUSE_EXPECTED_COLUMNS = MOUSE_EXPECTED_COLUMNS + GENOTYPE_EXPECTED_COLUMNS
+MOUSE_EXPECTED_COLUMNS = MOUSE_BASE_COLUMNS + GENOTYPE_EXPECTED_COLUMNS
+MOUSE_IMPORT_TEMPLATE_COLUMNS = MOUSE_BASE_COLUMNS + [
+    "Lyz2-Cre",
+    "Tet2",
+    "Gpr82",
+    "Foxp3-Cre",
+    "Rosa26-LSL-tdTomato",
+    "CA/TA/RA-KI",
+]
 
 MOUSE_REQUIRED_COLUMNS = ["mouse_uid", "strain_line"]
-MOUSE_OPTIONAL_COLUMNS = [col for col in MOUSE_EXPECTED_COLUMNS if col not in MOUSE_REQUIRED_COLUMNS]
+MOUSE_OPTIONAL_COLUMNS = [col for col in MOUSE_BASE_COLUMNS if col not in MOUSE_REQUIRED_COLUMNS]
+
+
+def _infer_chromosome_type(allele_1: str, allele_2: str) -> str:
+    if (allele_2 or "").upper() == "Y":
+        return "x_linked"
+    return "unknown"
+
+
+def _infer_zygosity_class(allele_1: str, allele_2: str) -> str:
+    a1 = (allele_1 or "").strip()
+    a2 = (allele_2 or "").strip()
+    if not (a1 and a2):
+        return "unknown"
+    if a2.upper() == "Y":
+        return "hemizygous"
+    if a1 == a2:
+        if a1 in {"+", "wt", "WT"}:
+            return "wt"
+        return "hom"
+    return "het"
+
+
+def _parse_genotype_display(text: str, row_number: int, locus_name: str, errors: list[str]) -> tuple[str, str, str] | None:
+    raw = _to_text(text)
+    if not raw:
+        return None
+    normalized = raw.replace(" ", "")
+    if "/" not in normalized:
+        errors.append(
+            f"Row {row_number}: locus '{locus_name}' value '{raw}' is invalid. Use genotype like +/-, fl/fl, Cre/Y."
+        )
+        return None
+    allele_1, allele_2 = [part.strip() for part in normalized.split("/", 1)]
+    if not allele_1 or not allele_2:
+        errors.append(
+            f"Row {row_number}: locus '{locus_name}' value '{raw}' is invalid. Both alleles are required."
+        )
+        return None
+    return allele_1, allele_2, f"{allele_1}/{allele_2}"
 
 
 def _parse_date(value, row_number: int, field_name: str, errors: list[str]) -> date | None:
@@ -268,7 +315,10 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
     for optional_col in MOUSE_OPTIONAL_COLUMNS:
         if optional_col not in dataframe.columns:
             dataframe[optional_col] = ""
-    genotype_slots = _detect_genotype_slots(list(dataframe.columns))
+    detected_slots = _detect_genotype_slots(list(dataframe.columns))
+    slot_columns = {col for slot in detected_slots for col in _genotype_slot_columns(slot)}
+    base_known_columns = set(MOUSE_BASE_COLUMNS) | slot_columns
+    locus_columns = [col for col in dataframe.columns if col and col not in base_known_columns]
 
     existing_mice: set[str] = set()
     existing_cages: set[str] = set()
@@ -284,7 +334,7 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
     seen_mouse_uids: set[str] = set()
     uid_to_row_number: dict[str, int] = {}
 
-    for index, record in dataframe[MOUSE_EXPECTED_COLUMNS].iterrows():
+    for index, record in dataframe.iterrows():
         row_number = index + 2
         mouse_uid = _to_text(record.get("mouse_uid"))
         sex = _to_text(record.get("sex"))
@@ -324,8 +374,9 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
         if not strain_line_name:
             errors.append(f"Row {row_number}: strain_line is required.")
 
-        genotype_slots: list[dict] = []
-        for slot in genotype_slots:
+        genotype_components: list[dict] = []
+        component_by_locus: dict[str, dict] = {}
+        for slot in detected_slots:
             prefix = f"genotype_{slot}_"
             locus = _to_text(record.get(f"{prefix}locus"))
             allele_1 = _to_text(record.get(f"{prefix}allele_1"))
@@ -349,18 +400,58 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
             if not locus:
                 errors.append(f"Row {row_number}: {prefix}locus is required when genotype slot has data.")
                 continue
-            genotype_slots.append(
-                {
-                    "slot": slot,
-                    "locus_name": locus,
-                    "allele_1": allele_1,
-                    "allele_2": allele_2,
-                    "zygosity_display": zygosity,
-                    "is_confirmed": bool(is_confirmed) if is_confirmed is not None else False,
-                    "assay_date": assay_date,
-                    "notes": genotype_notes,
-                }
-            )
+            if not (allele_1 and allele_2) and zygosity:
+                parsed = _parse_genotype_display(zygosity, row_number, locus, errors)
+                if parsed is not None:
+                    allele_1, allele_2, zygosity = parsed
+            elif allele_1 and allele_2 and not zygosity:
+                zygosity = f"{allele_1}/{allele_2}"
+
+            comp = {
+                "slot": slot,
+                "locus_name": locus,
+                "allele_1": allele_1,
+                "allele_2": allele_2,
+                "zygosity_display": zygosity,
+                "zygosity_class": _infer_zygosity_class(allele_1, allele_2),
+                "chromosome_type": _infer_chromosome_type(allele_1, allele_2),
+                "is_confirmed": bool(is_confirmed) if is_confirmed is not None else False,
+                "assay_date": assay_date,
+                "notes": genotype_notes,
+            }
+            key = locus.casefold()
+            if key in component_by_locus:
+                errors.append(f"Row {row_number}: duplicate genotype locus '{locus}' in import row.")
+                continue
+            component_by_locus[key] = comp
+            genotype_components.append(comp)
+
+        for locus_col in locus_columns:
+            display_value = _to_text(record.get(locus_col))
+            if not display_value:
+                continue
+            parsed = _parse_genotype_display(display_value, row_number, locus_col, errors)
+            if parsed is None:
+                continue
+            allele_1, allele_2, zygosity = parsed
+            key = locus_col.casefold()
+            if key in component_by_locus:
+                errors.append(f"Row {row_number}: duplicate genotype locus '{locus_col}' in import row.")
+                continue
+            comp = {
+                "slot": 0,
+                "locus_name": locus_col,
+                "allele_1": allele_1,
+                "allele_2": allele_2,
+                "zygosity_display": zygosity,
+                "zygosity_class": _infer_zygosity_class(allele_1, allele_2),
+                "chromosome_type": _infer_chromosome_type(allele_1, allele_2),
+                "is_confirmed": False,
+                "assay_date": None,
+                "notes": "",
+            }
+            component_by_locus[key] = comp
+            genotype_components.append(comp)
 
         rows.append(
             {
@@ -379,7 +470,8 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
                 "notes": _to_text(record.get("notes")),
                 "sire_uid": sire_uid,
                 "dam_uid": dam_uid,
-                "genotype_slots": genotype_slots,
+                "genotype_components": genotype_components,
+                "genotype_slots": genotype_components,
             }
         )
 

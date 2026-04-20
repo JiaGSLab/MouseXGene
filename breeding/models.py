@@ -6,9 +6,14 @@ from colony.models import Cage, Mouse, TimeStampedModel
 
 
 class Breeding(models.Model):
+    class MemberRole(models.TextChoices):
+        SIRE = "sire", "Sire"
+        DAM = "dam", "Dam"
+
     class BreedingType(models.TextChoices):
         PAIR = "pair", "Pair"
         TRIO = "trio", "Trio"
+        CUSTOM = "custom", "Custom"
 
     class Status(models.TextChoices):
         SETUP = "setup", "Setup"
@@ -57,6 +62,36 @@ class Breeding(models.Model):
 
     def __str__(self) -> str:
         return self.breeding_code
+
+    def sync_members_from_legacy_fields(self) -> None:
+        """Keep flexible breeding members synced from legacy fixed fields."""
+        entries: list[tuple[str, int, Mouse]] = []
+        if self.male_id:
+            entries.append((self.MemberRole.SIRE, 1, self.male))
+        if self.female_1_id:
+            entries.append((self.MemberRole.DAM, 1, self.female_1))
+        if self.female_2_id:
+            entries.append((self.MemberRole.DAM, 2, self.female_2))
+        for idx, link in enumerate(self.extra_female_links.select_related("mouse").order_by("mouse__mouse_uid"), start=3):
+            entries.append((self.MemberRole.DAM, idx, link.mouse))
+
+        BreedingMember.objects.filter(breeding=self).exclude(mouse_id__in=[m.pk for _, _, m in entries]).delete()
+        existing = {(m.mouse_id, m.role): m for m in BreedingMember.objects.filter(breeding=self)}
+        to_create: list[BreedingMember] = []
+        to_update: list[BreedingMember] = []
+        for role, sort_order, mouse in entries:
+            key = (mouse.pk, role)
+            found = existing.get(key)
+            if found:
+                if found.sort_order != sort_order:
+                    found.sort_order = sort_order
+                    to_update.append(found)
+            else:
+                to_create.append(BreedingMember(breeding=self, mouse=mouse, role=role, sort_order=sort_order))
+        if to_create:
+            BreedingMember.objects.bulk_create(to_create)
+        if to_update:
+            BreedingMember.objects.bulk_update(to_update, ["sort_order"])
 
 
 class Litter(models.Model):
@@ -159,3 +194,47 @@ class LitterPup(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"Pup {self.sort_order or self.pk} on {self.litter}"
+
+
+class BreedingExtraFemale(models.Model):
+    """Optional additional female breeders for flexible mating setups."""
+
+    breeding = models.ForeignKey(Breeding, on_delete=models.CASCADE, related_name="extra_female_links")
+    mouse = models.ForeignKey(Mouse, on_delete=models.PROTECT, related_name="extra_female_breedings")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["breeding", "mouse"], name="uq_breeding_extra_female"),
+        ]
+        ordering = ("breeding", "mouse__mouse_uid")
+
+    def clean(self) -> None:
+        if self.mouse and self.mouse.sex != Mouse.Sex.FEMALE:
+            raise ValidationError("extra breeder mouse must be female.")
+
+    def __str__(self) -> str:
+        return f"{self.breeding.breeding_code} + {self.mouse.mouse_uid}"
+
+
+class BreedingMember(models.Model):
+    """Flexible breeder membership model (transition from fixed legacy fields)."""
+
+    breeding = models.ForeignKey(Breeding, on_delete=models.CASCADE, related_name="breeding_members")
+    mouse = models.ForeignKey(Mouse, on_delete=models.PROTECT, related_name="breeding_memberships")
+    role = models.CharField(max_length=12, choices=Breeding.MemberRole.choices)
+    sort_order = models.PositiveSmallIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["breeding", "mouse"], name="uq_breeding_member_mouse"),
+        ]
+        ordering = ("breeding", "role", "sort_order", "mouse__mouse_uid")
+
+    def clean(self) -> None:
+        if self.role == Breeding.MemberRole.SIRE and self.mouse.sex != Mouse.Sex.MALE:
+            raise ValidationError("Sire role requires a male mouse.")
+        if self.role == Breeding.MemberRole.DAM and self.mouse.sex != Mouse.Sex.FEMALE:
+            raise ValidationError("Dam role requires a female mouse.")
+
+    def __str__(self) -> str:
+        return f"{self.breeding.breeding_code} {self.get_role_display()} {self.mouse.mouse_uid}"

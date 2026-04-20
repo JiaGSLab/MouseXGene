@@ -25,12 +25,13 @@ from .importers import (
     EXPECTED_COLUMNS,
     GENOTYPE_SLOT_COUNT,
     MOUSE_EXPECTED_COLUMNS,
+    MOUSE_IMPORT_TEMPLATE_COLUMNS,
     MouseImportOptions,
     parse_cage_import,
     parse_mouse_import,
 )
 from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine
-from breeding.models import Litter
+from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
 from core.history import actor_summary_for_audit_entries, audit_entries_for_object, summarize_modelform_changes
@@ -400,8 +401,396 @@ def build_cage_genotype_overview(mice: list[Mouse], *, sample_size: int = 3) -> 
     return "\n".join(preview_parts)
 
 
+def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, list[dict[str, str]]]:
+    out: dict[int, list[dict[str, str]]] = {mid: [] for mid in mouse_ids}
+    if not mouse_ids:
+        return out
+    breedings = (
+        Breeding.objects.filter(active=True)
+        .filter(
+            Q(male_id__in=mouse_ids)
+            | Q(female_1_id__in=mouse_ids)
+            | Q(female_2_id__in=mouse_ids)
+            | Q(extra_female_links__mouse_id__in=mouse_ids)
+        )
+        .prefetch_related("extra_female_links")
+        .distinct()
+    )
+    for breeding in breedings:
+        if breeding.male_id in out:
+            out[breeding.male_id].append({"role": "Sire", "code": breeding.breeding_code})
+        if breeding.female_1_id in out:
+            out[breeding.female_1_id].append({"role": "Dam", "code": breeding.breeding_code})
+        if breeding.female_2_id in out:
+            out[breeding.female_2_id].append({"role": "Dam", "code": breeding.breeding_code})
+        for row in breeding.extra_female_links.all():
+            if row.mouse_id in out:
+                out[row.mouse_id].append({"role": "Dam", "code": breeding.breeding_code})
+    return out
+
+
 def _normalize_name(value: str | None) -> str:
     return (value or "").strip()
+
+
+def _strain_template_loci_map() -> dict[str, list[dict[str, str]]]:
+    out: dict[str, list[dict[str, str]]] = {}
+    for line in StrainLine.objects.filter(is_active=True).order_by("line_name"):
+        out[str(line.pk)] = line.expected_loci_entries()
+    return out
+
+
+def _extract_mouse_genotype_rows_from_post(request: HttpRequest) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    try:
+        total = int(request.POST.get("genotype_row_count", "0"))
+    except ValueError:
+        total = 0
+    total = max(0, min(total, 200))
+    for idx in range(total):
+        locus = (request.POST.get(f"genotype_locus_{idx}") or "").strip()
+        genotype = (request.POST.get(f"genotype_display_{idx}") or "").strip()
+        if not locus:
+            continue
+        rows.append({"locus": locus, "genotype": genotype})
+    return rows
+
+
+def _template_loci_union_for_mouse_relations(
+    *,
+    strain_line: StrainLine | None = None,
+    sire: Mouse | None = None,
+    dam: Mouse | None = None,
+) -> list[dict[str, str]]:
+    ordered: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add_many(values: list[dict[str, str]]) -> None:
+        for entry in values:
+            text = (entry.get("locus_name") or "").strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            locus_type = entry.get("locus_type") or StrainLine.LocusType.CUSTOM
+            chromosome_type = entry.get("chromosome_type") or StrainLine.ChromosomeType.AUTOSOMAL
+            ordered.append(
+                {
+                    "locus_name": text,
+                    "locus_type": locus_type,
+                    "chromosome_type": chromosome_type,
+                }
+            )
+
+    if strain_line is not None:
+        add_many(strain_line.expected_loci_entries())
+    if sire is not None and sire.strain_line_id:
+        add_many(sire.strain_line.expected_loci_entries())
+    if dam is not None and dam.strain_line_id:
+        add_many(dam.strain_line.expected_loci_entries())
+    return ordered
+
+
+def _editable_template_loci_for_mouse(mouse: Mouse) -> tuple[list[str], bool]:
+    """
+    Return editable loci template + whether parent-union source is used.
+
+    Priority:
+    1) If mouse has both sire and dam, use union of sire+dam strain-line templates.
+    2) Else fallback to mouse strain-line template.
+    3) Else no loci.
+    """
+    if mouse.sire_id and mouse.dam_id:
+        parent_rows = _template_loci_union_for_mouse_relations(sire=mouse.sire, dam=mouse.dam)
+        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
+        if parent_loci:
+            return parent_loci, True
+    if mouse.strain_line_id:
+        return mouse.strain_line.expected_loci_list(), False
+    return [], False
+
+
+def _resolved_template_loci_for_context(
+    *,
+    strain_line: StrainLine | None,
+    sire: Mouse | None,
+    dam: Mouse | None,
+) -> list[str]:
+    """Resolve logical template loci with parental-union priority."""
+    if sire is not None and dam is not None:
+        parent_rows = _template_loci_union_for_mouse_relations(sire=sire, dam=dam)
+        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
+        if parent_loci:
+            return parent_loci
+    if strain_line is not None:
+        return strain_line.expected_loci_list()
+    return []
+
+
+def _component_has_meaningful_truth(component: MouseGenotypeComponent) -> bool:
+    allele_1 = (component.allele_display_1 or "").strip()
+    allele_2 = (component.allele_display_2 or "").strip()
+    zygosity = (component.zygosity or "").strip()
+    if zygosity == "-":
+        zygosity = ""
+    if allele_1 == "-":
+        allele_1 = ""
+    if allele_2 == "-":
+        allele_2 = ""
+    return bool((allele_1 and allele_2) or zygosity)
+
+
+def _mouse_has_meaningful_genotype_truth(mouse: Mouse) -> bool:
+    return any(_component_has_meaningful_truth(c) for c in mouse.genotype_components.all())
+
+
+def _mouse_component_loci_set(mouse: Mouse) -> set[str]:
+    loci: set[str] = set()
+    for c in mouse.genotype_components.all():
+        locus = StrainLine.normalize_locus_name((c.locus_name or "").strip())
+        if locus:
+            loci.add(locus.casefold())
+    return loci
+
+
+def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: list[str]) -> None:
+    target_keys = {StrainLine.normalize_locus_name(l).casefold() for l in target_loci if StrainLine.normalize_locus_name(l)}
+    if mode == "replace":
+        mouse.genotype_components.all().delete()
+        mouse.ensure_template_genotype_components(extra_loci=list(target_loci), include_strain_template=False)
+        mouse.rebuild_genotype_summary(save=True)
+        return
+    # overlap-safe mode: keep only loci that overlap with target template
+    for c in mouse.genotype_components.all():
+        locus = StrainLine.normalize_locus_name((c.locus_name or "").strip())
+        if not locus or locus.casefold() not in target_keys:
+            c.delete()
+    mouse.rebuild_genotype_summary(save=True)
+
+
+def _mouse_to_strain_line_map() -> dict[str, str]:
+    return {str(pk): str(strain_id) for pk, strain_id in Mouse.objects.values_list("pk", "strain_line_id")}
+
+
+def _infer_chromosome_type_for_mouse_genotype(allele_2: str) -> str:
+    if (allele_2 or "").upper() == "Y":
+        return MouseGenotypeComponent.ChromosomeType.X_LINKED
+    return MouseGenotypeComponent.ChromosomeType.UNKNOWN
+
+
+def _infer_zygosity_class_for_mouse_genotype(allele_1: str, allele_2: str) -> str:
+    a1 = (allele_1 or "").strip()
+    a2 = (allele_2 or "").strip()
+    if not (a1 and a2):
+        return MouseGenotypeComponent.ZygosityClass.UNKNOWN
+    if a2.upper() == "Y":
+        return MouseGenotypeComponent.ZygosityClass.HEMIZYGOUS
+    if a1 == a2:
+        if a1 in {"+", "wt", "WT"}:
+            return MouseGenotypeComponent.ZygosityClass.WT
+        return MouseGenotypeComponent.ZygosityClass.HOM
+    return MouseGenotypeComponent.ZygosityClass.HET
+
+
+def _apply_mouse_genotype_rows(mouse: Mouse, rows: list[dict[str, str]]) -> int:
+    updated = 0
+    for i, row in enumerate(rows):
+        locus = StrainLine.normalize_locus_name(row["locus"])
+        if not locus:
+            continue
+        display = row["genotype"]
+        if not display:
+            continue
+        cleaned = display.replace(" ", "")
+        if "/" not in cleaned:
+            continue
+        allele_1, allele_2 = [part.strip() for part in cleaned.split("/", 1)]
+        if not (allele_1 and allele_2):
+            continue
+        obj, _ = MouseGenotypeComponent.objects.get_or_create(
+            mouse=mouse,
+            locus_name=locus,
+            defaults={
+                "strain_line": mouse.strain_line,
+                "sort_order": i + 1,
+            },
+        )
+        obj.strain_line = mouse.strain_line
+        obj.zygosity = f"{allele_1}/{allele_2}"
+        obj.allele_display_1 = allele_1
+        obj.allele_display_2 = allele_2
+        obj.chromosome_type = _infer_chromosome_type_for_mouse_genotype(allele_2)
+        obj.zygosity_class = _infer_zygosity_class_for_mouse_genotype(allele_1, allele_2)
+        obj.save()
+        updated += 1
+    if updated:
+        mouse.rebuild_genotype_summary(save=True)
+    return updated
+
+
+def _apply_mouse_genotype_rows_to_template(mouse: Mouse, rows: list[dict[str, str]], template_rows: list[dict[str, str]]) -> int:
+    row_map: dict[str, str] = {}
+    for row in rows:
+        locus = StrainLine.normalize_locus_name(row.get("locus") or "")
+        if not locus:
+            continue
+        row_map[locus.casefold()] = (row.get("genotype") or "").strip()
+    components = {
+        StrainLine.normalize_locus_name((c.locus_name or "").strip()).casefold(): c
+        for c in mouse.genotype_components.all()
+        if StrainLine.normalize_locus_name((c.locus_name or "").strip())
+    }
+    updated = 0
+    for template in template_rows:
+        locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
+        if not locus:
+            continue
+        key = locus.casefold()
+        component = components.get(key)
+        if component is None:
+            continue
+        raw = (row_map.get(key) or "").strip()
+        if raw == "-":
+            raw = ""
+        before = (
+            component.zygosity or "",
+            component.allele_display_1 or "",
+            component.allele_display_2 or "",
+            component.chromosome_type or "",
+            component.zygosity_class or "",
+        )
+        if not raw:
+            component.zygosity = ""
+            component.allele_display_1 = ""
+            component.allele_display_2 = ""
+            component.chromosome_type = template.get("chromosome_type") or MouseGenotypeComponent.ChromosomeType.UNKNOWN
+            component.zygosity_class = MouseGenotypeComponent.ZygosityClass.UNKNOWN
+        else:
+            cleaned = raw.replace(" ", "")
+            if "/" in cleaned:
+                allele_1, allele_2 = [part.strip() for part in cleaned.split("/", 1)]
+                component.zygosity = f"{allele_1}/{allele_2}" if allele_1 and allele_2 else cleaned
+                component.allele_display_1 = allele_1
+                component.allele_display_2 = allele_2
+                component.chromosome_type = _infer_chromosome_type_for_mouse_genotype(allele_2)
+                component.zygosity_class = _infer_zygosity_class_for_mouse_genotype(allele_1, allele_2)
+            else:
+                component.zygosity = cleaned
+                component.allele_display_1 = ""
+                component.allele_display_2 = ""
+                component.chromosome_type = template.get("chromosome_type") or MouseGenotypeComponent.ChromosomeType.UNKNOWN
+                component.zygosity_class = MouseGenotypeComponent.ZygosityClass.UNKNOWN
+        after = (
+            component.zygosity or "",
+            component.allele_display_1 or "",
+            component.allele_display_2 or "",
+            component.chromosome_type or "",
+            component.zygosity_class or "",
+        )
+        if after != before:
+            component.save()
+            updated += 1
+    if updated:
+        mouse.rebuild_genotype_summary(save=True)
+    return updated
+
+
+def _genotype_components_signature(mouse: Mouse) -> list[tuple]:
+    """Stable snapshot for change detection before/after edits."""
+    components = (
+        mouse.genotype_components.select_related("strain_line")
+        .order_by("sort_order", "id")
+        .values_list(
+            "sort_order",
+            "locus_name",
+            "chromosome_type",
+            "zygosity_class",
+            "zygosity",
+            "allele_display_1",
+            "allele_display_2",
+            "notes",
+            "strain_line_id",
+        )
+    )
+    return list(components)
+
+
+def _signature_component_key(row: tuple) -> str:
+    sort_order, locus_name, _chromosome_type, _zygosity_class, _zygosity, _a1, _a2, _notes, strain_line_id = row
+    locus = (locus_name or "").strip()
+    if locus:
+        return locus.casefold()
+    return f"component:{sort_order}:{strain_line_id or 'na'}"
+
+
+def _signature_component_display(row: tuple) -> tuple[str, str]:
+    sort_order, locus_name, _chromosome_type, _zygosity_class, zygosity, allele_1, allele_2, _notes, _strain_line_id = row
+    label = (locus_name or "").strip() or f"Component {sort_order}"
+    genotype = (zygosity or "").strip()
+    if not genotype:
+        parts = [p for p in [(allele_1 or "").strip(), (allele_2 or "").strip()] if p]
+        genotype = "/".join(parts)
+    if genotype == "-":
+        genotype = ""
+    return label, (genotype or "")
+
+
+def _build_specific_genotype_history_lines(before: list[tuple], after: list[tuple]) -> list[str]:
+    before_map = {_signature_component_key(row): row for row in before}
+    after_map = {_signature_component_key(row): row for row in after}
+    keys = sorted(set(before_map.keys()) | set(after_map.keys()))
+    lines: list[str] = []
+    for key in keys:
+        prev = before_map.get(key)
+        curr = after_map.get(key)
+        if prev is None and curr is not None:
+            label, now_text = _signature_component_display(curr)
+            if now_text:
+                lines.append(f"Added {label}: {now_text}")
+            continue
+        if prev is not None and curr is None:
+            label, _old_text = _signature_component_display(prev)
+            prev_label, prev_text = _signature_component_display(prev)
+            if prev_text:
+                lines.append(f"Removed {prev_label}")
+            continue
+        if prev is not None and curr is not None:
+            prev_label, prev_text = _signature_component_display(prev)
+            curr_label, curr_text = _signature_component_display(curr)
+            label = curr_label or prev_label
+            if prev_text != curr_text:
+                if not prev_text and curr_text:
+                    lines.append(f"Added {label}: {curr_text}")
+                    continue
+                if prev_text and not curr_text:
+                    lines.append(f"Removed {label}")
+                    continue
+                lines.append(f"Updated {label}: {prev_text} -> {curr_text}")
+    return lines
+
+
+def _log_specific_genotype_changes(
+    *,
+    user,
+    mouse: Mouse,
+    before_signature: list[tuple],
+    after_signature: list[tuple],
+    source_label: str,
+) -> None:
+    if after_signature == before_signature:
+        return
+    lines = _build_specific_genotype_history_lines(before_signature, after_signature)
+    if not lines:
+        return
+    message = f"Genotype changes ({source_label}):\n" + "\n".join(f"- {line}" for line in lines)
+    log_audit_event(
+        user=user,
+        action=AuditLog.Action.UPDATE,
+        obj=mouse,
+        message=message[:4000],
+    )
 
 
 def _build_strain_line_lookup() -> dict[str, StrainLine]:
@@ -487,15 +876,6 @@ def _execute_two_pass_mouse_import(
             ]
         )
         project_lookup = {project.name: project for project in Project.objects.all()}
-        if getattr(acting_user, "is_authenticated", False):
-            for name in missing_projects:
-                project = project_lookup.get(name)
-                if project is not None:
-                    ProjectMembership.objects.get_or_create(
-                        project=project,
-                        user=acting_user,
-                        defaults={"role": ProjectMembership.Role.MANAGER},
-                    )
 
     for name in referenced_project_names:
         project = project_lookup.get(name)
@@ -642,49 +1022,65 @@ def _execute_two_pass_mouse_import(
         ]
     )
 
-    # Pass 3: import genotype slots embedded in each mouse row.
-    genotype_to_create: list[MouseGenotype] = []
-    genotype_to_update: list[MouseGenotype] = []
+    # Pass 3: import structured genotype components from per-locus columns / legacy slots.
+    genotype_to_create: list[MouseGenotypeComponent] = []
+    genotype_to_update: list[MouseGenotypeComponent] = []
     existing_by_mouse_locus = {
-        (gt.mouse_id, gt.locus_name): gt
-        for gt in MouseGenotype.objects.filter(mouse_id__in=[m.id for m in created_mice_by_uid.values()])
+        (gt.mouse_id, (gt.locus_name or "").casefold()): gt
+        for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in created_mice_by_uid.values()])
     }
     for row in rows:
         mouse = created_mice_by_uid.get(row["mouse_uid"])
         if mouse is None:
             continue
-        for slot in row.get("genotype_slots", []):
-            key = (mouse.id, slot["locus_name"])
+        for slot in row.get("genotype_components", row.get("genotype_slots", [])):
+            locus_name = (slot.get("locus_name") or "").strip()
+            if not locus_name:
+                continue
+            key = (mouse.id, locus_name.casefold())
             existing = existing_by_mouse_locus.get(key)
             if existing is None:
-                obj = MouseGenotype(
+                obj = MouseGenotypeComponent(
                     mouse=mouse,
-                    gene=None,
-                    locus_name=slot["locus_name"],
-                    allele_1=slot["allele_1"],
-                    allele_2=slot["allele_2"],
-                    zygosity_display=slot["zygosity_display"],
-                    is_confirmed=slot["is_confirmed"],
-                    assay_date=slot["assay_date"],
+                    strain_line=mouse.strain_line,
+                    locus_name=locus_name,
+                    chromosome_type=slot.get("chromosome_type") or MouseGenotypeComponent.ChromosomeType.UNKNOWN,
+                    zygosity_class=slot.get("zygosity_class") or MouseGenotypeComponent.ZygosityClass.UNKNOWN,
+                    zygosity=slot.get("zygosity_display", ""),
+                    allele_display_1=slot.get("allele_1", ""),
+                    allele_display_2=slot.get("allele_2", ""),
+                    sort_order=slot.get("slot", 0) or 0,
                     notes=slot["notes"],
                 )
                 genotype_to_create.append(obj)
             else:
-                existing.allele_1 = slot["allele_1"]
-                existing.allele_2 = slot["allele_2"]
-                existing.zygosity_display = slot["zygosity_display"]
-                existing.is_confirmed = slot["is_confirmed"]
-                existing.assay_date = slot["assay_date"]
+                existing.strain_line = mouse.strain_line
+                existing.chromosome_type = slot.get("chromosome_type") or existing.chromosome_type
+                existing.zygosity_class = slot.get("zygosity_class") or existing.zygosity_class
+                existing.zygosity = slot.get("zygosity_display", "")
+                existing.allele_display_1 = slot.get("allele_1", "")
+                existing.allele_display_2 = slot.get("allele_2", "")
                 existing.notes = slot["notes"]
                 genotype_to_update.append(existing)
 
     if genotype_to_create:
-        MouseGenotype.objects.bulk_create(genotype_to_create)
+        MouseGenotypeComponent.objects.bulk_create(genotype_to_create)
     if genotype_to_update:
-        MouseGenotype.objects.bulk_update(
+        MouseGenotypeComponent.objects.bulk_update(
             genotype_to_update,
-            ["allele_1", "allele_2", "zygosity_display", "is_confirmed", "assay_date", "notes"],
+            [
+                "strain_line",
+                "chromosome_type",
+                "zygosity_class",
+                "zygosity",
+                "allele_display_1",
+                "allele_display_2",
+                "notes",
+            ],
         )
+    if genotype_to_create or genotype_to_update:
+        for mouse in created_mice_by_uid.values():
+            mouse.rebuild_genotype_summary(save=True)
 
     return {
         "created_mice": len(created_mice_by_uid),
@@ -698,28 +1094,70 @@ def _execute_two_pass_mouse_import(
 
 @authenticated_required
 def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpResponse:
-    mouse = get_object_or_404(Mouse.objects.select_related("strain_line", "project"), pk=pk)
+    mouse = get_object_or_404(
+        Mouse.objects.select_related(
+            "project",
+            "strain_line",
+            "sire",
+            "sire__strain_line",
+            "dam",
+            "dam__strain_line",
+        ),
+        pk=pk,
+    )
     ensure_can_edit_project_data(request.user, mouse.project)
+    template_rows = _template_loci_union_for_mouse_relations(
+        sire=mouse.sire if mouse.sire_id else None,
+        dam=mouse.dam if mouse.dam_id else None,
+    )
+    used_parent_union = bool(template_rows)
+    if not template_rows and mouse.strain_line_id:
+        template_rows = mouse.strain_line.expected_loci_entries()
+    template_loci = [row.get("locus_name", "") for row in template_rows if (row.get("locus_name") or "").strip()]
+    mouse.ensure_template_genotype_components(
+        extra_loci=template_loci,
+        include_strain_template=False,
+    )
+    before_signature = _genotype_components_signature(mouse)
+    posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
-        formset = MouseGenotypeComponentFormSet(request.POST, instance=mouse)
-        if formset.is_valid():
-            formset.save()
-            mouse.rebuild_genotype_summary(save=True)
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.UPDATE,
-                obj=mouse,
-                message="Updated genotype components (structured slots).",
-            )
-            messages.success(request, "Genotype components updated.")
-            return redirect("mice:mouse_detail", pk=mouse.pk)
-    else:
-        formset = MouseGenotypeComponentFormSet(instance=mouse)
+        posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
+        _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
+        _apply_mouse_genotype_rows_to_template(mouse, posted_genotype_rows, template_rows)
+        after_signature = _genotype_components_signature(mouse)
+        _log_specific_genotype_changes(
+            user=request.user,
+            mouse=mouse,
+            before_signature=before_signature,
+            after_signature=after_signature,
+            source_label="Edit Genotype",
+        )
+        messages.success(request, "Genotype components updated.")
+        return redirect("mice:mouse_detail", pk=mouse.pk)
 
+    template_source_label = (
+        "Parent union template (sire + dam)"
+        if used_parent_union
+        else ("Strain-line template" if mouse.strain_line_id else "No template loci available")
+    )
+    existing_genotype_map = {}
+    for component in mouse.genotype_components.all():
+        locus = StrainLine.normalize_locus_name((component.locus_name or "").strip())
+        if not locus:
+            continue
+        value = (component.zygosity or "").strip()
+        if value:
+            existing_genotype_map[locus] = value
     return render(
         request,
         "colony/mouse_genotype_components_form.html",
-        {"mouse": mouse, "formset": formset},
+        {
+            "mouse": mouse,
+            "template_source_label": template_source_label,
+            "template_rows": template_rows,
+            "existing_genotype_map": existing_genotype_map,
+            "posted_genotype_rows": posted_genotype_rows,
+        },
     )
 
 
@@ -771,7 +1209,6 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     for cage in cages_page:
         cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
         cage.current_mouse_count = len(cage_mice)
-        cage.genotype_overview = build_cage_genotype_overview(cage_mice)
         cage.project_rows = cage_projects_from_mice(cage_mice)
     context = {
         "cages": cages_page,
@@ -802,12 +1239,10 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
     if q:
         lines = lines.filter(
             Q(name__icontains=q)
-            | Q(short_name__icontains=q)
-            | Q(gene_or_locus__icontains=q)
-            | Q(category__icontains=q)
             | Q(line_name__icontains=q)
             | Q(display_name__icontains=q)
             | Q(key_name__icontains=q)
+            | Q(expected_loci_template__icontains=q)
             | Q(notes__icontains=q)
         )
     if active == "yes":
@@ -1127,10 +1562,12 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .prefetch_related("genotype_components__strain_line", "genotypes__gene")
         .order_by("mouse_uid")
     )
+    breeding_badges_map = _active_breeding_badges_for_mouse_ids([m.pk for m in current_mice])
     current_mouse_rows = [
         {
             "mouse": mouse,
             "genotype_summary": build_short_genotype_summary(mouse),
+            "active_breeding_badges": breeding_badges_map.get(mouse.pk, []),
         }
         for mouse in current_mice
     ]
@@ -1396,6 +1833,9 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
                 m.age_display = "-"
         else:
             m.age_display = "-"
+    breeding_badges_map = _active_breeding_badges_for_mouse_ids([m.pk for m in mice_page])
+    for m in mice_page:
+        m.active_breeding_badges = breeding_badges_map.get(m.pk, [])
     return render(request, "colony/mouse_list.html", context)
 
 
@@ -1498,7 +1938,7 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
         "form": form,
         "prefix_form": prefix_form,
         "row_errors": row_errors,
-        "expected_columns": MOUSE_EXPECTED_COLUMNS,
+        "expected_columns": MOUSE_IMPORT_TEMPLATE_COLUMNS,
         "import_prefix_hint": get_effective_import_prefix(request.user),
     }
     return render(request, "colony/mouse_import.html", context)
@@ -1509,7 +1949,7 @@ def mouse_import_template(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="mouse_import_template.csv"'
     writer = csv.writer(response)
-    writer.writerow(MOUSE_EXPECTED_COLUMNS)
+    writer.writerow(MOUSE_IMPORT_TEMPLATE_COLUMNS)
     writer.writerow(
         [
             "M001",
@@ -1526,35 +1966,12 @@ def mouse_import_template(request: HttpRequest) -> HttpResponse:
             "Example imported mouse",
             "",
             "",
-            "Tet2",
-            "fl",
-            "fl",
-            "fl/fl",
-            "yes",
-            "2026-04-14",
-            "Validated by PCR",
-            "Lyz2-CreERT2",
-            "Cre",
-            "+",
             "Cre/+",
-            "no",
-            "",
-            "Pending confirmation",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "fl/fl",
+            "+/-",
+            "+/+",
+            "+/+",
+            "KI/+",
         ]
     )
     return response
@@ -1578,38 +1995,15 @@ def mouse_import_template_xlsx(request: HttpRequest) -> HttpResponse:
             "Example imported mouse",
             "",
             "",
-            "Tet2",
-            "fl",
-            "fl",
-            "fl/fl",
-            "yes",
-            "2026-04-14",
-            "Validated by PCR",
-            "Lyz2-CreERT2",
-            "Cre",
-            "+",
             "Cre/+",
-            "no",
-            "",
-            "Pending confirmation",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
+            "fl/fl",
+            "+/-",
+            "+/+",
+            "+/+",
+            "KI/+",
         ]
     ]
-    return build_xlsx_response("mouse_import_template.xlsx", "MouseTemplate", MOUSE_EXPECTED_COLUMNS, rows)
+    return build_xlsx_response("mouse_import_template.xlsx", "MouseTemplate", MOUSE_IMPORT_TEMPLATE_COLUMNS, rows)
 
 
 @authenticated_required
@@ -1682,7 +2076,11 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         )
 
     mouse_audit_entries = audit_entries_for_object("Mouse", mouse.pk)
+    genotype_history_entries = [
+        entry for entry in mouse_audit_entries if "genotype" in (entry.message or "").casefold()
+    ]
     actors = actor_summary_for_audit_entries(mouse_audit_entries)
+    active_breeding_badges = _active_breeding_badges_for_mouse_ids([mouse.pk]).get(mouse.pk, [])
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
@@ -1694,6 +2092,8 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "family_sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
         "family_dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
         "audit_entries": mouse_audit_entries,
+        "genotype_history_entries": genotype_history_entries,
+        "active_breeding_badges": active_breeding_badges,
         **actors,
     }
     return render(request, "colony/mouse_detail.html", context)
@@ -1766,17 +2166,45 @@ def family_tree(request: HttpRequest) -> HttpResponse:
 
 @authenticated_required
 def mouse_create(request: HttpRequest) -> HttpResponse:
+    posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
         form = MouseForm(request.POST, user=request.user)
+        posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
         if form.is_valid():
             ensure_can_edit_project_data(request.user, form.cleaned_data.get("project"))
             mouse = form.save()
+            before_signature = _genotype_components_signature(mouse)
+            template_loci = _resolved_template_loci_for_context(
+                strain_line=mouse.strain_line,
+                sire=mouse.sire,
+                dam=mouse.dam,
+            )
+            prefilled = mouse.ensure_template_genotype_components(
+                extra_loci=template_loci,
+                include_strain_template=False,
+            )
+            filled = _apply_mouse_genotype_rows(mouse, posted_genotype_rows)
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.CREATE,
                 obj=mouse,
                 message=f"Created mouse {mouse.mouse_uid}.",
             )
+            after_signature = _genotype_components_signature(mouse)
+            _log_specific_genotype_changes(
+                user=request.user,
+                mouse=mouse,
+                before_signature=before_signature,
+                after_signature=after_signature,
+                source_label="New Mouse form",
+            )
+            if prefilled:
+                messages.info(
+                    request,
+                    f"Pre-populated {prefilled} genotype template row(s) from strain line '{mouse.strain_line}'.",
+                )
+            if filled:
+                messages.info(request, f"Applied {filled} genotype row(s) from New Mouse form.")
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(user=request.user)
@@ -1786,6 +2214,10 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
         "page_title": "Create Mouse",
         "submit_label": "Save Mouse",
         "cancel_url": "mice:mouse_list",
+        "strain_template_loci_map": _strain_template_loci_map(),
+        "mouse_strain_line_map": _mouse_to_strain_line_map(),
+        "existing_genotype_map": {},
+        "posted_genotype_rows": posted_genotype_rows,
     }
     return render(request, "colony/mouse_form.html", context)
 
@@ -1795,9 +2227,15 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
     ensure_can_edit_project_data(request.user, mouse.project)
     previous_status = mouse.status
+    original_strain = mouse.strain_line
+    original_strain_id = mouse.strain_line_id
+    strain_change_action = (request.POST.get("strain_change_action") or "").strip().lower() if request.method == "POST" else ""
+    posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
         form = MouseForm(request.POST, instance=mouse, user=request.user)
+        posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
         if form.is_valid():
+            before_signature = _genotype_components_signature(mouse)
             new_project = form.cleaned_data.get("project")
             old_project = mouse.project
             if new_project != old_project:
@@ -1816,14 +2254,94 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 }
                 if target_status in terminal or previous_status in terminal:
                     ensure_can_archive_or_change_terminal_status(request.user, new_project)
+            new_strain = form.cleaned_data.get("strain_line")
+            strain_changed = bool(original_strain_id and new_strain and original_strain_id != new_strain.id)
+            has_truth = _mouse_has_meaningful_genotype_truth(mouse)
+            if strain_changed and has_truth and strain_change_action not in {"replace", "overlap", "cancel"}:
+                old_loci = _resolved_template_loci_for_context(
+                    strain_line=original_strain,
+                    sire=mouse.sire,
+                    dam=mouse.dam,
+                )
+                new_loci = _resolved_template_loci_for_context(
+                    strain_line=new_strain,
+                    sire=mouse.sire,
+                    dam=mouse.dam,
+                )
+                old_keys = {StrainLine.normalize_locus_name(x).casefold() for x in old_loci if StrainLine.normalize_locus_name(x)}
+                new_keys = {StrainLine.normalize_locus_name(x).casefold() for x in new_loci if StrainLine.normalize_locus_name(x)}
+                overlap = sorted([l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() in old_keys])
+                to_add = sorted([l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() not in old_keys])
+                to_remove = sorted([l for l in old_loci if StrainLine.normalize_locus_name(l).casefold() not in new_keys])
+                post_payload: list[tuple[str, str]] = []
+                for key, values in request.POST.lists():
+                    if key in {"csrfmiddlewaretoken", "strain_change_action"}:
+                        continue
+                    for value in values:
+                        post_payload.append((key, value))
+                return render(
+                    request,
+                    "colony/mouse_strain_change_confirm.html",
+                    {
+                        "mouse": mouse,
+                        "old_strain": original_strain,
+                        "new_strain": new_strain,
+                        "overlap_loci": overlap,
+                        "add_loci": to_add,
+                        "remove_loci": to_remove,
+                        "post_payload": post_payload,
+                    },
+                )
+            if strain_change_action == "cancel":
+                messages.info(request, "Strain-line change was cancelled.")
+                return redirect("mice:mouse_detail", pk=mouse.pk)
             msg = summarize_modelform_changes(form)
             mouse = form.save()
+            template_loci = _resolved_template_loci_for_context(
+                strain_line=mouse.strain_line,
+                sire=mouse.sire,
+                dam=mouse.dam,
+            )
+            prefilled = 0
+            filled = 0
+            if strain_changed:
+                if has_truth and strain_change_action in {"replace", "overlap"}:
+                    _apply_strain_template_resolution(mouse, mode=strain_change_action, target_loci=template_loci)
+                    if strain_change_action == "replace":
+                        messages.info(request, "Strain changed: replaced genotype loci with new template.")
+                    else:
+                        messages.info(request, "Strain changed: kept overlapping loci only.")
+                else:
+                    # No meaningful genotype truth yet: safely replace template rows.
+                    _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
+                    messages.info(request, "Strain changed: replaced empty template loci with new template.")
+            else:
+                prefilled = mouse.ensure_template_genotype_components(
+                    extra_loci=template_loci,
+                    include_strain_template=False,
+                )
+                filled = _apply_mouse_genotype_rows(mouse, posted_genotype_rows)
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.UPDATE,
                 obj=mouse,
                 message=msg[:4000],
             )
+            after_signature = _genotype_components_signature(mouse)
+            _log_specific_genotype_changes(
+                user=request.user,
+                mouse=mouse,
+                before_signature=before_signature,
+                after_signature=after_signature,
+                source_label="Edit Mouse form",
+            )
+            if prefilled:
+                messages.info(
+                    request,
+                    f"Added {prefilled} missing genotype template row(s) from strain line '{mouse.strain_line}'.",
+                )
+            if filled:
+                messages.info(request, f"Applied {filled} genotype row(s) from mouse form.")
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(instance=mouse, user=request.user)
@@ -1834,6 +2352,14 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "submit_label": "Save Changes",
         "cancel_url": "mice:mouse_detail",
         "cancel_kwargs": {"pk": mouse.pk},
+        "strain_template_loci_map": _strain_template_loci_map(),
+        "mouse_strain_line_map": _mouse_to_strain_line_map(),
+        "existing_genotype_map": {
+            (c.locus_name or "").strip(): (c.zygosity or "")
+            for c in mouse.genotype_components.all()
+            if (c.locus_name or "").strip()
+        },
+        "posted_genotype_rows": posted_genotype_rows,
     }
     return render(request, "colony/mouse_form.html", context)
 
