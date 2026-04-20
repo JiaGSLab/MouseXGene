@@ -32,3 +32,19 @@ class UserImportPrefixForm(forms.ModelForm):
         if not raw.strip():
             return ""
         return validate_import_prefix_format(raw)
+
+
+class SelfProfileForm(forms.ModelForm):
+    class Meta:
+        model = UserProfile
+        fields = ["display_name", "import_uid_prefix"]
+        help_texts = {
+            "display_name": "Optional name shown in project owner displays.",
+            "import_uid_prefix": "Letters, numbers, hyphens (1-15 chars). Example: JG.",
+        }
+
+    def clean_import_uid_prefix(self):
+        raw = self.cleaned_data.get("import_uid_prefix") or ""
+        if not raw.strip():
+            return ""
+        return validate_import_prefix_format(raw)

@@ -5,7 +5,7 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 
-from .forms import UserRoleForm
+from .forms import SelfProfileForm, UserRoleForm
 from .models import UserProfile
 from .permissions import authenticated_required, is_admin
 
@@ -21,6 +21,31 @@ class AppPasswordChangeView(SuccessMessageMixin, PasswordChangeView):
     template_name = "users/password_change_form.html"
     success_url = reverse_lazy("accounts:password_change_done")
     success_message = "Your password was changed successfully."
+
+
+@authenticated_required
+def account_profile(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    return render(
+        request,
+        "users/profile.html",
+        {
+            "profile": profile,
+        },
+    )
+
+
+@authenticated_required
+def account_profile_edit(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    if request.method == "POST":
+        form = SelfProfileForm(request.POST, instance=profile)
+        if form.is_valid():
+            form.save()
+            return redirect("accounts:profile")
+    else:
+        form = SelfProfileForm(instance=profile)
+    return render(request, "users/profile_form.html", {"form": form})
 
 
 @authenticated_required

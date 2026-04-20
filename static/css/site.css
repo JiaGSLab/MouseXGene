@@ -151,6 +151,16 @@ a.link-primary:hover {
     text-decoration: underline;
 }
 
+.nav-current-user {
+    color: #cbd5e1;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    padding: 2px 8px;
+    border: 1px solid rgba(203, 213, 225, 0.35);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
 .auth-card {
     max-width: 420px;
 }

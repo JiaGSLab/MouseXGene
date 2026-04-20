@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}My Account | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>My Account</h1>
+        <p class="muted">Signed-in account details and security settings.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'accounts:profile_edit' %}">Edit profile</a>
+        <a class="button" href="{% url 'accounts:password_change' %}">Change password</a>
+    </div>
+</section>
+
+<section class="card">
+    <h2>User Information</h2>
+    <dl class="detail-grid">
+        <dt>Username</dt><dd>{{ user.get_username }}</dd>
+        <dt>Display name</dt><dd>{{ profile.display_name|default:"—" }}</dd>
+        <dt>Email</dt><dd>{{ user.email|default:"—" }}</dd>
+        <dt>Role</dt><dd>{{ profile.get_role_display }}</dd>
+        <dt>Import UID prefix</dt><dd>{{ profile.import_uid_prefix|default:"—" }}</dd>
+        <dt>Date joined</dt><dd>{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
+        <dt>Last login</dt><dd>{{ user.last_login|date:"Y-m-d H:i"|default:"—" }}</dd>
+        <dt>Staff access</dt><dd>{{ user.is_staff|yesno:"Yes,No" }}</dd>
+    </dl>
+</section>
+{% endblock %}

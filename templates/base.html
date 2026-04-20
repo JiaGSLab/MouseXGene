@@ -29,13 +29,11 @@
                         <a href="/admin/">Admin</a>
                     {% endif %}
                     <a href="{% url 'guide' %}">Guide</a>
-                    <a href="{% url 'accounts:password_change' %}">Change password</a>
+                    <a class="nav-current-user" href="{% url 'accounts:profile' %}" title="View current account">User: {{ user.get_username }}</a>
                     <form method="post" action="{% url 'accounts:logout' %}" class="nav-logout">
                         {% csrf_token %}
                         <button type="submit" class="nav-link-button">Log out</button>
                     </form>
-                {% else %}
-                    <a href="{% url 'accounts:login' %}">Sign in</a>
                 {% endif %}
             </nav>
         </div>

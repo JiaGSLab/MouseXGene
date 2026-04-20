@@ -23,6 +23,7 @@ from .forms import (
 )
 from .importers import (
     EXPECTED_COLUMNS,
+    GENOTYPE_SLOT_COUNT,
     MOUSE_EXPECTED_COLUMNS,
     MouseImportOptions,
     parse_cage_import,
@@ -231,20 +232,43 @@ def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
 
 
 def get_cages_export_rows(user) -> list[list]:
-    return [
-        [
-            cage.cage_id,
-            cage.created_date or "",
-            cage.room,
-            cage.rack,
-            cage.position,
-            cage.cage_type,
-            cage.purpose,
-            cage.status,
-            cage.notes,
-        ]
-        for cage in _scoped_cage_queryset(user).order_by("cage_id")
-    ]
+    cages = (
+        _scoped_cage_queryset(user)
+        .prefetch_related(
+            "current_mice__project",
+            "current_mice__project__owner",
+            "current_mice__project__owner__profile",
+            "current_mice__genotype_components__strain_line",
+            "current_mice__genotypes__gene",
+        )
+        .order_by("cage_id")
+    )
+    rows: list[list] = []
+    for cage in cages:
+        cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
+        project_rows = cage_projects_from_mice(cage_mice)
+        projects_text = "; ".join(pr["project"].name for pr in project_rows)
+        owners_text = "; ".join(pr["owner_display"] for pr in project_rows)
+        rows.append(
+            [
+                cage.cage_id,
+                cage.created_date or "",
+                cage.room,
+                cage.rack,
+                cage.position,
+                cage.cage_type,
+                cage.purpose,
+                cage.status,
+                cage.notes,
+                projects_text,
+                owners_text,
+                len(cage_mice),
+                build_cage_genotype_overview(cage_mice),
+                cage.created_at.isoformat(timespec="seconds"),
+                cage.updated_at.isoformat(timespec="seconds"),
+            ]
+        )
+    return rows
 
 
 def get_cage_inventory_rows(cage: Cage) -> list[list]:
@@ -266,25 +290,57 @@ def get_cage_inventory_rows(cage: Cage) -> list[list]:
 
 
 def get_mice_export_rows(user) -> list[list]:
-    mice = _scoped_mouse_queryset(user).order_by("mouse_uid")
-    return [
-        [
-            mouse.mouse_uid,
-            mouse.sex,
-            mouse.birth_date or "",
-            mouse.death_date or "",
-            mouse.status,
-            mouse.strain_line.line_name if mouse.strain_line else "",
-            mouse.current_cage.cage_id if mouse.current_cage else "",
-            mouse.project.name if mouse.project else "",
-            mouse.ear_tag,
-            mouse.toe_tag,
-            mouse.origin,
-            mouse.coat_color,
-            mouse.notes,
+    mice = (
+        _scoped_mouse_queryset(user)
+        .select_related("project", "project__owner", "project__owner__profile", "sire", "dam")
+        .prefetch_related("genotypes__gene")
+        .order_by("mouse_uid")
+    )
+    rows: list[list] = []
+    for mouse in mice:
+        row_map: dict[str, str] = {col: "" for col in MOUSE_EXPECTED_COLUMNS}
+        row_map["mouse_uid"] = mouse.mouse_uid
+        row_map["sex"] = mouse.sex
+        row_map["birth_date"] = str(mouse.birth_date) if mouse.birth_date else ""
+        row_map["status"] = mouse.status
+        row_map["strain_line"] = mouse.strain_line.line_name if mouse.strain_line else ""
+        row_map["current_cage"] = mouse.current_cage.cage_id if mouse.current_cage else ""
+        row_map["project"] = mouse.project.name if mouse.project else ""
+        row_map["ear_tag"] = mouse.ear_tag
+        row_map["toe_tag"] = mouse.toe_tag
+        row_map["origin"] = mouse.origin
+        row_map["coat_color"] = mouse.coat_color
+        row_map["notes"] = mouse.notes
+        row_map["sire"] = mouse.sire.mouse_uid if mouse.sire else ""
+        row_map["dam"] = mouse.dam.mouse_uid if mouse.dam else ""
+
+        gt_records = list(mouse.genotypes.all().order_by("-assay_date", "-created_at"))
+        for idx, gt in enumerate(gt_records[:GENOTYPE_SLOT_COUNT], start=1):
+            row_map[f"genotype_{idx}_locus"] = gt.gene.symbol if gt.gene else (gt.locus_name or "")
+            row_map[f"genotype_{idx}_allele_1"] = gt.allele_1 or ""
+            row_map[f"genotype_{idx}_allele_2"] = gt.allele_2 or ""
+            row_map[f"genotype_{idx}_zygosity"] = gt.zygosity_display or ""
+            if gt.is_confirmed is True:
+                row_map[f"genotype_{idx}_is_confirmed"] = "yes"
+            elif gt.is_confirmed is False:
+                row_map[f"genotype_{idx}_is_confirmed"] = "no"
+            else:
+                row_map[f"genotype_{idx}_is_confirmed"] = ""
+            row_map[f"genotype_{idx}_assay_date"] = str(gt.assay_date) if gt.assay_date else ""
+            row_map[f"genotype_{idx}_notes"] = gt.notes or ""
+
+        base_cols = [row_map[col] for col in MOUSE_EXPECTED_COLUMNS]
+        extras = [
+            mouse.project.owner_display if mouse.project else "",
+            build_short_genotype_summary(mouse),
+            str(mouse.death_date) if mouse.death_date else "",
+            str(mouse.euthanasia_date) if mouse.euthanasia_date else "",
+            mouse.death_reason or "",
+            mouse.created_at.isoformat(timespec="seconds"),
+            mouse.updated_at.isoformat(timespec="seconds"),
         ]
-        for mouse in mice
-    ]
+        rows.append(base_cols + extras)
+    return rows
 
 
 def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
@@ -1158,16 +1214,14 @@ def cages_export(request: HttpRequest) -> HttpResponse:
     response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
     writer = csv.writer(response)
     writer.writerow(
-        [
-            "cage_id",
-            "created_date",
-            "room",
-            "rack",
-            "position",
-            "cage_type",
-            "purpose",
-            "status",
-            "notes",
+        EXPECTED_COLUMNS
+        + [
+            "projects",
+            "owners",
+            "current_mouse_count",
+            "genotype_overview",
+            "created_at",
+            "updated_at",
         ]
     )
     for row in get_cages_export_rows(request.user):
@@ -1201,7 +1255,14 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
-    headers = ["cage_id", "created_date", "room", "rack", "position", "cage_type", "purpose", "status", "notes"]
+    headers = EXPECTED_COLUMNS + [
+        "projects",
+        "owners",
+        "current_mouse_count",
+        "genotype_overview",
+        "created_at",
+        "updated_at",
+    ]
     rows = get_cages_export_rows(request.user)
     return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
 
@@ -1557,20 +1618,15 @@ def mice_export(request: HttpRequest) -> HttpResponse:
     response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
     writer = csv.writer(response)
     writer.writerow(
-        [
-            "mouse_uid",
-            "sex",
-            "birth_date",
+        MOUSE_EXPECTED_COLUMNS
+        + [
+            "owner",
+            "genotype_summary",
             "death_date",
-            "status",
-            "strain_line",
-            "current_cage",
-            "project",
-            "ear_tag",
-            "toe_tag",
-            "origin",
-            "coat_color",
-            "notes",
+            "euthanasia_date",
+            "death_reason",
+            "created_at",
+            "updated_at",
         ]
     )
     for row in get_mice_export_rows(request.user):
@@ -1580,20 +1636,14 @@ def mice_export(request: HttpRequest) -> HttpResponse:
 
 @authenticated_required
 def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
-    headers = [
-        "mouse_uid",
-        "sex",
-        "birth_date",
+    headers = MOUSE_EXPECTED_COLUMNS + [
+        "owner",
+        "genotype_summary",
         "death_date",
-        "status",
-        "strain_line",
-        "current_cage",
-        "project",
-        "ear_tag",
-        "toe_tag",
-        "origin",
-        "coat_color",
-        "notes",
+        "euthanasia_date",
+        "death_reason",
+        "created_at",
+        "updated_at",
     ]
     rows = get_mice_export_rows(request.user)
     return build_xlsx_response("mice.xlsx", "Mice", headers, rows)

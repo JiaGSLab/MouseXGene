@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Edit My Profile | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Edit My Profile</h1>
+        <p class="muted">Update your display name and import prefix.</p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'accounts:profile' %}">Back</a>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+        {% for field in form %}
+            <div class="form-row">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <p class="muted small-print">{{ field.help_text }}</p>
+                {% endif %}
+                {% if field.errors %}
+                    <div class="field-error">
+                        {% for error in field.errors %}<div>{{ error }}</div>{% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+        <div class="form-actions">
+            <button type="submit" class="button">Save</button>
+            <a class="button button-light" href="{% url 'accounts:profile' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
