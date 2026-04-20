@@ -17,6 +17,27 @@ def audit_entries_for_object(object_type: str, object_id: str, *, limit: int = 1
     )
 
 
+def actor_summary_for_audit_entries(entries: list[AuditLog]) -> dict[str, str]:
+    """Best-effort actor labels for created/updated summaries."""
+    created_by = "—"
+    updated_by = "—"
+
+    if entries:
+        latest_with_user = next((e for e in entries if e.user_id), None)
+        if latest_with_user is not None:
+            updated_by = latest_with_user.user.get_username()
+
+        create_with_user = next((e for e in reversed(entries) if e.action == AuditLog.Action.CREATE and e.user_id), None)
+        if create_with_user is not None:
+            created_by = create_with_user.user.get_username()
+        else:
+            oldest_with_user = next((e for e in reversed(entries) if e.user_id), None)
+            if oldest_with_user is not None:
+                created_by = oldest_with_user.user.get_username()
+
+    return {"created_by": created_by, "updated_by": updated_by}
+
+
 def summarize_modelform_changes(form: ModelForm) -> str:
     """Short text describing fields that changed (uses ModelForm.changed_data)."""
     inst = getattr(form, "instance", None)

@@ -3,8 +3,12 @@
     <dl class="detail-grid">
         <dt>Created (system)</dt>
         <dd>{{ created_at|date:"Y-m-d H:i" }}</dd>
+        <dt>Created by</dt>
+        <dd>{{ created_by|default:"—" }}</dd>
         <dt>Last updated</dt>
         <dd>{{ updated_at|date:"Y-m-d H:i" }}</dd>
+        <dt>Last updated by</dt>
+        <dd>{{ updated_by|default:"—" }}</dd>
         {% if extra_date_label %}
             <dt>{{ extra_date_label }}</dt>
             <dd>{% if extra_date_value %}{{ extra_date_value }}{% else %}—{% endif %}</dd>

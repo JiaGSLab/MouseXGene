@@ -32,7 +32,7 @@ from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainL
 from breeding.models import Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
-from core.history import audit_entries_for_object, summarize_modelform_changes
+from core.history import actor_summary_for_audit_entries, audit_entries_for_object, summarize_modelform_changes
 from core.models import AuditLog, ImportLog, Project, ProjectMembership
 from users.forms import UserImportPrefixForm
 from colony.mouse_age import mouse_list_age_band
@@ -830,7 +830,12 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         pk=pk,
     )
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
-    return render(request, "colony/strain_line_detail.html", {"line": line, "audit_entries": audit_entries})
+    actors = actor_summary_for_audit_entries(audit_entries)
+    return render(
+        request,
+        "colony/strain_line_detail.html",
+        {"line": line, "audit_entries": audit_entries, **actors},
+    )
 
 
 @authenticated_required
@@ -1093,6 +1098,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     cage_project_rows = cage_projects_from_mice(current_mice)
     audit_entries = audit_entries_for_object("Cage", cage.pk)
+    actors = actor_summary_for_audit_entries(audit_entries)
     context = {
         "cage": cage,
         "current_mice": current_mice,
@@ -1103,6 +1109,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "cage_setup_date": latest_setup or cage.created_date,
         "cage_project_rows": cage_project_rows,
         "audit_entries": audit_entries,
+        **actors,
     }
     return render(request, "colony/cage_detail.html", context)
 
@@ -1624,6 +1631,8 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
             .order_by("mouse_uid")
         )
 
+    mouse_audit_entries = audit_entries_for_object("Mouse", mouse.pk)
+    actors = actor_summary_for_audit_entries(mouse_audit_entries)
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
@@ -1634,7 +1643,8 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "family_littermates": [build_mouse_relation_card(m) for m in littermates],
         "family_sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
         "family_dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
-        "audit_entries": audit_entries_for_object("Mouse", mouse.pk),
+        "audit_entries": mouse_audit_entries,
+        **actors,
     }
     return render(request, "colony/mouse_detail.html", context)
 
