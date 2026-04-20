@@ -277,6 +277,12 @@ def mouse_genotype_create(request: HttpRequest) -> HttpResponse:
                     obj=obj,
                     message=f"Added genotype record for {obj.mouse.mouse_uid}.",
                 )
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.CREATE,
+                    obj=obj.mouse,
+                    message=f"Genotype record (assay) added for locus {obj.gene or obj.locus_name or '—'}.",
+                )
                 messages.success(request, "Genotype record saved.")
                 return redirect("mice:mouse_detail", pk=obj.mouse_id)
     else:
@@ -324,6 +330,12 @@ def mouse_genotype_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     action=AuditLog.Action.UPDATE,
                     obj=obj,
                     message=f"Updated genotype record for {obj.mouse.mouse_uid}.",
+                )
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=obj.mouse,
+                    message=f"Genotype record (assay) updated for locus {obj.gene or obj.locus_name or '—'}.",
                 )
                 messages.success(request, "Genotype record updated.")
                 return redirect("mice:mouse_detail", pk=obj.mouse_id)

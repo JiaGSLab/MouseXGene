@@ -9,6 +9,8 @@ from datetime import timedelta
 from colony.models import Cage, Mouse
 from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
+from core.audit import log_audit_event
+from core.history import audit_entries_for_object, summarize_modelform_changes
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
 from .models import Project, ProjectMembership
@@ -237,6 +239,7 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     memberships = list(project.memberships.select_related("user", "user__profile").order_by("user__username"))
     can_manage = is_admin(request.user) or can_manage_project_settings(request.user, project)
+    audit_entries = audit_entries_for_object("Project", project.pk)
     return render(
         request,
         "core/project_detail.html",
@@ -244,6 +247,7 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "project": project,
             "memberships": memberships,
             "can_manage": can_manage,
+            "audit_entries": audit_entries,
         },
     )
 
@@ -265,7 +269,13 @@ def project_create(request: HttpRequest) -> HttpResponse:
                     user=request.user,
                     defaults={"role": ProjectMembership.Role.MANAGER},
                 )
-            return redirect("project_list")
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.CREATE,
+                obj=project,
+                message=f"Created project {project.name}.",
+            )
+            return redirect("project_detail", pk=project.pk)
     else:
         form = ProjectForm(initial={"owner": request.user})
     return render(
@@ -283,8 +293,15 @@ def project_edit(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = ProjectForm(request.POST, instance=project)
         if form.is_valid():
+            msg = summarize_modelform_changes(form)
             form.save()
-            return redirect("project_list")
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=project,
+                message=msg[:4000],
+            )
+            return redirect("project_detail", pk=project.pk)
     else:
         form = ProjectForm(instance=project)
     return render(
@@ -303,7 +320,13 @@ def project_membership_manage(request: HttpRequest, pk: int) -> HttpResponse:
         formset = ProjectMembershipFormSet(request.POST, instance=project)
         if formset.is_valid():
             formset.save()
-            return redirect("project_list")
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=project,
+                message=f"Updated memberships for project {project.name}.",
+            )
+            return redirect("project_detail", pk=project.pk)
     else:
         formset = ProjectMembershipFormSet(instance=project)
     return render(

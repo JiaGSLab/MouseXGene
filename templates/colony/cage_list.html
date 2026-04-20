@@ -114,6 +114,7 @@
                 <th>Cage Type</th>
                 <th class="col-purpose">Purpose</th>
                 <th class="col-num"># Mice</th>
+                <th>Projects / owners</th>
                 <th>Genotype Overview</th>
                 <th>Status</th>
             </tr>
@@ -128,12 +129,22 @@
                 <td>{{ cage.get_cage_type_display }}</td>
                 <td class="col-purpose">{{ cage.get_purpose_display }}</td>
                 <td class="col-num">{{ cage.current_mouse_count|default:"0" }}</td>
+                <td class="cage-projects-cell">
+                    {% for pr in cage.project_rows %}
+                        <div class="cage-projects-cell__row">
+                            <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
+                            <span class="muted"> · {{ pr.owner_display }} ({{ pr.n }})</span>
+                        </div>
+                    {% empty %}
+                        <span class="cell-empty">—</span>
+                    {% endfor %}
+                </td>
                 <td class="cage-genotype-overview">{% if cage.genotype_overview and cage.genotype_overview != "-" %}{{ cage.genotype_overview }}{% else %}<span class="cell-empty">—</span>{% endif %}</td>
                 <td><span class="status-pill status-pill--cage status-pill--cage-{{ cage.status }}">{{ cage.get_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="9" class="empty-row">No cages found.</td>
+                <td colspan="10" class="empty-row">No cages found.</td>
             </tr>
             {% endfor %}
         </tbody>

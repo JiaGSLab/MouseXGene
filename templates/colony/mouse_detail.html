@@ -52,7 +52,15 @@
         <dt>Euthanasia Date</dt><dd>{{ mouse.euthanasia_date|default:"-" }}</dd>
         <dt>Death/Euthanasia Reason</dt><dd>{{ mouse.death_reason|default:"-" }}</dd>
         <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
-        <dt>Project</dt><dd>{{ mouse.project|default:"-" }}</dd>
+        <dt>Project</dt>
+        <dd>
+            {% if mouse.project %}
+                <a class="link-primary" href="{% url 'project_detail' mouse.project_id %}">{{ mouse.project.name }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Owner</dt><dd>{% if mouse.project %}{{ mouse.project.owner_display }}{% else %}—{% endif %}</dd>
         <dt>Ear Tag</dt><dd>{{ mouse.ear_tag|default:"-" }}</dd>
         <dt>Toe Tag</dt><dd>{{ mouse.toe_tag|default:"-" }}</dd>
         <dt>Origin</dt><dd>{{ mouse.origin|default:"-" }}</dd>
@@ -237,4 +245,6 @@
     <h2>Notes</h2>
     <p>{{ mouse.notes|default:"No notes." }}</p>
 </section>
+
+{% include "includes/record_timeline.html" with created_at=mouse.created_at updated_at=mouse.updated_at audit_entries=audit_entries only %}
 {% endblock %}

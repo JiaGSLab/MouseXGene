@@ -52,4 +52,6 @@
         {% endif %}
     </article>
 </section>
+
+{% include "includes/record_timeline.html" with created_at=project.created_at updated_at=project.updated_at audit_entries=audit_entries only %}
 {% endblock %}

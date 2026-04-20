@@ -1,0 +1,41 @@
+<section class="card card--timeline">
+    <h2>System record &amp; change history</h2>
+    <dl class="detail-grid">
+        <dt>Created (system)</dt>
+        <dd>{{ created_at|date:"Y-m-d H:i" }}</dd>
+        <dt>Last updated</dt>
+        <dd>{{ updated_at|date:"Y-m-d H:i" }}</dd>
+        {% if extra_date_label %}
+            <dt>{{ extra_date_label }}</dt>
+            <dd>{% if extra_date_value %}{{ extra_date_value }}{% else %}—{% endif %}</dd>
+        {% endif %}
+    </dl>
+    <h3 class="section-subtitle">Audit trail</h3>
+    <p class="muted small-print">Logged saves and imports for this record. Bulk imports may appear as batch summaries in the global audit log.</p>
+    {% if audit_entries %}
+        <div class="table-wrap">
+            <table class="data-table data-table--compact">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in audit_entries %}
+                        <tr>
+                            <td>{{ entry.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{% if entry.user %}{{ entry.user.get_username }}{% else %}—{% endif %}</td>
+                            <td>{{ entry.get_action_display }}</td>
+                            <td class="audit-msg">{% if entry.message %}{{ entry.message|linebreaksbr }}{% else %}—{% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">No audit entries for this record yet.</p>
+    {% endif %}
+</section>

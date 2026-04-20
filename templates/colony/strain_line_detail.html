@@ -48,4 +48,6 @@
         </dl>
     </article>
 </section>
+
+{% include "includes/record_timeline.html" with created_at=line.created_at updated_at=line.updated_at audit_entries=audit_entries only %}
 {% endblock %}

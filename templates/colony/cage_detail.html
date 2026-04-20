@@ -34,6 +34,24 @@
             <dt>Current Occupancy</dt><dd>{{ current_mouse_count }}</dd>
         </dl>
     </article>
+
+    <article class="card">
+        <h2>Projects in this cage</h2>
+        <p class="muted small-print">From current mice; a cage may include multiple projects.</p>
+        {% if cage_project_rows %}
+            <ul class="cage-project-list">
+                {% for pr in cage_project_rows %}
+                    <li>
+                        <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
+                        <span class="muted"> · Owner: {{ pr.owner_display }}</span>
+                        <span class="muted"> ({{ pr.n }} mouse{% if pr.n != 1 %}s{% endif %})</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p class="muted">No project (no mice in cage).</p>
+        {% endif %}
+    </article>
 </section>
 
 <section class="card">
@@ -49,6 +67,8 @@
                 <th>Sex</th>
                 <th>Status</th>
                 <th>Strain Line</th>
+                <th>Project</th>
+                <th>Owner</th>
                 <th>Birth Date</th>
                 <th>Genotype Summary</th>
             </tr>
@@ -60,12 +80,20 @@
                 <td>{{ row.mouse.get_sex_display }}</td>
                 <td>{{ row.mouse.get_status_display }}</td>
                 <td>{{ row.mouse.strain_line }}</td>
+                <td>
+                    {% if row.mouse.project %}
+                        <a class="link-primary" href="{% url 'project_detail' row.mouse.project_id %}">{{ row.mouse.project.name }}</a>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>{% if row.mouse.project %}{{ row.mouse.project.owner_display }}{% else %}—{% endif %}</td>
                 <td>{{ row.mouse.birth_date|default:"-" }}</td>
                 <td>{{ row.genotype_summary|default:"-" }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="6" class="empty-row">No current mice in this cage.</td>
+                <td colspan="8" class="empty-row">No current mice in this cage.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -104,4 +132,6 @@
     <h2>Notes</h2>
     <p>{{ cage.notes|default:"No notes." }}</p>
 </section>
+
+{% include "includes/record_timeline.html" with created_at=cage.created_at updated_at=cage.updated_at audit_entries=audit_entries extra_date_label="Created date (cage card)" extra_date_value=cage.created_date only %}
 {% endblock %}

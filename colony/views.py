@@ -32,6 +32,7 @@ from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainL
 from breeding.models import Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
+from core.history import audit_entries_for_object, summarize_modelform_changes
 from core.models import AuditLog, ImportLog, Project, ProjectMembership
 from users.forms import UserImportPrefixForm
 from colony.mouse_age import mouse_list_age_band
@@ -208,6 +209,25 @@ def paginate_queryset_for_list(
         "all_allowed": total <= LIST_ALL_RESULTS_MAX,
         "items": page_obj.object_list,
     }
+
+
+def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
+    """Distinct projects (with owner label and mouse count) for mice currently in a cage."""
+    from collections import OrderedDict
+
+    rows: OrderedDict[int, dict] = OrderedDict()
+    for m in mice:
+        if not getattr(m, "project_id", None):
+            continue
+        pid = m.project_id
+        if pid not in rows:
+            rows[pid] = {
+                "project": m.project,
+                "owner_display": m.project.owner_display,
+                "n": 0,
+            }
+        rows[pid]["n"] += 1
+    return list(rows.values())
 
 
 def get_cages_export_rows(user) -> list[list]:
@@ -629,6 +649,12 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
         if formset.is_valid():
             formset.save()
             mouse.rebuild_genotype_summary(save=True)
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=mouse,
+                message="Updated genotype components (structured slots).",
+            )
             messages.success(request, "Genotype components updated.")
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
@@ -677,6 +703,9 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         .order_by("cage_id")
         .prefetch_related(
             "current_mice__strain_line",
+            "current_mice__project",
+            "current_mice__project__owner",
+            "current_mice__project__owner__profile",
             "current_mice__genotype_components__strain_line",
             "current_mice__genotypes__gene",
         )
@@ -687,6 +716,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
         cage.current_mouse_count = len(cage_mice)
         cage.genotype_overview = build_cage_genotype_overview(cage_mice)
+        cage.project_rows = cage_projects_from_mice(cage_mice)
     context = {
         "cages": cages_page,
         "q": q,
@@ -799,7 +829,8 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         ),
         pk=pk,
     )
-    return render(request, "colony/strain_line_detail.html", {"line": line})
+    audit_entries = audit_entries_for_object("StrainLine", line.pk)
+    return render(request, "colony/strain_line_detail.html", {"line": line, "audit_entries": audit_entries})
 
 
 @authenticated_required
@@ -807,9 +838,15 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = StrainLineForm(request.POST)
         if form.is_valid():
-            form.save()
+            line = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.CREATE,
+                obj=line,
+                message=f"Created strain line {line.line_name}.",
+            )
             messages.success(request, "Strain line created.")
-            return redirect("colony:strain_line_list")
+            return redirect("colony:strain_line_detail", pk=line.pk)
     else:
         form = StrainLineForm()
     return render(
@@ -832,9 +869,16 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if form.is_valid():
             if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
                 raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
-            form.save()
+            msg = summarize_modelform_changes(form)
+            line = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=line,
+                message=msg[:4000],
+            )
             messages.success(request, "Strain line updated.")
-            return redirect("colony:strain_line_list")
+            return redirect("colony:strain_line_detail", pk=line.pk)
     else:
         form = StrainLineForm(instance=line)
     return render(
@@ -854,6 +898,12 @@ def cage_create(request: HttpRequest) -> HttpResponse:
         form = CageForm(request.POST)
         if form.is_valid():
             cage = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.CREATE,
+                obj=cage,
+                message=f"Created cage {cage.cage_id}.",
+            )
             return redirect("colony:cage_detail", pk=cage.pk)
     else:
         form = CageForm()
@@ -878,14 +928,14 @@ def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
             new_status = form.cleaned_data.get("status")
             if new_status != previous_status:
                 ensure_cage_status_change(request.user, cage, previous_status, new_status)
+            msg = summarize_modelform_changes(form)
             cage = form.save()
-            if cage.status != previous_status:
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.UPDATE,
-                    obj=cage,
-                    message=f"Changed cage {cage.cage_id} status from {previous_status} to {cage.status}.",
-                )
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=cage,
+                message=msg[:4000],
+            )
             return redirect("colony:cage_detail", pk=cage.pk)
     else:
         form = CageForm(instance=cage)
@@ -1012,6 +1062,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     current_mice = list(
         _scoped_mouse_queryset(request.user)
         .filter(current_cage=cage)
+        .select_related("project", "project__owner", "project__owner__profile")
         .prefetch_related("genotype_components__strain_line", "genotypes__gene")
         .order_by("mouse_uid")
     )
@@ -1040,6 +1091,8 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     latest_setup = (
         CageMembership.objects.filter(cage=cage, is_current=True).aggregate(setup=Max("start_date")).get("setup")
     )
+    cage_project_rows = cage_projects_from_mice(current_mice)
+    audit_entries = audit_entries_for_object("Cage", cage.pk)
     context = {
         "cage": cage,
         "current_mice": current_mice,
@@ -1048,6 +1101,8 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "active_litters": active_litters,
         "current_mouse_count": len(current_mice),
         "cage_setup_date": latest_setup or cage.created_date,
+        "cage_project_rows": cage_project_rows,
+        "audit_entries": audit_entries,
     }
     return render(request, "colony/cage_detail.html", context)
 
@@ -1540,7 +1595,13 @@ def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
-        _scoped_mouse_queryset(request.user).select_related("sire", "dam"),
+        _scoped_mouse_queryset(request.user).select_related(
+            "sire",
+            "dam",
+            "project",
+            "project__owner",
+            "project__owner__profile",
+        ),
         pk=pk,
     )
     genotype_records = MouseGenotype.objects.select_related("gene").filter(mouse=mouse)
@@ -1573,6 +1634,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "family_littermates": [build_mouse_relation_card(m) for m in littermates],
         "family_sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
         "family_dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
+        "audit_entries": audit_entries_for_object("Mouse", mouse.pk),
     }
     return render(request, "colony/mouse_detail.html", context)
 
@@ -1635,6 +1697,12 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
         if form.is_valid():
             ensure_can_edit_project_data(request.user, form.cleaned_data.get("project"))
             mouse = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.CREATE,
+                obj=mouse,
+                message=f"Created mouse {mouse.mouse_uid}.",
+            )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(user=request.user)
@@ -1674,14 +1742,14 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 }
                 if target_status in terminal or previous_status in terminal:
                     ensure_can_archive_or_change_terminal_status(request.user, new_project)
+            msg = summarize_modelform_changes(form)
             mouse = form.save()
-            if mouse.status != previous_status:
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.UPDATE,
-                    obj=mouse,
-                    message=f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status}.",
-                )
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=mouse,
+                message=msg[:4000],
+            )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(instance=mouse, user=request.user)

@@ -1482,3 +1482,47 @@ a.col-uid-link {
 .pagination-nav__edge {
     font-size: var(--font-body);
 }
+
+.section-subtitle {
+    margin: 16px 0 8px;
+    font-size: var(--font-section);
+    font-weight: 600;
+    color: var(--text);
+}
+
+.card--timeline .table-wrap {
+    margin-top: 8px;
+}
+
+.audit-msg {
+    white-space: normal;
+    max-width: min(520px, 100%);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: #374151;
+}
+
+.cage-projects-cell {
+    white-space: normal;
+    max-width: 280px;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    vertical-align: top;
+}
+
+.cage-projects-cell__row {
+    margin-bottom: 4px;
+}
+
+.cage-projects-cell__row:last-child {
+    margin-bottom: 0;
+}
+
+.cage-project-list {
+    margin: 0;
+    padding-left: 1.2rem;
+}
+
+.cage-project-list li {
+    margin-bottom: 6px;
+}
