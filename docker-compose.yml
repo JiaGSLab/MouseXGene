@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      TZ: ${DJANGO_TIME_ZONE:-Asia/Shanghai}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -16,6 +18,8 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     env_file:
       - .env
+    environment:
+      TZ: ${DJANGO_TIME_ZONE:-Asia/Shanghai}
     volumes:
       - .:/app
     ports:

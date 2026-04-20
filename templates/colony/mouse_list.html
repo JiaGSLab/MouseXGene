@@ -119,7 +119,16 @@
             {% for mouse in mice %}
             <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.list_age_band %}mouse-row-age mouse-row-age--{{ mouse.list_age_band }}{% endif %}">
                 <td class="col-uid"><a class="table-link col-uid-link" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
-                <td class="col-genotype">{% if mouse.genotype_summary %}{{ mouse.genotype_summary }}{% else %}<span class="cell-empty" title="No genotype data: add genotype components, legacy genotype records, or import">—</span>{% endif %}</td>
+                <td class="col-genotype">
+                    {% if mouse.genotype_summary %}
+                        <div class="genotype-scroll-wrap">
+                            <div class="genotype-scroll" title="{{ mouse.genotype_summary }}">{{ mouse.genotype_summary }}</div>
+                            <span class="genotype-scroll-hint" aria-hidden="true">↔ scroll</span>
+                        </div>
+                    {% else %}
+                        <span class="cell-empty" title="No genotype data: add genotype components, legacy genotype records, or import">—</span>
+                    {% endif %}
+                </td>
                 <td>{{ mouse.get_sex_display }}</td>
                 <td>{{ mouse.birth_date|default:"-" }}</td>
                 <td>
@@ -182,4 +191,15 @@
     </table>
     {% include "includes/pagination_nav.html" %}
 </section>
+<script>
+(() => {
+    const items = document.querySelectorAll(".genotype-scroll-wrap");
+    items.forEach((wrap) => {
+        const scroller = wrap.querySelector(".genotype-scroll");
+        if (!scroller) return;
+        const overflowing = scroller.scrollWidth > scroller.clientWidth + 4;
+        if (overflowing) wrap.classList.add("is-overflowing");
+    });
+})();
+</script>
 {% endblock %}

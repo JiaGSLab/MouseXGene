@@ -454,13 +454,51 @@ a.col-uid-link {
 .col-genotype {
     min-width: 220px;
     max-width: 320px;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
     line-height: 1.35;
     vertical-align: top;
     font-size: 0.8125rem;
     color: #374151;
+}
+
+.genotype-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    display: block;
+    scrollbar-width: thin;
+}
+
+.genotype-scroll-wrap {
+    position: relative;
+}
+
+.genotype-scroll-wrap.is-overflowing::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    pointer-events: none;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0), #fff);
+}
+
+.genotype-scroll-hint {
+    display: none;
+    position: absolute;
+    right: 2px;
+    top: -14px;
+    font-size: 0.65rem;
+    color: #6b7280;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 0 4px;
+    border-radius: 999px;
+    pointer-events: none;
+}
+
+.genotype-scroll-wrap.is-overflowing .genotype-scroll-hint {
+    display: inline-block;
 }
 
 .cage-genotype-overview {

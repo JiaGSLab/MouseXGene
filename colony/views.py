@@ -1,4 +1,5 @@
 import csv
+import logging
 from io import BytesIO
 
 from django.http import HttpRequest, HttpResponse
@@ -42,6 +43,7 @@ from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
 from users.permissions import (
     authenticated_required,
+    can_edit_project_data,
     can_import,
     ensure_can_archive_or_change_terminal_status,
     ensure_can_edit_cage,
@@ -54,6 +56,8 @@ from users.permissions import (
 LIST_PAGE_SIZES = (25, 50, 100)
 LIST_PAGE_DEFAULT = 25
 LIST_ALL_RESULTS_MAX = 500
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_MOUSE_IMPORT_OPTIONS = MouseImportOptions(
@@ -923,6 +927,17 @@ def _execute_two_pass_mouse_import(
         if strain_line is None:
             errors.append(f"Row {row_number}: unresolved strain_line '{strain_name}'.")
             continue
+        project_name = _normalize_name(row.get("project_name"))
+        if not project_name:
+            errors.append(f"Row {row_number}: project is required for ownership control.")
+            continue
+        project = project_lookup.get(project_name)
+        if project is None:
+            errors.append(f"Row {row_number}: unresolved project '{project_name}'.")
+            continue
+        if not can_edit_project_data(acting_user, project):
+            errors.append(f"Row {row_number}: project '{project_name}': you do not have edit permission.")
+            continue
         mice_to_create.append(
             Mouse(
                 mouse_uid=row["mouse_uid"],
@@ -930,6 +945,7 @@ def _execute_two_pass_mouse_import(
                 birth_date=row["birth_date"],
                 status=row["status"],
                 strain_line=strain_line,
+                project=project,
             )
         )
 
@@ -958,17 +974,6 @@ def _execute_two_pass_mouse_import(
             current_cage = cage_lookup.get(cage_id)
             if current_cage is None:
                 errors.append(f"Row {row_number}: unresolved current_cage '{cage_id}'.")
-
-        project = None
-        project_name = _normalize_name(row.get("project_name"))
-        if project_name:
-            project = project_lookup.get(project_name)
-            if project is None:
-                errors.append(f"Row {row_number}: unresolved project '{project_name}'.")
-            elif not can_edit_project_data(acting_user, project):
-                errors.append(f"Row {row_number}: project '{project_name}': you do not have edit permission.")
-        else:
-            errors.append(f"Row {row_number}: project is required for ownership control.")
 
         sire = None
         sire_uid = _normalize_name(row.get("sire_uid"))
@@ -1890,6 +1895,22 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
                         )
                 except MouseImportExecutionError as exc:
                     row_errors = exc.errors
+                    record_import_log(
+                        user=request.user,
+                        import_type=ImportLog.ImportType.MOUSE,
+                        filename=upload_name,
+                        success=False,
+                        created_count=0,
+                        errors=row_errors,
+                    )
+                except Exception:
+                    logger.exception("Unexpected error during mouse import.")
+                    row_errors = [
+                        (
+                            "Import failed due to an unexpected server error. "
+                            "Please retry once; if it still fails, check your row values and contact admin."
+                        )
+                    ]
                     record_import_log(
                         user=request.user,
                         import_type=ImportLog.ImportType.MOUSE,
