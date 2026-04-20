@@ -29,6 +29,7 @@
                         <a href="/admin/">Admin</a>
                     {% endif %}
                     <a href="{% url 'guide' %}">Guide</a>
+                    <a href="{% url 'accounts:password_change' %}">Change password</a>
                     <form method="post" action="{% url 'accounts:logout' %}" class="nav-logout">
                         {% csrf_token %}
                         <button type="submit" class="nav-link-button">Log out</button>

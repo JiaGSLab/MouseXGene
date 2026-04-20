@@ -1,7 +1,9 @@
-from django.contrib.auth.views import LoginView
+from django.contrib.auth.views import LoginView, PasswordChangeView
 from django.contrib.auth import get_user_model
+from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse_lazy
 
 from .forms import UserRoleForm
 from .models import UserProfile
@@ -13,6 +15,12 @@ class AppLoginView(LoginView):
 
     template_name = "users/login.html"
     redirect_authenticated_user = True
+
+
+class AppPasswordChangeView(SuccessMessageMixin, PasswordChangeView):
+    template_name = "users/password_change_form.html"
+    success_url = reverse_lazy("accounts:password_change_done")
+    success_message = "Your password was changed successfully."
 
 
 @authenticated_required
