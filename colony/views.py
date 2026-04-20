@@ -766,6 +766,43 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
 
 
 @authenticated_required
+def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    line = get_object_or_404(
+        StrainLine.objects.annotate(
+            active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
+            active_cages_count=Count(
+                "mice__current_cage",
+                filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
+                distinct=True,
+            ),
+            active_breedings_count=Count(
+                "mice__maternal_breedings_primary",
+                filter=Q(mice__maternal_breedings_primary__active=True),
+                distinct=True,
+            )
+            + Count(
+                "mice__sired_breedings",
+                filter=Q(mice__sired_breedings__active=True),
+                distinct=True,
+            ),
+            active_litters_count=Count(
+                "mice__maternal_breedings_primary__litters",
+                filter=Q(
+                    mice__maternal_breedings_primary__litters__litter_status__in=[
+                        Litter.LitterStatus.ACTIVE,
+                        Litter.LitterStatus.WEANED,
+                        Litter.LitterStatus.TAIL_TAGGED,
+                    ]
+                ),
+                distinct=True,
+            ),
+        ),
+        pk=pk,
+    )
+    return render(request, "colony/strain_line_detail.html", {"line": line})
+
+
+@authenticated_required
 def strain_line_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = StrainLineForm(request.POST)

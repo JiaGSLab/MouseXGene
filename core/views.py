@@ -230,6 +230,25 @@ def project_list(request: HttpRequest) -> HttpResponse:
 
 
 @authenticated_required
+def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    project = get_object_or_404(
+        Project.objects.select_related("owner", "owner__profile"),
+        pk=pk,
+    )
+    memberships = list(project.memberships.select_related("user", "user__profile").order_by("user__username"))
+    can_manage = is_admin(request.user) or can_manage_project_settings(request.user, project)
+    return render(
+        request,
+        "core/project_detail.html",
+        {
+            "project": project,
+            "memberships": memberships,
+            "can_manage": can_manage,
+        },
+    )
+
+
+@authenticated_required
 def project_create(request: HttpRequest) -> HttpResponse:
     if not (is_admin(request.user) or can_import(request.user)):
         raise PermissionDenied("Only admin or project managers can create projects.")

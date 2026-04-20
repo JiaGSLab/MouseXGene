@@ -50,19 +50,19 @@
             {% for line in lines %}
                 <tr class="{% if not line.is_active %}row-inactive{% endif %}">
                     <td>
-                        <a class="table-link table-link--strong" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">
+                        <a class="link-primary" href="{% url 'colony:strain_line_detail' line.pk %}">
                             {{ line.name|default:line.line_name }}
                         </a>
                     </td>
                     <td>{{ line.short_name|default:line.display_name|default:line.line_name }}</td>
                     <td>{{ line.get_category_display }}</td>
                     <td>{{ line.gene_or_locus|default:"-" }}</td>
-                    <td class="col-num-right"><a class="table-link" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
-                    <td class="col-num-right"><a class="table-link" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
-                    <td class="col-num-right"><a class="table-link" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
-                    <td class="col-num-right"><a class="table-link" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
+                    <td class="col-num-right"><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
+                    <td class="col-num-right"><a class="link-primary" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
+                    <td class="col-num-right"><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
+                    <td class="col-num-right"><a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
                     <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
-                    <td><a class="table-link" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
+                    <td><a class="link-primary" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
                 </tr>
             {% empty %}
                 <tr>

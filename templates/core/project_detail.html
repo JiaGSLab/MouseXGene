@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} | Project | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>{{ project.name }}</h1>
+        <p class="muted">Project details and membership.</p>
+    </div>
+    <div class="action-links">
+        <a class="link-primary" href="{% url 'project_list' %}">Back to list</a>
+        <a class="link-primary" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">Mice in project</a>
+        {% if can_manage %}
+            <a class="button" href="{% url 'project_edit' project.pk %}">Edit</a>
+            <a class="button button-secondary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="cards">
+    <article class="card">
+        <h2>Overview</h2>
+        <dl class="detail-grid">
+            <dt>Owner</dt><dd>{{ project.owner_display }}</dd>
+            <dt>Status</dt><dd>{% if project.is_active %}<span class="status-pill status-pill--ok">Active</span>{% else %}<span class="status-pill status-pill--muted">Archived</span>{% endif %}</dd>
+            <dt>Description</dt><dd>{{ project.description|default:"—"|linebreaksbr }}</dd>
+        </dl>
+    </article>
+
+    <article class="card">
+        <h2>Members</h2>
+        {% if memberships %}
+            <table class="data-table data-table--compact">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in memberships %}
+                        <tr>
+                            <td>{{ m.user.get_username }}</td>
+                            <td>{{ m.get_role_display }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="muted">No additional members (owner is not duplicated here).</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

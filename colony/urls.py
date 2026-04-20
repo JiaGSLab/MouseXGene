@@ -15,6 +15,7 @@ from .views import (
     cages_export,
     cages_export_xlsx,
     strain_line_create,
+    strain_line_detail,
     strain_line_edit,
     strain_line_list,
 )
@@ -26,6 +27,7 @@ urlpatterns = [
     path("strain-lines/", strain_line_list, name="strain_line_list"),
     path("strain-lines/new/", strain_line_create, name="strain_line_create"),
     path("strain-lines/<int:pk>/edit/", strain_line_edit, name="strain_line_edit"),
+    path("strain-lines/<int:pk>/", strain_line_detail, name="strain_line_detail"),
     path("new/", cage_create, name="cage_create"),
     path("import/", cage_import, name="cage_import"),
     path("import/template/", cage_import_template, name="cage_import_template"),

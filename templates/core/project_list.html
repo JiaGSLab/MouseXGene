@@ -40,14 +40,14 @@
         <tbody>
             {% for project in projects %}
                 <tr>
-                    <td><a class="table-link table-link--strong" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}">{{ project.name }}</a></td>
+                    <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
                     <td>{{ project.owner_display }}</td>
                     <td><span class="status-pill {% if project.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
                     <td>
                         {% if can_import or is_admin %}
-                            <a class="table-link" href="{% url 'project_edit' project.pk %}">Edit</a>
+                            <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
                             <span class="muted">|</span>
-                            <a class="table-link" href="{% url 'project_membership_manage' project.pk %}">Members</a>
+                            <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
                         {% else %}
                             <span class="muted">View only</span>
                         {% endif %}

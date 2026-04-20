@@ -61,6 +61,18 @@ a.table-link--strong:hover {
     color: var(--primary);
 }
 
+/* Primary-blue text links (matches default <a>; use where table-link indigo / --strong body color is wrong). */
+a.link-primary {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: none;
+}
+
+a.link-primary:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
 .status-pill--ok {
     background: var(--success-bg);
     border-color: #86efac;
