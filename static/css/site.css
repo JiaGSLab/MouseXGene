@@ -1510,6 +1510,14 @@ a.col-uid-link {
     vertical-align: top;
 }
 
+.cage-owners-cell {
+    white-space: normal;
+    max-width: 220px;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    vertical-align: top;
+}
+
 .cage-projects-cell__row {
     margin-bottom: 4px;
 }

@@ -114,7 +114,8 @@
                 <th>Cage Type</th>
                 <th class="col-purpose">Purpose</th>
                 <th class="col-num"># Mice</th>
-                <th>Projects / owners</th>
+                <th>Project</th>
+                <th>Owner</th>
                 <th>Genotype Overview</th>
                 <th>Status</th>
             </tr>
@@ -133,7 +134,16 @@
                     {% for pr in cage.project_rows %}
                         <div class="cage-projects-cell__row">
                             <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
-                            <span class="muted"> · {{ pr.owner_display }} ({{ pr.n }})</span>
+                            <span class="muted"> ({{ pr.n }})</span>
+                        </div>
+                    {% empty %}
+                        <span class="cell-empty">—</span>
+                    {% endfor %}
+                </td>
+                <td class="cage-owners-cell">
+                    {% for pr in cage.project_rows %}
+                        <div class="cage-projects-cell__row">
+                            {{ pr.owner_display }}
                         </div>
                     {% empty %}
                         <span class="cell-empty">—</span>
@@ -144,7 +154,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="10" class="empty-row">No cages found.</td>
+                <td colspan="11" class="empty-row">No cages found.</td>
             </tr>
             {% endfor %}
         </tbody>
