@@ -35,6 +35,30 @@ def home(request: HttpRequest) -> HttpResponse:
     breedings_queryset = Breeding.objects.all()
     litters_queryset = Litter.objects.all()
 
+    # Dashboard visibility: admin sees all; non-admin only sees data tied to projects they own/join.
+    if not is_admin(request.user):
+        allowed_project_ids = set(
+            Project.objects.filter(Q(owner=request.user) | Q(memberships__user=request.user))
+            .values_list("id", flat=True)
+            .distinct()
+        )
+        mice_queryset = mice_queryset.filter(project_id__in=allowed_project_ids)
+        cages_queryset = cages_queryset.filter(
+            current_mice__project_id__in=allowed_project_ids
+        ).distinct()
+        breedings_queryset = breedings_queryset.filter(
+            Q(male__project_id__in=allowed_project_ids)
+            | Q(female_1__project_id__in=allowed_project_ids)
+            | Q(female_2__project_id__in=allowed_project_ids)
+            | Q(extra_female_links__mouse__project_id__in=allowed_project_ids)
+        ).distinct()
+        litters_queryset = litters_queryset.filter(
+            Q(breeding__male__project_id__in=allowed_project_ids)
+            | Q(breeding__female_1__project_id__in=allowed_project_ids)
+            | Q(breeding__female_2__project_id__in=allowed_project_ids)
+            | Q(breeding__extra_female_links__mouse__project_id__in=allowed_project_ids)
+        ).distinct()
+
     mice_without_cage_qs = mice_queryset.filter(current_cage__isnull=True).select_related(
         "strain_line", "project"
     )

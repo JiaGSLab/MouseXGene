@@ -1643,3 +1643,22 @@ a.col-uid-link {
 .cage-project-list li {
     margin-bottom: 6px;
 }
+
+.site-footer {
+    border-top: 1px solid var(--line);
+    margin-top: 24px;
+    padding: 12px 0 18px;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.site-footer a {
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.site-footer a:hover {
+    color: var(--primary);
+    text-decoration: underline;
+}
