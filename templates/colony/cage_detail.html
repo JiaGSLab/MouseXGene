@@ -152,5 +152,5 @@
     <p>{{ cage.notes|default:"No notes." }}</p>
 </section>
 
-{% include "includes/record_timeline.html" with created_at=cage.created_at updated_at=cage.updated_at audit_entries=audit_entries extra_date_label="Created date (cage card)" extra_date_value=cage.created_date only %}
+{% include "includes/record_timeline.html" with created_at=cage.created_at updated_at=cage.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by extra_date_label="Created date (cage card)" extra_date_value=cage.created_date only %}
 {% endblock %}

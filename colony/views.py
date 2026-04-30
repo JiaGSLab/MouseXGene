@@ -35,7 +35,7 @@ from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainL
 from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
-from core.history import actor_summary_for_audit_entries, audit_entries_for_object, summarize_modelform_changes
+from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from core.models import AuditLog, ImportLog, Project, ProjectMembership
 from users.forms import UserImportPrefixForm
 from colony.mouse_age import mouse_list_age_band
@@ -861,6 +861,12 @@ def _execute_two_pass_mouse_import(
                 for name in missing_strains
             ]
         )
+        if getattr(acting_user, "is_authenticated", False):
+            StrainLine.objects.filter(line_name__in=missing_strains).update(
+                created_by_id=acting_user.pk,
+                updated_by_id=acting_user.pk,
+                owner_id=acting_user.pk,
+            )
         strain_lookup = _build_strain_line_lookup()
 
     project_lookup = {project.name: project for project in Project.objects.all()}
@@ -879,6 +885,10 @@ def _execute_two_pass_mouse_import(
                 for name in missing_projects
             ]
         )
+        if getattr(acting_user, "is_authenticated", False):
+            Project.objects.filter(name__in=missing_projects).update(
+                created_by_id=acting_user.pk, updated_by_id=acting_user.pk
+            )
         project_lookup = {project.name: project for project in Project.objects.all()}
 
     for name in referenced_project_names:
@@ -908,6 +918,10 @@ def _execute_two_pass_mouse_import(
                 for cage_id in missing_cages
             ]
         )
+        if getattr(acting_user, "is_authenticated", False):
+            Cage.objects.filter(cage_id__in=missing_cages).update(
+                created_by_id=acting_user.pk, updated_by_id=acting_user.pk
+            )
         cage_lookup = {cage.cage_id: cage for cage in Cage.objects.all()}
 
     if errors:
@@ -953,6 +967,10 @@ def _execute_two_pass_mouse_import(
         raise MouseImportExecutionError(errors)
 
     Mouse.objects.bulk_create(mice_to_create)
+    if getattr(acting_user, "is_authenticated", False):
+        Mouse.objects.filter(mouse_uid__in=[row["mouse_uid"] for row in rows]).update(
+            created_by_id=acting_user.pk, updated_by_id=acting_user.pk
+        )
     created_mice = list(Mouse.objects.filter(mouse_uid__in=[row["mouse_uid"] for row in rows]))
     created_mice_by_uid = {mouse.mouse_uid: mouse for mouse in created_mice}
 
@@ -1240,7 +1258,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     active = (request.GET.get("active") or "yes").strip()
-    lines = StrainLine.objects.all()
+    lines = StrainLine.objects.select_related("owner", "owner__profile").all()
     if q:
         lines = lines.filter(
             Q(name__icontains=q)
@@ -1249,6 +1267,10 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
             | Q(key_name__icontains=q)
             | Q(expected_loci_template__icontains=q)
             | Q(notes__icontains=q)
+            | Q(owner__username__icontains=q)
+            | Q(owner__first_name__icontains=q)
+            | Q(owner__last_name__icontains=q)
+            | Q(owner__profile__display_name__icontains=q)
         )
     if active == "yes":
         lines = lines.filter(is_active=True)
@@ -1322,11 +1344,19 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 ),
                 distinct=True,
             ),
+        )
+        .select_related(
+            "owner",
+            "owner__profile",
+            "created_by",
+            "created_by__profile",
+            "updated_by",
+            "updated_by__profile",
         ),
         pk=pk,
     )
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
-    actors = actor_summary_for_audit_entries(audit_entries)
+    actors = merge_actor_labels(line, audit_entries)
     return render(
         request,
         "colony/strain_line_detail.html",
@@ -1337,7 +1367,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def strain_line_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
-        form = StrainLineForm(request.POST)
+        form = StrainLineForm(request.POST, user=request.user)
         if form.is_valid():
             line = form.save()
             log_audit_event(
@@ -1349,7 +1379,7 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Strain line created.")
             return redirect("colony:strain_line_detail", pk=line.pk)
     else:
-        form = StrainLineForm()
+        form = StrainLineForm(user=request.user, initial={"owner": request.user})
     return render(
         request,
         "colony/strain_line_form.html",
@@ -1366,7 +1396,7 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(StrainLine, pk=pk)
     previous_active = line.is_active
     if request.method == "POST":
-        form = StrainLineForm(request.POST, instance=line)
+        form = StrainLineForm(request.POST, instance=line, user=request.user)
         if form.is_valid():
             if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
                 raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
@@ -1381,7 +1411,7 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
             messages.success(request, "Strain line updated.")
             return redirect("colony:strain_line_detail", pk=line.pk)
     else:
-        form = StrainLineForm(instance=line)
+        form = StrainLineForm(instance=line, user=request.user)
     return render(
         request,
         "colony/strain_line_form.html",
@@ -1488,6 +1518,10 @@ def cage_import(request: HttpRequest) -> HttpResponse:
             else:
                 with transaction.atomic():
                     Cage.objects.bulk_create([Cage(**row) for row in result.rows])
+                    cage_ids = [row["cage_id"] for row in result.rows]
+                    Cage.objects.filter(cage_id__in=cage_ids).update(
+                        created_by_id=request.user.pk, updated_by_id=request.user.pk
+                    )
                 log_audit_event(
                     user=request.user,
                     action=AuditLog.Action.IMPORT,
@@ -1559,7 +1593,12 @@ def cage_import_template_xlsx(request: HttpRequest) -> HttpResponse:
 
 @authenticated_required
 def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
+    cage = get_object_or_404(
+        _scoped_cage_queryset(request.user).select_related(
+            "created_by", "created_by__profile", "updated_by", "updated_by__profile"
+        ),
+        pk=pk,
+    )
     current_mice = list(
         _scoped_mouse_queryset(request.user)
         .filter(current_cage=cage)
@@ -1596,7 +1635,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     cage_project_rows = cage_projects_from_mice(current_mice)
     audit_entries = audit_entries_for_object("Cage", cage.pk)
-    actors = actor_summary_for_audit_entries(audit_entries)
+    actors = merge_actor_labels(cage, audit_entries)
     context = {
         "cage": cage,
         "current_mice": current_mice,
@@ -2073,6 +2112,10 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "project",
             "project__owner",
             "project__owner__profile",
+            "created_by",
+            "created_by__profile",
+            "updated_by",
+            "updated_by__profile",
         ),
         pk=pk,
     )
@@ -2100,7 +2143,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     genotype_history_entries = [
         entry for entry in mouse_audit_entries if "genotype" in (entry.message or "").casefold()
     ]
-    actors = actor_summary_for_audit_entries(mouse_audit_entries)
+    actors = merge_actor_labels(mouse, mouse_audit_entries)
     active_breeding_badges = _active_breeding_badges_for_mouse_ids([mouse.pk]).get(mouse.pk, [])
     context = {
         "mouse": mouse,

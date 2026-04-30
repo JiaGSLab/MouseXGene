@@ -53,5 +53,5 @@
     </article>
 </section>
 
-{% include "includes/record_timeline.html" with created_at=project.created_at updated_at=project.updated_at audit_entries=audit_entries only %}
+{% include "includes/record_timeline.html" with created_at=project.created_at updated_at=project.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by only %}
 {% endblock %}

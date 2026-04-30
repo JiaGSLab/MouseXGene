@@ -5,16 +5,12 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
 
+from django.conf import settings
 
-class TimeStampedModel(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from core.models import ActorStampedModel, TimeStampedModel, format_project_owner_label
 
 
-class StrainLine(TimeStampedModel):
+class StrainLine(ActorStampedModel):
     class LocusType(models.TextChoices):
         STANDARD_AUTOSOMAL = "standard_autosomal", "Standard autosomal"
         FLOX = "flox", "Flox"
@@ -56,6 +52,13 @@ class StrainLine(TimeStampedModel):
     expected_loci_config = models.JSONField(default=list, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="owned_strain_lines",
+    )
 
     class Meta:
         ordering = ("line_name",)
@@ -76,6 +79,12 @@ class StrainLine(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.short_name or self.display_name or self.name or self.line_name
+
+    @property
+    def owner_display(self) -> str:
+        if not self.owner_id:
+            return "—"
+        return format_project_owner_label(self.owner) or "—"
 
     @classmethod
     def normalize_locus_name(cls, raw_name: str) -> str:
@@ -154,7 +163,7 @@ class StrainLine(TimeStampedModel):
         return [entry["locus_name"] for entry in self.expected_loci_entries()]
 
 
-class Cage(TimeStampedModel):
+class Cage(ActorStampedModel):
     class CageType(models.TextChoices):
         STANDARD = "standard", "Standard"
         BREEDING = "breeding", "Breeding"
@@ -192,7 +201,7 @@ class Cage(TimeStampedModel):
         return self.cage_id
 
 
-class Mouse(TimeStampedModel):
+class Mouse(ActorStampedModel):
     class Sex(models.TextChoices):
         MALE = "M", "Male"
         FEMALE = "F", "Female"

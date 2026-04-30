@@ -10,7 +10,7 @@ class NoHardDeleteAdminMixin:
 
 @admin.register(StrainLine)
 class StrainLineAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
-    list_display = ("name", "short_name", "category", "gene_or_locus", "is_active", "updated_at")
+    list_display = ("name", "owner", "short_name", "category", "gene_or_locus", "is_active", "updated_at")
     search_fields = ("name", "short_name", "category", "gene_or_locus", "line_name", "key_name", "notes")
     list_filter = ("category", "species", "is_active")
 

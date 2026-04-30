@@ -29,7 +29,47 @@ class TimeStampedModel(models.Model):
         abstract = True
 
 
-class Project(TimeStampedModel):
+class ActorStampedModel(TimeStampedModel):
+    """Adds created_by / updated_by filled from request context (see CurrentActorMiddleware)."""
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        from core.current_actor import get_current_actor
+
+        u = get_current_actor()
+        if u is not None and getattr(u, "is_authenticated", False):
+            if self._state.adding:
+                self.created_by = u
+            self.updated_by = u
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                update_fields = list(update_fields)
+                if "updated_by" not in update_fields:
+                    update_fields.append("updated_by")
+                if self._state.adding and "created_by" not in update_fields:
+                    update_fields.append("created_by")
+                kwargs["update_fields"] = update_fields
+        super().save(*args, **kwargs)
+
+
+class Project(ActorStampedModel):
     name = models.CharField(max_length=128, unique=True)
     description = models.TextField(blank=True)
     owner = models.ForeignKey(

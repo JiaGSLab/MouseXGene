@@ -11,7 +11,7 @@ from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
 from breeding.analytics import breeding_litter_timing_alert
 from core.audit import log_audit_event
-from core.history import actor_summary_for_audit_entries, audit_entries_for_object, summarize_modelform_changes
+from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
 from .models import Project, ProjectMembership
@@ -298,13 +298,20 @@ def project_list(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
     project = get_object_or_404(
-        Project.objects.select_related("owner", "owner__profile"),
+        Project.objects.select_related(
+            "owner",
+            "owner__profile",
+            "created_by",
+            "created_by__profile",
+            "updated_by",
+            "updated_by__profile",
+        ),
         pk=pk,
     )
     memberships = list(project.memberships.select_related("user", "user__profile").order_by("user__username"))
     can_manage = is_admin(request.user) or can_manage_project_settings(request.user, project)
     audit_entries = audit_entries_for_object("Project", project.pk)
-    actors = actor_summary_for_audit_entries(audit_entries)
+    actors = merge_actor_labels(project, audit_entries)
     return render(
         request,
         "core/project_detail.html",

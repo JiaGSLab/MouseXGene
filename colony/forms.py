@@ -1,6 +1,7 @@
 import json
 
 from django import forms
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.forms import BaseInlineFormSet, inlineformset_factory
 from django.utils import timezone
@@ -193,6 +194,7 @@ class StrainLineForm(forms.ModelForm):
         model = StrainLine
         fields = [
             "name",
+            "owner",
             "expected_loci_template",
             "expected_loci_config",
             "is_active",
@@ -204,6 +206,7 @@ class StrainLineForm(forms.ModelForm):
         }
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
+            "owner": "Lab contact for this strain line (shown on the Strain Lines list). Defaults to you when creating.",
             "expected_loci_template": (
                 "Required. One locus per row (or comma/semicolon separated), e.g. Lyz2-Cre, Tet2, Gpr82. "
                 "This template is used to auto-populate loci on New Mouse / offspring workflows."
@@ -212,14 +215,18 @@ class StrainLineForm(forms.ModelForm):
         }
         labels = {
             "name": "Strain line name",
+            "owner": "Owner",
             "expected_loci_template": "Included loci",
         }
 
     def clean_expected_loci_template(self):
         return (self.cleaned_data.get("expected_loci_template") or "").strip()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
+        self._actor_user = user
         super().__init__(*args, **kwargs)
+        self.fields["owner"].queryset = get_user_model().objects.order_by("username")
+        self.fields["owner"].required = False
         entries: list[dict[str, str]] = []
         if self.instance and self.instance.pk:
             entries = self.instance.expected_loci_entries()
@@ -305,6 +312,13 @@ class StrainLineForm(forms.ModelForm):
                 obj.expected_loci_config = json.loads(raw_cfg)
             except Exception:
                 obj.expected_loci_config = []
+        if (
+            not self.instance.pk
+            and not obj.owner_id
+            and self._actor_user
+            and getattr(self._actor_user, "is_authenticated", False)
+        ):
+            obj.owner = self._actor_user
         if commit:
             obj.save()
         return obj
