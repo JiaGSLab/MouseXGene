@@ -113,10 +113,48 @@
 </section>
 
 <section class="card guide-card">
-    <h2>9. Strain Lines</h2>
+    <h2>9. Strain Lines（品系行）与基因型：从使用者角度怎么用</h2>
     <p>
-        品系行是基因命名与统计的「锚点」。列表顶部为单行搜索 + 状态下拉 + 应用/重置，布局与 Mice/Cages 的筛选条一致。
-        行内数字可链到对应小鼠、笼位、交配或产仔列表，用于从品系下钻到个体。
+        可以把 <strong>Strain Line</strong> 理解成：<strong>这条「品系命名」在系统里对应的一套规则</strong>——包括统计上算哪条线、
+        以及<strong>以后给老鼠录基因型时，系统先给你摆好哪些位点、哪些常用下拉选项</strong>。
+        列表里可以按名称、位点说明、备注、负责人名字等搜索；数字链接用来跳到小鼠、笼位、交配或产仔列表，方便从品系往下查。
+    </p>
+    <h3 class="guide-subheading">9.1 你在品系页最需要先做好的两件事</h3>
+    <ul class="guide-list">
+        <li><strong>把「包含位点」配清楚</strong>：在品系编辑里维护 <strong>Included loci</strong>（每条一个逻辑位点）。你还可以为每个位点标类型（例如 Cre、flox）和染色体（常染色体 / X / Y），这样后面录鼠时下拉选项会更贴实验用语。</li>
+        <li><strong>指定负责人（Owner）</strong>：列表上的 Owner 表示「这条品系在实验室里找谁问」。新建时一般会默认成你自己；也可以改成别的同事。旧数据若 Owner 一直空，可请管理员在服务器跑一次补齐命令（见文末说明）。</li>
+    </ul>
+    <h3 class="guide-subheading">9.2 新建或编辑小鼠时：页面上的「基因型」块在帮你什么</h3>
+    <p>
+        选好 <strong>品系</strong>、填好 <strong>性别</strong>，如果还选了 <strong>父鼠 / 母鼠</strong>，下面会出现一块 <strong>Genotype Rows（按位点一行一行）</strong>，不用自己从零想该录哪些基因位点。
+    </p>
+    <ul class="guide-list">
+        <li><strong>页面上会先出现哪些位点？</strong> 会把「当前这只鼠选的品系」里配好的位点，再加上「父鼠所在品系」「母鼠所在品系」里配好的位点，合在一起、同名只保留一行，方便你一眼看到<strong>这条鼠可能要关心的所有位点</strong>。</li>
+        <li><strong>每一行怎么填？</strong> 每一行有一个下拉菜单，里面是常见写法（例如 Cre/+、fl/fl）；没有合适的就选 <strong>Custom</strong> 再自己打字。</li>
+        <li><strong>和性别有关：</strong> 系统会根据你选的公/母换一批更合理的选项；若是 <strong>Y 连锁位点 + 雌性</strong>，那一行会灰掉（雌鼠不按 Y 连锁那样录）。</li>
+    </ul>
+    <h3 class="guide-subheading">9.3 点「保存」之后：有父母 vs 没父母，系统认哪套位点</h3>
+    <p>
+        你在页面上看到的位点可能比较多；<strong>真正写进数据库、以后在「编辑基因型结果」里能改的那几行</strong>，按下面规则取一套「主模板」（和有没有父母有关）：
+    </p>
+    <ul class="guide-list">
+        <li><strong>若父鼠、母鼠都选了，且父母各自品系里都配过位点</strong>：系统以<strong>父母两边品系上的位点合并结果</strong>为主，用来生成这只鼠要维护的基因型行（避免和父母系谱里已经写过的位点重复堆一层）。</li>
+        <li><strong>其它情况</strong>（只选了一方父母、或父母品系上还没配位点、或根本没选父母）：就按<strong>你给小鼠选的那个 Strain line</strong> 里配好的位点来生成行。</li>
+        <li>你在每一行下拉或自定义里填的内容，会在保存时写进这只鼠的基因型记录里，并更新详情页上看到的<strong>基因型摘要</strong>。</li>
+    </ul>
+    <p class="muted small-print">
+        极少数情况下，保存前页面上多出来的某一行，若不在上述「主模板」里，保存后可能不会出现在详情里；以保存后小鼠详情或「Edit genotyping results」为准。
+        若父母品系已经把要录的位点都列全了，一般不用额外操心。
+    </p>
+    <h3 class="guide-subheading">9.4 只想改某几只鼠的基因型时去哪</h3>
+    <ul class="guide-list">
+        <li>打开该鼠详情，进入 <strong>Edit genotyping results</strong>。这里<strong>不能自己加新位点列</strong>，只能在系统根据品系（和父母）已经给出的位点上改结果——这样全实验室的「位点名单」仍由品系统一管，不会每人一套叫法。</li>
+        <li>这里用的位点规则与上一节一致：<strong>有父母且父母品系有位点 → 以父母为主</strong>；否则<strong>以这只鼠的品系为准</strong>。</li>
+    </ul>
+    <h3 class="guide-subheading">9.5 历史品系 Owner 一次性对齐创建人（管理员）</h3>
+    <p class="muted small-print">
+        仅当库里已有「创建人」但 Owner 仍为空时需要。在项目目录、已激活虚拟环境后执行：<br>
+        <code>python manage.py backfill_strainline_owner_from_created_by</code>（可先加 <code>--dry-run</code> 只看数量不写库）。
     </p>
 </section>
 
@@ -148,6 +186,7 @@
         <li>常见失败原因：必填列缺失、日期格式错误、主键重复、引用无法解析、枚举值越界。</li>
         <li>父母（sire/dam）须已存在，或与当前小鼠出现在同一导入文件中以便解析。</li>
         <li>导出：Mice/Cages 导出已按导入字段顺序优先输出，并可附带扩展列（owner、summary、timestamps 等）。</li>
+        <li>运维：若历史品系 <strong>Owner</strong> 仍为空但已有创建人，可在服务器执行 <code>python manage.py backfill_strainline_owner_from_created_by</code>（见第 9 节）。</li>
     </ul>
 </section>
 
@@ -236,6 +275,9 @@
 
         <dt>Project 后面的人名是谁？</dt>
         <dd>一般为课题 <strong>Owner</strong> 的显示名（或全名/用户名），用于识别负责人。</dd>
+
+        <dt>Strain Line 的 Owner 和创建人怎么对齐？</dt>
+        <dd>新建保存后会尽量把空的 Owner 设为创建人；大批量历史数据可运行 <code>backfill_strainline_owner_from_created_by</code> 管理命令一次性补齐（见第 9.5 节）。</dd>
     </dl>
 </section>
 

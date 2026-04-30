@@ -986,6 +986,13 @@ a.col-uid-link {
     margin-bottom: 10px;
 }
 
+.guide-subheading {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 18px 0 8px;
+    color: #1f2937;
+}
+
 .guide-card p {
     line-height: 1.65;
     margin: 8px 0;

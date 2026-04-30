@@ -9,6 +9,8 @@ from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
 
+from core.models import format_project_owner_label
+
 from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 
 
@@ -201,12 +203,13 @@ class StrainLineForm(forms.ModelForm):
             "notes",
         ]
         widgets = {
+            "owner": forms.Select(attrs={"class": "filter-control"}),
             "expected_loci_template": forms.Textarea(attrs={"rows": 3}),
             "notes": forms.Textarea(attrs={"rows": 3}),
         }
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
-            "owner": "Lab contact for this strain line (shown on the Strain Lines list). Defaults to you when creating.",
+            "owner": "Lab contact (shown on Strain Lines list). Defaults to the creating user; you can change it here.",
             "expected_loci_template": (
                 "Required. One locus per row (or comma/semicolon separated), e.g. Lyz2-Cre, Tet2, Gpr82. "
                 "This template is used to auto-populate loci on New Mouse / offspring workflows."
@@ -227,6 +230,9 @@ class StrainLineForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.fields["owner"].queryset = get_user_model().objects.order_by("username")
         self.fields["owner"].required = False
+        self.fields["owner"].label_from_instance = (
+            lambda u: (format_project_owner_label(u) or u.get_username() or "").strip() or str(u.pk)
+        )
         entries: list[dict[str, str]] = []
         if self.instance and self.instance.pk:
             entries = self.instance.expected_loci_entries()
@@ -234,6 +240,8 @@ class StrainLineForm(forms.ModelForm):
             self.initial["expected_loci_config"] = json.dumps(entries)
         if entries and not self.initial.get("expected_loci_template"):
             self.initial["expected_loci_template"] = "\n".join(item["locus_name"] for item in entries)
+        if self.instance.pk and not self.instance.owner_id and getattr(self.instance, "created_by_id", None):
+            self.initial.setdefault("owner", self.instance.created_by_id)
 
     def clean(self):
         cleaned = super().clean()
@@ -321,6 +329,9 @@ class StrainLineForm(forms.ModelForm):
             obj.owner = self._actor_user
         if commit:
             obj.save()
+            if not obj.owner_id and getattr(obj, "created_by_id", None):
+                StrainLine.objects.filter(pk=obj.pk).update(owner_id=obj.created_by_id)
+                obj.owner_id = obj.created_by_id
         return obj
 
 
