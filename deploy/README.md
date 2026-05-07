@@ -1,16 +1,129 @@
-# Production deployment notes
+# Production deployment (Docker Compose + Nginx + Let’s Encrypt)
 
-## Static files (nginx + web)
+## Layout
 
-`web` and `nginx` both mount the host directory `./staticfiles` at `/app/staticfiles`, matching Django `STATIC_ROOT`. After building or changing static assets, run `collectstatic` inside `web` so nginx serves the same files.
+- **`web`**: Gunicorn; mounts `./staticfiles` → `/app/staticfiles` (same as `STATIC_ROOT`).
+- **`nginx`**: Terminates TLS; proxies to `web:8000`; serves `/static/` from `/app/staticfiles`.
+- **ACME webroot**: Host directory `./acme-challenge` → container `/var/www/certbot` (read-only in container; Certbot on the **host** writes challenges here).
+- **Certificates**: Host `/etc/letsencrypt` → container `/etc/letsencrypt` (read-only).
 
-### Suggested steps on the server
+## DNS and firewall
+
+- `jialabmouse.top` and `www.jialabmouse.top` **A records** → your server’s public IP.
+- Open inbound **TCP 80** and **TCP 443** on the cloud security group / firewall.
+
+## Static files
+
+After code or asset changes, run collectstatic in `web` so Nginx serves updated files:
 
 ```bash
+cd ~/apps/MouseXGene   # or your project root on the server
 rm -rf staticfiles/*
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec web python manage.py collectstatic --noinput
-docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec nginx nginx -s reload
 ```
 
-Adjust paths if your project root or compose file location differs.
+## Django behind HTTPS (`.env.prod`)
+
+After HTTPS is live, set (adjust if needed):
+
+```env
+DJANGO_ALLOWED_HOSTS=jialabmouse.top,www.jialabmouse.top
+DJANGO_CSRF_TRUSTED_ORIGINS=https://jialabmouse.top,https://www.jialabmouse.top
+DJANGO_SECURE_PROXY_SSL_HEADER=true
+DJANGO_SESSION_COOKIE_SECURE=true
+DJANGO_CSRF_COOKIE_SECURE=true
+```
+
+Restart `web` after editing `.env.prod`:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d web
+```
+
+---
+
+## Let’s Encrypt (Certbot on the Ubuntu host)
+
+Certbot runs **on the host**, not inside Docker. Nginx in Docker serves the HTTP-01 challenge from `./acme-challenge`.
+
+### Why a bootstrap config?
+
+`deploy/nginx/default.conf` references `/etc/letsencrypt/live/jialabmouse.top/...`, which **do not exist** until the first certificate is issued. On a brand-new server, temporarily use **`deploy/nginx/default-bootstrap.conf`** (HTTP only, ACME + app) so Nginx can start; after `certbot` succeeds, switch back to the repo’s HTTPS **`default.conf`**.
+
+### 1) First-time bootstrap (temporary HTTP-only)
+
+On the server, from the project root:
+
+```bash
+cd ~/apps/MouseXGene
+mkdir -p acme-challenge
+cp deploy/nginx/default-bootstrap.conf deploy/nginx/default.conf
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx web db
+```
+
+Verify `http://jialabmouse.top` loads (HTTP) and that files under `acme-challenge/` are visible to Nginx (container mapping is already in `docker-compose.prod.yml`).
+
+### 2) Obtain the first certificate (webroot)
+
+Install Certbot if needed (`sudo apt install certbot`). Issue certs using the **host path** that maps to `/var/www/certbot` in the container:
+
+```bash
+sudo certbot certonly --webroot \
+  -w /home/ubuntu/apps/MouseXGene/acme-challenge \
+  -d jialabmouse.top -d www.jialabmouse.top \
+  --email your-email@example.com \
+  --agree-tos --non-interactive
+```
+
+(Replace `/home/ubuntu/apps/MouseXGene` if your project path differs.)
+
+### 3) Switch Nginx to the HTTPS configuration
+
+Restore the repository’s TLS config (do **not** leave the bootstrap file in place):
+
+```bash
+cd ~/apps/MouseXGene
+git checkout deploy/nginx/default.conf
+# If you don’t use git on the server, copy the HTTPS default.conf from your rsync / repo checkout instead.
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec nginx nginx -t
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec nginx nginx -s reload
+```
+
+Visit `https://jialabmouse.top` and confirm the browser shows a valid certificate.
+
+### 4) Automatic renewal + reload Nginx container
+
+Certbot installs a **systemd timer** (or cron) on Ubuntu that runs `certbot renew` twice daily. Renewals only occur when certificates are within the renewal window.
+
+Add a **deploy hook** so Nginx picks up renewed certs:
+
+```bash
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-mousexgene-nginx.sh >/dev/null <<'EOF'
+#!/bin/sh
+docker exec mousexgene_nginx_prod nginx -t && docker exec mousexgene_nginx_prod nginx -s reload
+EOF
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-mousexgene-nginx.sh
+```
+
+Test renewal **without** changing certificates:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+You should see the deploy hook run at the end of a successful simulated renewal.
+
+### 5) Troubleshooting
+
+- **`nginx: [em] host not found in upstream`** — ensure `web` container is up (`docker compose ps`).
+- **Permission denied on webroot** — ensure Certbot’s `-w` path is exactly the host directory mounted as `./acme-challenge`.
+- **403 / challenge fails** — check security group allows port 80 from the internet during issuance.
+
+---
+
+## Legacy manual certificates (Tencent zip, etc.)
+
+If you previously mounted certs from `deploy/ssl/`, that flow is optional and separate. This README assumes **Let’s Encrypt** paths under `/etc/letsencrypt`.

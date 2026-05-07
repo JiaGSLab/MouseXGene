@@ -1,4 +1,4 @@
-# 将腾讯云下载的证书解压到此目录，文件名需与 default-https.conf 中一致；切勿提交私钥到 Git。
+# Optional: legacy manual TLS files (e.g. vendor zip). Prefer Let's Encrypt + deploy/README.md.
 *.crt
 *.pem
 *.key

@@ -87,6 +87,8 @@ gunicorn config.wsgi:application --bind 0.0.0.0:8000
 
 (`docker-compose.prod.yml` already uses Gunicorn with worker settings.)
 
+**HTTPS (Let’s Encrypt + Certbot on the host):** see **`deploy/README.md`** — nginx listens on 80/443, mounts `/etc/letsencrypt` and `./acme-challenge`; first-time issuance uses a temporary HTTP-only bootstrap config.
+
 ## Database Backup (PostgreSQL)
 
 Use helper script:
