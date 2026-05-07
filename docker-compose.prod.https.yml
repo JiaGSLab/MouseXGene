@@ -1,0 +1,13 @@
+# 启用 HTTPS：先把证书放到 deploy/ssl/（见 deploy/nginx/default-https.conf 注释），再执行：
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.https.yml up -d
+# 仅覆盖 nginx：对外暴露 443，并挂载证书目录。
+
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/default-https.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./staticfiles:/app/staticfiles:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro

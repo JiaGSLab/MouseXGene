@@ -1660,6 +1660,19 @@ a.col-uid-link {
     color: var(--muted);
 }
 
+.site-footer-beian {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35rem 0.65rem;
+}
+
+.site-footer-beian__sep {
+    color: var(--muted);
+    user-select: none;
+}
+
 .site-footer a {
     color: var(--muted);
     text-decoration: none;
