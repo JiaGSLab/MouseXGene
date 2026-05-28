@@ -22,6 +22,8 @@ services:
     expose:
       - "8000"
     volumes:
+      # Mount project root so rsync/git pull on the host updates live code (restart web after sync).
+      - .:/app
       - ./staticfiles:/app/staticfiles
       - ./media:/app/media
     depends_on:

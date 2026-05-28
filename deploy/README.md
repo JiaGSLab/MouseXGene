@@ -12,19 +12,48 @@
 - `jialabmouse.top` and `www.jialabmouse.top` **A records** → your server’s public IP.
 - Open inbound **TCP 80** and **TCP 443** on the cloud security group / firewall.
 
+## Deploy code from your Mac (rsync)
+
+**Important:** `web` mounts the project directory (`.:/app`). Rsync only updates files on the **host**; you must run **`apply_on_server.sh`** (migrate + collectstatic + restart `web`) or the site keeps serving old code baked into an earlier image.
+
+On your Mac:
+
+```bash
+cd /path/to/MouseXGene
+chmod +x scripts/rsync_to_server.sh scripts/apply_on_server.sh
+./scripts/rsync_to_server.sh
+ssh ubuntu@YOUR_SERVER 'cd ~/apps/MouseXGene && ./scripts/apply_on_server.sh'
+```
+
+Change host if needed: `SERVER=ubuntu@1.2.3.4 ./scripts/rsync_to_server.sh`
+
+After changing `requirements.txt` or `Dockerfile`, rebuild on the server:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build web
+```
+
 ## Uploaded files (strain line PDFs)
 
 `web` mounts host `./media` → `/app/media` in the container. Back up this directory with your database. PDFs are served through the app (login required), not as public static files.
 
+Run `mkdir -p media` on the server once. Upload PDFs in the UI after deploy; they are stored under `./media/strain_lines/`.
+
 ## Static files
 
-After code or asset changes, run collectstatic in `web` so Nginx serves updated files:
+After code or asset changes:
 
 ```bash
-cd ~/apps/MouseXGene   # or your project root on the server
-rm -rf staticfiles/*
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+cd ~/apps/MouseXGene
+./scripts/apply_on_server.sh
+```
+
+Or manually:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec web python manage.py migrate --noinput
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec web python manage.py collectstatic --noinput
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d web
 docker compose -f docker-compose.prod.yml --env-file .env.prod exec nginx nginx -s reload
 ```
 
