@@ -2393,6 +2393,12 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def family_tree(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
+    sex = (request.GET.get("sex") or "").strip()
+    strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
+    parent = (request.GET.get("parent") or "").strip()
+
     mice = (
         _scoped_mouse_queryset(request.user)
         .select_related(
@@ -2406,17 +2412,53 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         )
         .prefetch_related("genotype_components__strain_line", "genotypes__gene")
     )
+    if include_inactive != "yes":
+        mice = mice.filter(status=Mouse.Status.ACTIVE)
     if q:
         mice = mice.filter(Q(mouse_uid__icontains=q) | Q(ear_tag__icontains=q) | Q(toe_tag__icontains=q))
+    if sex:
+        mice = mice.filter(sex=sex)
+    if strain_line:
+        mice = mice.filter(strain_line_id=strain_line)
+    if project:
+        mice = mice.filter(project_id=project)
+    if parent == "sire":
+        mice = mice.filter(sire__isnull=False)
+    elif parent == "dam":
+        mice = mice.filter(dam__isnull=False)
+    elif parent == "both":
+        mice = mice.filter(sire__isnull=False, dam__isnull=False)
+    elif parent == "either":
+        mice = mice.filter(Q(sire__isnull=False) | Q(dam__isnull=False))
+    elif parent == "none":
+        mice = mice.filter(sire__isnull=True, dam__isnull=True)
+
     mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
     for m in mice:
         m.family_genotype_summary = build_short_genotype_summary(m)
+    strain_line_model = Mouse._meta.get_field("strain_line").related_model
     return render(
         request,
         "colony/family_tree.html",
         {
             "mice": mice,
             "q": q,
+            "sex": sex,
+            "strain_line": strain_line,
+            "project": project,
+            "include_inactive": include_inactive,
+            "parent": parent,
+            "sex_options": Mouse.Sex.choices,
+            "strain_line_options": strain_line_model.objects.order_by("line_name"),
+            "project_options": Project.objects.order_by("name"),
+            "parent_options": [
+                ("", "All parent records"),
+                ("either", "Has sire or dam"),
+                ("both", "Has sire and dam"),
+                ("sire", "Has sire only"),
+                ("dam", "Has dam only"),
+                ("none", "No parents on record"),
+            ],
             **build_list_sort_context(request, "mice:family_tree", FAMILY_TREE_SORT),
         },
     )

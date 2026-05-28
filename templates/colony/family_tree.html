@@ -3,20 +3,62 @@
 
 {% block title %}Family Tree | MouseXGene{% endblock %}
 
+{% block extra_head %}
+<style>
+    .filter-form--family-tree .family-tree-search {
+        min-width: 0;
+        width: min(240px, 100%);
+        flex: 0 1 240px;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <section class="page-header page-header-row">
     <div>
         <h1>Family Tree</h1>
-        <p class="muted">Pedigree-first workflow page for sire/dam/offspring navigation across the colony.</p>
+        <p class="muted">Pedigree hub: search mice and filter by strain, project, or parent links (up to 80 rows).</p>
     </div>
 </section>
 
-<section class="card">
-    <form method="get" class="filter-grid filter-form" id="family-tree-filters">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search mouse UID / ear tag / toe tag" class="search-input">
-        <div class="form-actions">
-            <button class="button" type="submit">Search</button>
-            <a href="{% url 'mice:family_tree' %}" class="button button-light">Reset</a>
+<section class="card card--filters">
+    <form method="get" class="filter-form filter-form--family-tree" id="family-tree-filters" action="{% url 'mice:family_tree' %}">
+        <div class="filter-row filter-row--primary">
+            <input type="text" name="q" value="{{ q }}" placeholder="UID / ear tag / toe tag" class="search-input filter-control family-tree-search" aria-label="Search mice">
+            <select name="sex" class="filter-control" aria-label="Sex">
+                <option value="">All sex</option>
+                {% for value, label in sex_options %}
+                    <option value="{{ value }}" {% if sex == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <select name="strain_line" class="filter-control" aria-label="Strain line">
+                <option value="">All strain lines</option>
+                {% for item in strain_line_options %}
+                    <option value="{{ item.pk }}" {% if strain_line == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+            <select name="project" class="filter-control" aria-label="Project">
+                <option value="">All projects</option>
+                {% for item in project_options %}
+                    <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+            </select>
+            <select name="parent" class="filter-control" aria-label="Parent records">
+                {% for value, label in parent_options %}
+                    <option value="{{ value }}" {% if parent == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <div class="filter-actions">
+                <button class="button" type="submit">Apply</button>
+                <a href="{% url 'mice:family_tree' %}" class="button button-reset">Reset</a>
+            </div>
+        </div>
+        <div class="filter-row filter-row--secondary">
+            <label class="filter-label" for="id_include_inactive_family">Status</label>
+            <select name="include_inactive" id="id_include_inactive_family" class="filter-control">
+                <option value="" {% if include_inactive != "yes" %}selected{% endif %}>Active mice only</option>
+                <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include inactive / archived</option>
+            </select>
         </div>
     </form>
 </section>
@@ -80,7 +122,7 @@
                     <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="9" class="empty-row">No mice matched your query.</td></tr>
+                <tr><td colspan="9" class="empty-row">No mice matched your filters.</td></tr>
             {% endfor %}
         </tbody>
     </table>
