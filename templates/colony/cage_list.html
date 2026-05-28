@@ -6,7 +6,7 @@
 <section class="page-header page-header-row page-header--toolbar">
     <div>
         <h1>Cages</h1>
-        <p class="muted">All cages in the colony.</p>
+        <p class="muted">All cages in the colony. Export uses the current filter fields below (no need to click Apply first).</p>
         {% if strain_line_filter_label %}
             <p class="muted small-print">Filtered to active cages with mice on strain line <strong>{{ strain_line_filter_label }}</strong>.</p>
         {% endif %}
@@ -20,8 +20,8 @@
         </div>
         {% if user.is_authenticated %}
             <div class="action-links action-links--stack">
-                <a class="button button-export" href="{% url 'colony:cages_export' %}">Export Cages (CSV)</a>
-                <a class="button button-export" href="{% url 'colony:cages_export_xlsx' %}">Export Cages (Excel)</a>
+                <button type="submit" class="button button-export" form="cage-list-filters" formaction="{% url 'colony:cages_export' %}" formmethod="get">Export Cages (CSV)</button>
+                <button type="submit" class="button button-export" form="cage-list-filters" formaction="{% url 'colony:cages_export_xlsx' %}" formmethod="get">Export Cages (Excel)</button>
             </div>
         {% endif %}
     </div>

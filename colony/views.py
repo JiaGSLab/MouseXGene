@@ -239,18 +239,59 @@ def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
     return list(rows.values())
 
 
-def get_cages_export_rows(user) -> list[list]:
-    cages = (
-        _scoped_cage_queryset(user)
+def _filtered_cages_queryset(request: HttpRequest):
+    """Apply the same GET filters as the cage list page."""
+    q = (request.GET.get("q") or "").strip()
+    room = (request.GET.get("room") or "").strip()
+    rack = (request.GET.get("rack") or "").strip()
+    cage_type = (request.GET.get("cage_type") or "").strip()
+    purpose = (request.GET.get("purpose") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    is_empty = (request.GET.get("is_empty") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
+    strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+
+    cages = _scoped_cage_queryset(request.user)
+    if include_inactive != "yes":
+        cages = cages.filter(status=Cage.Status.ACTIVE)
+    if strain_line:
+        cages = cages.filter(
+            current_mice__strain_line_id=strain_line,
+            current_mice__status=Mouse.Status.ACTIVE,
+        )
+    if q:
+        cages = cages.filter(cage_id__icontains=q)
+    if room:
+        cages = cages.filter(room=room)
+    if rack:
+        cages = cages.filter(rack=rack)
+    if cage_type:
+        cages = cages.filter(cage_type=cage_type)
+    if purpose:
+        cages = cages.filter(purpose=purpose)
+    if status:
+        cages = cages.filter(status=status)
+    if is_empty == "yes":
+        cages = cages.filter(current_mice__isnull=True)
+    elif is_empty == "no":
+        cages = cages.filter(current_mice__isnull=False)
+
+    return (
+        cages.distinct()
+        .order_by("cage_id")
         .prefetch_related(
+            "current_mice__strain_line",
             "current_mice__project",
             "current_mice__project__owner",
             "current_mice__project__owner__profile",
             "current_mice__genotype_components__strain_line",
             "current_mice__genotypes__gene",
         )
-        .order_by("cage_id")
     )
+
+
+def get_cages_export_rows(request: HttpRequest) -> list[list]:
+    cages = _filtered_cages_queryset(request)
     rows: list[list] = []
     for cage in cages:
         cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
@@ -1273,43 +1314,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
 
-    cages = _scoped_cage_queryset(request.user)
-    if include_inactive != "yes":
-        cages = cages.filter(status=Cage.Status.ACTIVE)
-    if strain_line:
-        cages = cages.filter(
-            current_mice__strain_line_id=strain_line,
-            current_mice__status=Mouse.Status.ACTIVE,
-        )
-    if q:
-        cages = cages.filter(cage_id__icontains=q)
-    if room:
-        cages = cages.filter(room=room)
-    if rack:
-        cages = cages.filter(rack=rack)
-    if cage_type:
-        cages = cages.filter(cage_type=cage_type)
-    if purpose:
-        cages = cages.filter(purpose=purpose)
-    if status:
-        cages = cages.filter(status=status)
-    if is_empty == "yes":
-        cages = cages.filter(current_mice__isnull=True)
-    elif is_empty == "no":
-        cages = cages.filter(current_mice__isnull=False)
-
-    cages = (
-        cages.distinct()
-        .order_by("cage_id")
-        .prefetch_related(
-            "current_mice__strain_line",
-            "current_mice__project",
-            "current_mice__project__owner",
-            "current_mice__project__owner__profile",
-            "current_mice__genotype_components__strain_line",
-            "current_mice__genotypes__gene",
-        )
-    )
+    cages = _filtered_cages_queryset(request)
     strain_line_filter_label = ""
     if strain_line:
         strain_line_filter_label = (
@@ -1895,7 +1900,7 @@ def cages_export(request: HttpRequest) -> HttpResponse:
             "updated_at",
         ]
     )
-    for row in get_cages_export_rows(request.user):
+    for row in get_cages_export_rows(request):
         writer.writerow(row)
     return response
 
@@ -1934,7 +1939,7 @@ def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
         "created_at",
         "updated_at",
     ]
-    rows = get_cages_export_rows(request.user)
+    rows = get_cages_export_rows(request)
     return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
 
 
