@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags %}
 
 {% block title %}Litters | MouseXGene{% endblock %}
 
@@ -76,20 +77,20 @@
     <table class="data-table data-table-compact">
         <thead>
             <tr>
-                <th>Litter ID</th>
-                <th>Breeding</th>
-                <th>Birth date</th>
-                <th>Age</th>
-                <th>Pups count</th>
-                <th>Wean due</th>
-                <th>Weaning status</th>
-                <th>Tagging status</th>
-                <th>Mice created</th>
-                <th>Parent lines</th>
-                <th>Breeder Members</th>
-                <th>Status</th>
-                <th>Alerts</th>
-                <th>Actions</th>
+                {% sort_th "litter_code" "Litter ID" %}
+                {% sort_th "breeding" "Breeding" %}
+                {% sort_th "birth_date" "Birth date" %}
+                {% sort_th "age" "Age" %}
+                {% sort_th "pups" "Pups count" %}
+                {% sort_th "wean_due" "Wean due" %}
+                {% sort_th "weaning_status" "Weaning status" %}
+                {% sort_th "tagging_status" "Tagging status" %}
+                {% sort_th "mice_created" "Mice created" %}
+                {% sort_th "parent_lines" "Parent lines" %}
+                <th scope="col">Breeder Members</th>
+                {% sort_th "status" "Status" %}
+                <th scope="col">Alerts</th>
+                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>

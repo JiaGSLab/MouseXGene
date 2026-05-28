@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags %}
 
 {% block title %}Family Tree | MouseXGene{% endblock %}
 
@@ -24,15 +25,15 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th>Mouse</th>
-                <th>Sire (Father)</th>
-                <th>Dam (Mother)</th>
-                <th>Cage</th>
-                <th>Strain</th>
-                <th>Genotype</th>
-                <th>Project</th>
-                <th>Owner</th>
-                <th>Pedigree</th>
+                {% sort_th "mouse_uid" "Mouse" %}
+                {% sort_th "sire" "Sire (Father)" %}
+                {% sort_th "dam" "Dam (Mother)" %}
+                {% sort_th "cage" "Cage" %}
+                {% sort_th "strain_line" "Strain" %}
+                {% sort_th "genotype" "Genotype" %}
+                {% sort_th "project" "Project" %}
+                {% sort_th "owner" "Owner" %}
+                <th scope="col">Pedigree</th>
             </tr>
         </thead>
         <tbody>

@@ -1,0 +1,9 @@
+<th scope="col" class="{% if extra_class %}{{ extra_class }} {% endif %}{% if active %}th-sort-active{% endif %}">
+    {% if href %}
+        <a href="{{ href }}" class="table-sort-link"{% if active %} aria-sort="{% if dir == 'desc' %}descending{% else %}ascending{% endif %}"{% endif %}>
+            {{ label }}{% if active %} <span class="table-sort-link__mark" aria-hidden="true">{% if dir == 'desc' %}▼{% else %}▲{% endif %}</span>{% endif %}
+        </a>
+    {% else %}
+        {{ label }}
+    {% endif %}
+</th>

@@ -44,6 +44,14 @@ from users.forms import UserImportPrefixForm
 from colony.mouse_age import mouse_list_age_band
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
+from core.list_sort import (
+    CAGE_LIST_SORT,
+    FAMILY_TREE_SORT,
+    MICE_LIST_SORT,
+    STRAIN_LINE_LIST_SORT,
+    apply_list_sort,
+    build_list_sort_context,
+)
 from users.permissions import (
     authenticated_required,
     can_edit_project_data,
@@ -339,7 +347,8 @@ def get_cages_export_rows(request: HttpRequest) -> list[list]:
 
 
 def _cages_export_http_response(request: HttpRequest, export_fmt: str) -> HttpResponse:
-    rows = _cages_export_rows_from_queryset(_filtered_cages_queryset(request))
+    cages = apply_list_sort(_filtered_cages_queryset(request), request, CAGE_LIST_SORT)
+    rows = _cages_export_rows_from_queryset(cages)
     headers = _cages_export_headers()
     if export_fmt == "csv":
         response = HttpResponse(content_type="text/csv")
@@ -347,8 +356,10 @@ def _cages_export_http_response(request: HttpRequest, export_fmt: str) -> HttpRe
         writer = csv.writer(response)
         writer.writerow(headers)
         writer.writerows(rows)
-        return response
-    return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
+    else:
+        response = build_xlsx_response("cages.xlsx", "Cages", headers, rows)
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def get_cage_inventory_rows(cage: Cage) -> list[list]:
@@ -369,7 +380,7 @@ def get_cage_inventory_rows(cage: Cage) -> list[list]:
     ]
 
 
-def _filtered_mice_queryset(request: HttpRequest, *, preserve_list_order: bool = True):
+def _filtered_mice_queryset(request: HttpRequest):
     """Apply the same GET filters as the mouse list page."""
     query = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip()
@@ -378,9 +389,6 @@ def _filtered_mice_queryset(request: HttpRequest, *, preserve_list_order: bool =
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
-    age_sort = (request.GET.get("age_sort") or "").strip()
-    if age_sort not in ("", "old", "young"):
-        age_sort = ""
 
     mice = _scoped_mouse_queryset(request.user)
     if include_inactive != "yes":
@@ -405,22 +413,16 @@ def _filtered_mice_queryset(request: HttpRequest, *, preserve_list_order: bool =
     if project:
         mice = mice.filter(project_id=project)
 
-    if preserve_list_order:
-        if age_sort == "old":
-            mice = mice.order_by(F("birth_date").asc(nulls_last=True), "mouse_uid")
-        elif age_sort == "young":
-            mice = mice.order_by(F("birth_date").desc(nulls_last=True), "mouse_uid")
-        else:
-            mice = mice.order_by("-birth_date", "mouse_uid")
     return mice
 
 
 def get_mice_export_rows(request: HttpRequest) -> list[list]:
-    mice = (
-        _filtered_mice_queryset(request, preserve_list_order=False)
+    mice = apply_list_sort(
+        _filtered_mice_queryset(request)
         .select_related("project", "project__owner", "project__owner__profile", "sire", "dam")
-        .prefetch_related("genotypes__gene")
-        .order_by("mouse_uid")
+        .prefetch_related("genotypes__gene"),
+        request,
+        MICE_LIST_SORT,
     )
     rows: list[list] = []
     for mouse in mice:
@@ -1350,6 +1352,8 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     if export in {"csv", "xlsx"}:
         return _cages_export_http_response(request, export)
 
+    cages = apply_list_sort(cages, request, CAGE_LIST_SORT)
+
     strain_line_filter_label = ""
     if strain_line:
         strain_line_filter_label = (
@@ -1380,6 +1384,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "purpose_options": Cage.Purpose.choices,
         "status_options": Cage.Status.choices,
         "list_all_max": LIST_ALL_RESULTS_MAX,
+        **build_list_sort_context(request, "colony:cage_list", CAGE_LIST_SORT),
         **page_ctx,
     }
     return render(request, "colony/cage_list.html", context)
@@ -1438,10 +1443,12 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
             distinct=True,
         ),
     )
+    lines = apply_list_sort(lines, request, STRAIN_LINE_LIST_SORT)
     context = {
-        "lines": lines.order_by("name", "line_name"),
+        "lines": lines,
         "q": q,
         "active": active,
+        **build_list_sort_context(request, "colony:strain_line_list", STRAIN_LINE_LIST_SORT),
     }
     return render(request, "colony/strain_line_list.html", context)
 
@@ -1921,7 +1928,11 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cages_export(request: HttpRequest) -> HttpResponse:
-    return _cages_export_http_response(request, "csv")
+    q = request.GET.copy()
+    q["export"] = "csv"
+    qs = q.urlencode()
+    url = reverse("colony:cage_list")
+    return redirect(f"{url}?{qs}" if qs else url)
 
 
 @authenticated_required
@@ -1950,7 +1961,11 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
-    return _cages_export_http_response(request, "xlsx")
+    q = request.GET.copy()
+    q["export"] = "xlsx"
+    qs = q.urlencode()
+    url = reverse("colony:cage_list")
+    return redirect(f"{url}?{qs}" if qs else url)
 
 
 @authenticated_required
@@ -1971,15 +1986,6 @@ def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     return build_xlsx_response(f"cage_{cage.cage_id}_inventory.xlsx", "CageInventory", headers, rows)
 
 
-def _mouse_list_age_sort_querystring(request: HttpRequest, new_age_sort: str | None) -> str:
-    q = request.GET.copy()
-    if new_age_sort in ("old", "young"):
-        q["age_sort"] = new_age_sort
-    else:
-        q.pop("age_sort", None)
-    return q.urlencode()
-
-
 @authenticated_required
 def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
@@ -1990,8 +1996,14 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     age_sort = (request.GET.get("age_sort") or "").strip()
-    if age_sort not in ("", "old", "young"):
-        age_sort = ""
+    if age_sort in ("old", "young") and not (request.GET.get("sort") or "").strip():
+        q = request.GET.copy()
+        q["sort"] = "age"
+        q["dir"] = "desc" if age_sort == "old" else "asc"
+        q.pop("age_sort", None)
+        qs = q.urlencode()
+        url = reverse("mice:mouse_list")
+        return redirect(f"{url}?{qs}" if qs else url)
 
     mice = _filtered_mice_queryset(request).select_related(
         "project__owner",
@@ -2002,16 +2014,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "genotypes__gene",
     )
 
-    if age_sort == "":
-        next_age_sort: str | None = "old"
-    elif age_sort == "old":
-        next_age_sort = "young"
-    else:
-        next_age_sort = None
-    age_sort_qs = _mouse_list_age_sort_querystring(request, next_age_sort)
-    age_sort_href = reverse("mice:mouse_list")
-    if age_sort_qs:
-        age_sort_href = f"{age_sort_href}?{age_sort_qs}"
+    mice = apply_list_sort(mice, request, MICE_LIST_SORT)
 
     current_cage_options = Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id")
     project_options = (
@@ -2030,9 +2033,8 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "current_cage": current_cage,
         "project": project,
         "include_inactive": include_inactive,
-        "age_sort": age_sort,
-        "age_sort_href": age_sort_href,
         "sex_options": Mouse.Sex.choices,
+        **build_list_sort_context(request, "mice:mouse_list", MICE_LIST_SORT),
         "status_options": Mouse.Status.choices,
         "strain_line_options": Mouse._meta.get_field("strain_line").related_model.objects.order_by("line_name"),
         "current_cage_options": current_cage_options,
@@ -2391,7 +2393,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
     )
     if q:
         mice = mice.filter(Q(mouse_uid__icontains=q) | Q(ear_tag__icontains=q) | Q(toe_tag__icontains=q))
-    mice = list(mice.order_by("-birth_date", "mouse_uid")[:80])
+    mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
     for m in mice:
         m.family_genotype_summary = build_short_genotype_summary(m)
     return render(
@@ -2400,6 +2402,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         {
             "mice": mice,
             "q": q,
+            **build_list_sort_context(request, "mice:family_tree", FAMILY_TREE_SORT),
         },
     )
 

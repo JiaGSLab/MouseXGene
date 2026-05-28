@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags %}
 
 {% block title %}Mice | MouseXGene{% endblock %}
 
@@ -100,19 +101,17 @@
     <table class="data-table data-table--compact">
         <thead>
             <tr>
-                <th>Mouse UID</th>
-                <th>Genotype Summary</th>
-                <th>Sex</th>
-                <th>Birth Date</th>
-                <th class="th-sort-age">
-                    <a href="{{ age_sort_href }}" class="table-sort-link" title="Cycle: oldest first → youngest first → default order">Age{% if age_sort == "old" %} <span class="table-sort-link__mark" aria-hidden="true">▲</span>{% elif age_sort == "young" %} <span class="table-sort-link__mark" aria-hidden="true">▼</span>{% endif %}</a>
-                </th>
-                <th>Status</th>
-                <th>Breeding</th>
-                <th>Strain Line</th>
-                <th>Current Cage</th>
-                <th>Project</th>
-                <th>Owner</th>
+                {% sort_th "mouse_uid" "Mouse UID" extra_class="col-uid" %}
+                {% sort_th "genotype" "Genotype Summary" extra_class="col-genotype" %}
+                {% sort_th "sex" "Sex" %}
+                {% sort_th "birth_date" "Birth Date" %}
+                {% sort_th "age" "Age" extra_class="th-sort-age" %}
+                {% sort_th "status" "Status" %}
+                {% sort_th "breeding" "Breeding" %}
+                {% sort_th "strain_line" "Strain Line" %}
+                {% sort_th "cage" "Current Cage" %}
+                {% sort_th "project" "Project" %}
+                {% sort_th "owner" "Owner" %}
             </tr>
         </thead>
         <tbody>

@@ -13,6 +13,7 @@ from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
 from breeding.analytics import breeding_litter_timing_alert
 from core.audit import log_audit_event
+from core.list_sort import PROJECT_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
@@ -290,9 +291,11 @@ def project_list(request: HttpRequest) -> HttpResponse:
             | Q(owner__profile__display_name__icontains=q)
             | Q(description__icontains=q)
         )
+    projects = apply_list_sort(projects, request, PROJECT_LIST_SORT)
     context = {
-        "projects": projects.order_by("name"),
+        "projects": projects,
         "q": q,
+        **build_list_sort_context(request, "project_list", PROJECT_LIST_SORT),
     }
     return render(request, "core/project_list.html", context)
 

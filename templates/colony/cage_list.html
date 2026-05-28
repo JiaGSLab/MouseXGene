@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags static %}
 
 {% block title %}Cages | MouseXGene{% endblock %}
 
@@ -18,6 +19,12 @@
                 <a class="button" href="{% url 'colony:cage_import' %}">Import Cages</a>
             {% endif %}
         </div>
+        {% if user.is_authenticated %}
+            <div class="action-links action-links--stack">
+                <a class="button button-export" href="{% url 'colony:cage_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=csv">Export Cages (CSV)</a>
+                <a class="button button-export" href="{% url 'colony:cage_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Cages (Excel)</a>
+            </div>
+        {% endif %}
     </div>
 </section>
 
@@ -47,10 +54,6 @@
             </select>
             <div class="filter-actions">
                 <button type="submit" class="button">Apply</button>
-                {% if user.is_authenticated %}
-                    <button type="submit" class="button button-export" name="export" value="csv">Export Cages (CSV)</button>
-                    <button type="submit" class="button button-export" name="export" value="xlsx">Export Cages (Excel)</button>
-                {% endif %}
                 <a href="{% url 'colony:cage_list' %}" class="button button-reset">Reset</a>
             </div>
         </div>
@@ -86,6 +89,10 @@
                 <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
                 <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
             </select>
+            {% if user.is_authenticated %}
+                <button type="button" class="button button-export" form="cage-list-filters" data-export-format="csv">Export Cages (CSV)</button>
+                <button type="button" class="button button-export" form="cage-list-filters" data-export-format="xlsx">Export Cages (Excel)</button>
+            {% endif %}
             {% if total_count %}
                 <p class="list-range-meta muted">
                     {% if page_obj and per_page != "all" %}
@@ -105,16 +112,16 @@
     <table class="data-table data-table--compact">
         <thead>
             <tr>
-                <th class="col-cage-id">Cage ID</th>
-                <th>Room</th>
-                <th>Rack</th>
-                <th>Position</th>
-                <th>Cage Type</th>
-                <th class="col-purpose">Purpose</th>
-                <th class="col-num"># Mice</th>
-                <th>Project</th>
-                <th>Owner</th>
-                <th>Status</th>
+                {% sort_th "cage_id" "Cage ID" extra_class="col-cage-id" %}
+                {% sort_th "room" "Room" %}
+                {% sort_th "rack" "Rack" %}
+                {% sort_th "position" "Position" %}
+                {% sort_th "cage_type" "Cage Type" %}
+                {% sort_th "purpose" "Purpose" extra_class="col-purpose" %}
+                {% sort_th "mouse_count" "# Mice" extra_class="col-num" %}
+                {% sort_th "project" "Project" %}
+                {% sort_th "owner" "Owner" %}
+                {% sort_th "status" "Status" %}
             </tr>
         </thead>
         <tbody>
@@ -156,4 +163,8 @@
     </table>
     {% include "includes/pagination_nav.html" %}
 </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{% static 'js/filter_form_export.js' %}"></script>
 {% endblock %}

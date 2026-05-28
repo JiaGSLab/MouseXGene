@@ -22,6 +22,7 @@ from .forms import BreedingForm, LitterForm, LitterPupFormSet, WeanLitterForm, g
 from .models import Breeding, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
+from core.list_sort import BREEDING_LIST_SORT, LITTER_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels
 from core.models import AuditLog, Project, ProjectMembership, format_project_owner_label
 from users.permissions import (
@@ -47,6 +48,7 @@ def _mouse_age_days(mouse: Mouse | None, *, today=None) -> int | None:
 def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
     def href(n: int) -> str:
         q = request.GET.copy()
+        q.pop("export", None)
         if n <= 1:
             q.pop("page", None)
         else:
@@ -451,7 +453,8 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     breedings = breedings.distinct().annotate(
         litter_count=Count("litters", distinct=True),
         latest_litter_date=Max("litters__birth_date"),
-    ).order_by("-start_date", "breeding_code")
+    )
+    breedings = apply_list_sort(breedings, request, BREEDING_LIST_SORT)
     today = timezone.localdate()
     breedings_export_list = list(breedings)
     _enrich_breedings_for_list(breedings_export_list, today=today)
@@ -529,6 +532,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "total_count": pagination["total_count"],
         "all_allowed": pagination["all_allowed"],
         "list_all_max": LIST_ALL_RESULTS_MAX,
+        **build_list_sort_context(request, "breeding:breeding_list", BREEDING_LIST_SORT),
     }
     return render(request, "breeding/breeding_list.html", context)
 
@@ -787,7 +791,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     if litter_status:
         litters = litters.filter(litter_status=litter_status)
 
-    litters_qs = litters.order_by("-birth_date", "litter_code")
+    litters_qs = apply_list_sort(litters, request, LITTER_LIST_SORT)
     litters = list(litters_qs)
     today = timezone.localdate()
     for litter in litters:
@@ -992,6 +996,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         "total_count": pagination["total_count"],
         "all_allowed": pagination["all_allowed"],
         "list_all_max": LIST_ALL_RESULTS_MAX,
+        **build_list_sort_context(request, "litters:litter_list", LITTER_LIST_SORT),
     }
     return render(request, "breeding/litter_list.html", context)
 

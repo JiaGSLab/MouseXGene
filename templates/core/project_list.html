@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags %}
 
 {% block title %}Projects | MouseXGene{% endblock %}
 
@@ -31,10 +32,10 @@
     <table class="data-table data-table--compact data-table--striped">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Owner</th>
-                <th>Active</th>
-                <th>Actions</th>
+                {% sort_th "name" "Name" %}
+                {% sort_th "owner" "Owner" %}
+                {% sort_th "active" "Active" %}
+                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load list_sort_tags %}
 
 {% block title %}Breedings | MouseXGene{% endblock %}
 
@@ -96,17 +97,17 @@
     <table class="data-table data-table--breedings">
         <thead>
             <tr>
-                <th scope="col">Set up by</th>
-                <th class="col-breeding-alert" scope="col">Alert</th>
-                <th scope="col">Breeding Code</th>
-                <th scope="col">Cage</th>
-                <th scope="col">Breeding Type</th>
-                <th scope="col">Sire</th>
-                <th scope="col">Dams</th>
-                <th scope="col">Start Date</th>
-                <th scope="col">Plug Date</th>
-                <th scope="col">Expected Birth Date</th>
-                <th scope="col">Status</th>
+                {% sort_th "setup_by" "Set up by" %}
+                {% sort_th "alert" "Alert" extra_class="col-breeding-alert" %}
+                {% sort_th "breeding_code" "Breeding Code" %}
+                {% sort_th "cage" "Cage" %}
+                {% sort_th "breeding_type" "Breeding Type" %}
+                {% sort_th "sire" "Sire" %}
+                {% sort_th "dams" "Dams" %}
+                {% sort_th "start_date" "Start Date" %}
+                {% sort_th "plug_date" "Plug Date" %}
+                {% sort_th "expected_birth_date" "Expected Birth Date" %}
+                {% sort_th "status" "Status" %}
             </tr>
         </thead>
         <tbody>
