@@ -138,6 +138,7 @@ def _scoped_cage_queryset(user):
 def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
     def href(n: int) -> str:
         q = request.GET.copy()
+        q.pop("export", None)
         if n <= 1:
             q.pop("page", None)
         else:
@@ -290,8 +291,21 @@ def _filtered_cages_queryset(request: HttpRequest):
     )
 
 
-def get_cages_export_rows(request: HttpRequest) -> list[list]:
-    cages = _filtered_cages_queryset(request)
+CAGE_EXPORT_EXTRA_COLUMNS = [
+    "projects",
+    "owners",
+    "current_mouse_count",
+    "genotype_overview",
+    "created_at",
+    "updated_at",
+]
+
+
+def _cages_export_headers() -> list[str]:
+    return EXPECTED_COLUMNS + CAGE_EXPORT_EXTRA_COLUMNS
+
+
+def _cages_export_rows_from_queryset(cages) -> list[list]:
     rows: list[list] = []
     for cage in cages:
         cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
@@ -318,6 +332,23 @@ def get_cages_export_rows(request: HttpRequest) -> list[list]:
             ]
         )
     return rows
+
+
+def get_cages_export_rows(request: HttpRequest) -> list[list]:
+    return _cages_export_rows_from_queryset(_filtered_cages_queryset(request))
+
+
+def _cages_export_http_response(request: HttpRequest, export_fmt: str) -> HttpResponse:
+    rows = _cages_export_rows_from_queryset(_filtered_cages_queryset(request))
+    headers = _cages_export_headers()
+    if export_fmt == "csv":
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        return response
+    return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
 
 
 def get_cage_inventory_rows(cage: Cage) -> list[list]:
@@ -1313,8 +1344,12 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    export = (request.GET.get("export") or "").strip().lower()
 
     cages = _filtered_cages_queryset(request)
+    if export in {"csv", "xlsx"}:
+        return _cages_export_http_response(request, export)
+
     strain_line_filter_label = ""
     if strain_line:
         strain_line_filter_label = (
@@ -1886,23 +1921,7 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cages_export(request: HttpRequest) -> HttpResponse:
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
-    writer = csv.writer(response)
-    writer.writerow(
-        EXPECTED_COLUMNS
-        + [
-            "projects",
-            "owners",
-            "current_mouse_count",
-            "genotype_overview",
-            "created_at",
-            "updated_at",
-        ]
-    )
-    for row in get_cages_export_rows(request):
-        writer.writerow(row)
-    return response
+    return _cages_export_http_response(request, "csv")
 
 
 @authenticated_required
@@ -1931,16 +1950,7 @@ def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cages_export_xlsx(request: HttpRequest) -> HttpResponse:
-    headers = EXPECTED_COLUMNS + [
-        "projects",
-        "owners",
-        "current_mouse_count",
-        "genotype_overview",
-        "created_at",
-        "updated_at",
-    ]
-    rows = get_cages_export_rows(request)
-    return build_xlsx_response("cages.xlsx", "Cages", headers, rows)
+    return _cages_export_http_response(request, "xlsx")
 
 
 @authenticated_required

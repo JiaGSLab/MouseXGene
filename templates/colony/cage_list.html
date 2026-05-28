@@ -18,17 +18,11 @@
                 <a class="button" href="{% url 'colony:cage_import' %}">Import Cages</a>
             {% endif %}
         </div>
-        {% if user.is_authenticated %}
-            <div class="action-links action-links--stack">
-                <button type="submit" class="button button-export" form="cage-list-filters" formaction="{% url 'colony:cages_export' %}" formmethod="get">Export Cages (CSV)</button>
-                <button type="submit" class="button button-export" form="cage-list-filters" formaction="{% url 'colony:cages_export_xlsx' %}" formmethod="get">Export Cages (Excel)</button>
-            </div>
-        {% endif %}
     </div>
 </section>
 
 <section class="card card--filters">
-    <form method="get" class="filter-form" id="cage-list-filters">
+    <form method="get" class="filter-form" id="cage-list-filters" action="{% url 'colony:cage_list' %}">
         {% if strain_line %}
             <input type="hidden" name="strain_line" value="{{ strain_line }}">
         {% endif %}
@@ -53,6 +47,10 @@
             </select>
             <div class="filter-actions">
                 <button type="submit" class="button">Apply</button>
+                {% if user.is_authenticated %}
+                    <button type="submit" class="button button-export" name="export" value="csv">Export Cages (CSV)</button>
+                    <button type="submit" class="button button-export" name="export" value="xlsx">Export Cages (Excel)</button>
+                {% endif %}
                 <a href="{% url 'colony:cage_list' %}" class="button button-reset">Reset</a>
             </div>
         </div>
