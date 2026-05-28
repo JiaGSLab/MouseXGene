@@ -21,19 +21,17 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Breedings</h1>
-        <p class="muted">Track active and historical breeding setups. Rows with a left bar have been active &gt;21 days without a new litter.</p>
+        <p class="muted">Track active and historical breeding setups. Rows with a left bar have been active &gt;21 days without a new litter. Export buttons are in the filter section below.</p>
     </div>
     <div class="action-links">
         {% if can_manage_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
-        <a class="button button-export" href="{% url 'breeding:breeding_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=csv">Export Breedings (CSV)</a>
-        <a class="button button-export" href="{% url 'breeding:breeding_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Breedings (Excel)</a>
     </div>
 </section>
 
 <section class="card card--filters">
-    <form method="get" class="filter-form" id="breeding-list-filters">
+    <form method="get" class="filter-form" id="breeding-list-filters" action="{% url 'breeding:breeding_list' %}">
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search code, sire/dam UID, or set-up by" class="search-input filter-control" aria-label="Search breedings">
             <select name="setup_by" class="filter-control" aria-label="Set up by">
@@ -78,6 +76,8 @@
                 <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
                 <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
             </select>
+            <button type="submit" class="button button-export" name="export" value="csv">Export Breedings (CSV)</button>
+            <button type="submit" class="button button-export" name="export" value="xlsx">Export Breedings (Excel)</button>
             {% if total_count %}
                 <p class="list-range-meta muted">
                     {% if page_obj and per_page != "all" %}

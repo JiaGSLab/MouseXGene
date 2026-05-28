@@ -1986,6 +1986,36 @@ def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     return build_xlsx_response(f"cage_{cage.cage_id}_inventory.xlsx", "CageInventory", headers, rows)
 
 
+MICE_EXPORT_EXTRA_COLUMNS = [
+    "owner",
+    "genotype_summary",
+    "death_date",
+    "euthanasia_date",
+    "death_reason",
+    "created_at",
+    "updated_at",
+]
+
+
+def _mice_export_headers() -> list[str]:
+    return MOUSE_EXPECTED_COLUMNS + MICE_EXPORT_EXTRA_COLUMNS
+
+
+def _mice_export_http_response(request: HttpRequest, export_fmt: str) -> HttpResponse:
+    headers = _mice_export_headers()
+    rows = get_mice_export_rows(request)
+    if export_fmt == "csv":
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(rows)
+    else:
+        response = build_xlsx_response("mice.xlsx", "Mice", headers, rows)
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 @authenticated_required
 def mouse_list(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
@@ -1995,6 +2025,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    export = (request.GET.get("export") or "").strip().lower()
     age_sort = (request.GET.get("age_sort") or "").strip()
     if age_sort in ("old", "young") and not (request.GET.get("sort") or "").strip():
         q = request.GET.copy()
@@ -2015,6 +2046,9 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     )
 
     mice = apply_list_sort(mice, request, MICE_LIST_SORT)
+
+    if export in {"csv", "xlsx"}:
+        return _mice_export_http_response(request, export)
 
     current_cage_options = Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id")
     project_options = (
@@ -2246,39 +2280,20 @@ def mouse_import_template_xlsx(request: HttpRequest) -> HttpResponse:
 
 @authenticated_required
 def mice_export(request: HttpRequest) -> HttpResponse:
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
-    writer = csv.writer(response)
-    writer.writerow(
-        MOUSE_EXPECTED_COLUMNS
-        + [
-            "owner",
-            "genotype_summary",
-            "death_date",
-            "euthanasia_date",
-            "death_reason",
-            "created_at",
-            "updated_at",
-        ]
-    )
-    for row in get_mice_export_rows(request):
-        writer.writerow(row)
-    return response
+    q = request.GET.copy()
+    q["export"] = "csv"
+    qs = q.urlencode()
+    url = reverse("mice:mouse_list")
+    return redirect(f"{url}?{qs}" if qs else url)
 
 
 @authenticated_required
 def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
-    headers = MOUSE_EXPECTED_COLUMNS + [
-        "owner",
-        "genotype_summary",
-        "death_date",
-        "euthanasia_date",
-        "death_reason",
-        "created_at",
-        "updated_at",
-    ]
-    rows = get_mice_export_rows(request)
-    return build_xlsx_response("mice.xlsx", "Mice", headers, rows)
+    q = request.GET.copy()
+    q["export"] = "xlsx"
+    qs = q.urlencode()
+    url = reverse("mice:mouse_list")
+    return redirect(f"{url}?{qs}" if qs else url)
 
 
 @authenticated_required
