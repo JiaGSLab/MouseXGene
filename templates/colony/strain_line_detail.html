@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}{{ line.line_name }} | Strain Line | MouseXGene{% endblock %}
+{% block title %}{{ line.name|default:line.line_name }} | Strain Line | MouseXGene{% endblock %}
 
 {% block content %}
 <section class="page-header page-header-row">
     <div>
         <h1>{{ line.name|default:line.line_name }}</h1>
-        <p class="muted">Strain line definition and usage counts.</p>
+        <p class="muted">Strain line definition, PDF introductions, and usage counts.</p>
     </div>
     <div class="action-links">
         <a class="link-primary" href="{% url 'colony:strain_line_list' %}">Back to list</a>
@@ -19,19 +19,18 @@
         <h2>Definition</h2>
         <dl class="detail-grid">
             <dt>Owner</dt><dd>{{ line.owner_display }}</dd>
-            <dt>Line name</dt><dd>{{ line.line_name }}</dd>
-            <dt>Key name</dt><dd>{{ line.key_name|default:"—" }}</dd>
-            <dt>Display name</dt><dd>{{ line.display_name|default:"—" }}</dd>
-            <dt>Name</dt><dd>{{ line.name|default:"—" }}</dd>
-            <dt>Short name</dt><dd>{{ line.short_name|default:"—" }}</dd>
+            <dt>Included loci</dt>
+            <dd>
+                {% with loci=line.expected_loci_list %}
+                    {% if loci %}{{ loci|join:", " }}{% else %}<span class="cell-empty">—</span>{% endif %}
+                {% endwith %}
+            </dd>
             <dt>Category</dt><dd>{{ line.get_category_display }}</dd>
-            <dt>Gene / locus</dt><dd>{{ line.gene_or_locus|default:"—" }}</dd>
             <dt>Species</dt><dd>{{ line.get_species_display }}</dd>
             <dt>Background</dt><dd>{{ line.background|default:"—" }}</dd>
             <dt>Source</dt><dd>{{ line.source|default:"—" }}</dd>
             <dt>Status</dt><dd>{% if line.is_active %}<span class="status-pill status-pill--ok">Active</span>{% else %}<span class="status-pill status-pill--muted">Archived</span>{% endif %}</dd>
             <dt>Notes</dt><dd>{{ line.notes|default:"—"|linebreaksbr }}</dd>
-            <dt>Updated</dt><dd>{{ line.updated_at|date:"Y-m-d H:i" }}</dd>
         </dl>
     </article>
 
@@ -41,14 +40,16 @@
             <dt>Active mice</dt>
             <dd><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></dd>
             <dt>Active cages (via mice)</dt>
-            <dd><a class="link-primary" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></dd>
+            <dd><a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ line.active_cages_count }}</a></dd>
             <dt>Active breedings</dt>
-            <dd><a class="link-primary" href="{% url 'breeding:breeding_list' }}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></dd>
+            <dd><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></dd>
             <dt>Active litters</dt>
-            <dd><a class="link-primary" href="{% url 'litters:litter_list' }}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></dd>
+            <dd><a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></dd>
         </dl>
     </article>
 </section>
+
+{% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining only %}
 
 {% include "includes/record_timeline.html" with created_at=line.created_at updated_at=line.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by only %}
 {% endblock %}

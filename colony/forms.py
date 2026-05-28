@@ -222,6 +222,17 @@ class StrainLineForm(forms.ModelForm):
             "expected_loci_template": "Included loci",
         }
 
+    def clean_name(self):
+        name = (self.cleaned_data.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Strain line name is required.")
+        conflict = StrainLine.objects.filter(line_name=name)
+        if self.instance.pk:
+            conflict = conflict.exclude(pk=self.instance.pk)
+        if conflict.exists():
+            raise ValidationError("A strain line with this name already exists.")
+        return name
+
     def clean_expected_loci_template(self):
         return (self.cleaned_data.get("expected_loci_template") or "").strip()
 
@@ -242,6 +253,11 @@ class StrainLineForm(forms.ModelForm):
             self.initial["expected_loci_template"] = "\n".join(item["locus_name"] for item in entries)
         if self.instance.pk and not self.instance.owner_id and getattr(self.instance, "created_by_id", None):
             self.initial.setdefault("owner", self.instance.created_by_id)
+        if self.instance and self.instance.pk and not self.initial.get("name"):
+            self.initial.setdefault(
+                "name",
+                (self.instance.name or self.instance.display_name or self.instance.line_name or "").strip(),
+            )
 
     def clean(self):
         cleaned = super().clean()
@@ -314,6 +330,12 @@ class StrainLineForm(forms.ModelForm):
 
     def save(self, commit=True):
         obj = super().save(commit=False)
+        new_name = (self.cleaned_data.get("name") or "").strip()
+        if new_name:
+            obj.name = new_name
+            obj.display_name = new_name
+            obj.line_name = new_name
+            obj.short_name = new_name
         raw_cfg = (self.cleaned_data.get("expected_loci_config") or "").strip()
         if raw_cfg:
             try:

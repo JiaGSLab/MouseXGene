@@ -37,6 +37,7 @@
                 <th>Name</th>
                 <th>Owner</th>
                 <th>Included loci</th>
+                <th class="col-num-right">PDFs</th>
                 <th class="col-num-right">Active Mice</th>
                 <th class="col-num-right">Active Cages</th>
                 <th class="col-num-right">Active Breedings</th>
@@ -63,8 +64,9 @@
                             {% endif %}
                         {% endwith %}
                     </td>
+                    <td class="col-num-right">{% if line.pdf_count %}{{ line.pdf_count }}{% else %}<span class="cell-empty">—</span>{% endif %}</td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
-                    <td class="col-num-right"><a class="link-primary" href="{% url 'colony:cage_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_cages_count }}</a></td>
+                    <td class="col-num-right"><a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ line.active_cages_count }}</a></td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
                     <td class="col-num-right"><a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
                     <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
@@ -72,7 +74,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td class="empty-row" colspan="9">No strain lines yet. Create one before mouse data entry/import.</td>
+                    <td class="empty-row" colspan="10">No strain lines yet. Create one before mouse data entry/import.</td>
                 </tr>
             {% endfor %}
         </tbody>

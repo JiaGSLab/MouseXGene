@@ -23,6 +23,7 @@ services:
       - "8000"
     volumes:
       - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
     depends_on:
       - db
 

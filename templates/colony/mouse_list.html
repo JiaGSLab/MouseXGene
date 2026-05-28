@@ -6,7 +6,7 @@
 <section class="page-header page-header-row page-header--toolbar">
     <div>
         <h1>Mice</h1>
-        <p class="muted">Browse all mice and search by key identifiers.</p>
+        <p class="muted">Browse all mice and search by key identifiers. Export uses the current filter fields below (no need to click Apply first).</p>
         <p class="muted small-print">
             Age column: gray <strong>Age unknown</strong> if birth date is missing; amber <strong>≥6mo</strong> (≥183d) and red bar <strong>≥1yr</strong> (≥365d) include a left row marker.
         </p>
@@ -20,8 +20,8 @@
         </div>
         {% if user.is_authenticated %}
             <div class="action-links action-links--stack">
-                <a class="button button-export" href="{% url 'mice:mice_export' %}">Export Mice (CSV)</a>
-                <a class="button button-export" href="{% url 'mice:mice_export_xlsx' %}">Export Mice (Excel)</a>
+                <button type="submit" class="button button-export" form="mouse-list-filters" formaction="{% url 'mice:mice_export' %}" formmethod="get">Export Mice (CSV)</button>
+                <button type="submit" class="button button-export" form="mouse-list-filters" formaction="{% url 'mice:mice_export_xlsx' %}" formmethod="get">Export Mice (Excel)</button>
             </div>
         {% endif %}
     </div>
@@ -46,7 +46,7 @@
             <select name="strain_line" class="filter-control">
                 <option value="">All Strain Lines</option>
                 {% for item in strain_line_options %}
-                    <option value="{{ item.pk }}" {% if strain_line == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.line_name }}</option>
+                    <option value="{{ item.pk }}" {% if strain_line == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.label }}</option>
                 {% endfor %}
             </select>
             <select name="current_cage" class="filter-control">

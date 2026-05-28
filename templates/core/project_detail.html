@@ -29,6 +29,53 @@
     </article>
 
     <article class="card">
+        <h2>Strain lines in this project</h2>
+        <p class="muted">
+            Strain lines used by at least one mouse assigned to this project. Definitions are lab-wide; a strain may also appear on other projects.
+        </p>
+        {% if strain_lines %}
+            <div class="table-wrap">
+                <table class="data-table data-table--compact data-table--striped">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Owner</th>
+                            <th>Included loci</th>
+                            <th class="col-num-right">Mice (this project)</th>
+                            <th class="col-num-right">Active (this project)</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for line in strain_lines %}
+                            <tr class="{% if not line.is_active %}row-inactive{% endif %}">
+                                <td>
+                                    <a class="link-primary" href="{% url 'colony:strain_line_detail' line.pk %}">
+                                        {{ line.name|default:line.line_name }}
+                                    </a>
+                                </td>
+                                <td>{{ line.owner_display }}</td>
+                                <td>
+                                    {% with loci=line.expected_loci_list %}
+                                        {% if loci %}{{ loci|join:", " }}{% else %}<span class="cell-empty">—</span>{% endif %}
+                                    {% endwith %}
+                                </td>
+                                <td class="col-num-right">
+                                    <a class="link-primary" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}&strain_line_id={{ line.pk }}">{{ line.project_mice_count }}</a>
+                                </td>
+                                <td class="col-num-right">{{ line.project_active_mice_count }}</td>
+                                <td><a class="link-primary" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="muted">No mice (and no strain lines) are assigned to this project yet.</p>
+        {% endif %}
+    </article>
+
+    <article class="card">
         <h2>Members</h2>
         {% if memberships %}
             <table class="data-table data-table--compact">

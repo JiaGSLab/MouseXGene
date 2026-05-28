@@ -1,0 +1,50 @@
+<section class="card" id="strain-pdf-documents">
+    <h2>PDF introductions</h2>
+    <p class="muted">
+        Attach up to <strong>10</strong> PDF files (max <strong>10 MB</strong> each) describing husbandry, genetics, or colony notes for this strain line.
+        {% if pdf_slots_remaining == 0 %}
+            <strong>You have reached the limit.</strong> Remove a file below to upload another.
+        {% else %}
+            <strong>{{ pdf_slots_remaining }}</strong> slot(s) remaining.
+        {% endif %}
+    </p>
+
+    {% if documents %}
+        <ul class="strain-pdf-list">
+            {% for doc in documents %}
+                <li class="strain-pdf-list__item">
+                    <a class="link-primary" href="{% url 'colony:strain_line_document_download' line.pk doc.pk %}" target="_blank" rel="noopener noreferrer">
+                        {{ doc.display_name }}
+                    </a>
+                    <span class="muted small-print">
+                        {% if doc.file_size %}{{ doc.file_size|filesizeformat }}{% endif %}
+                        · {{ doc.created_at|date:"Y-m-d" }}
+                        {% if doc.uploaded_by %}· {{ doc.uploaded_by.get_username }}{% endif %}
+                    </span>
+                    <form method="post" action="{% url 'colony:strain_line_document_delete' line.pk doc.pk %}" class="strain-pdf-delete-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.path }}">
+                        <button type="submit" class="button button-light button-small" onclick="return confirm('Remove this PDF?');">Remove</button>
+                    </form>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">No PDF files attached yet.</p>
+    {% endif %}
+
+    {% if pdf_slots_remaining > 0 %}
+        <form method="post" action="{% url 'colony:strain_line_upload_documents' line.pk %}" enctype="multipart/form-data" class="strain-pdf-upload-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <div class="form-row">
+                <label for="id_pdf_files">Add PDF(s)</label>
+                <input type="file" name="pdf_files" id="id_pdf_files" accept="application/pdf,.pdf" multiple>
+                <small class="muted">Select one or more PDF files. Total per strain line cannot exceed 10.</small>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="button button-light">Upload PDF(s)</button>
+            </div>
+        </form>
+    {% endif %}
+</section>

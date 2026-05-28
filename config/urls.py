@@ -12,3 +12,5 @@ urlpatterns = [
     path("litters/", include("breeding.litter_urls")),
     path("genotypes/", include("genotypes.urls")),
 ]
+
+handler403 = "core.views.permission_denied"

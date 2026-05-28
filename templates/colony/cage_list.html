@@ -7,6 +7,9 @@
     <div>
         <h1>Cages</h1>
         <p class="muted">All cages in the colony.</p>
+        {% if strain_line_filter_label %}
+            <p class="muted small-print">Filtered to active cages with mice on strain line <strong>{{ strain_line_filter_label }}</strong>.</p>
+        {% endif %}
     </div>
     <div class="toolbar-actions">
         <div class="action-links action-links--primary">
@@ -26,6 +29,9 @@
 
 <section class="card card--filters">
     <form method="get" class="filter-form" id="cage-list-filters">
+        {% if strain_line %}
+            <input type="hidden" name="strain_line" value="{{ strain_line }}">
+        {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search cage_id" class="search-input filter-control">
             <select name="purpose" class="filter-control">

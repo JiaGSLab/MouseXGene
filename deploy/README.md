@@ -12,6 +12,10 @@
 - `jialabmouse.top` and `www.jialabmouse.top` **A records** → your server’s public IP.
 - Open inbound **TCP 80** and **TCP 443** on the cloud security group / firewall.
 
+## Uploaded files (strain line PDFs)
+
+`web` mounts host `./media` → `/app/media` in the container. Back up this directory with your database. PDFs are served through the app (login required), not as public static files.
+
 ## Static files
 
 After code or asset changes, run collectstatic in `web` so Nginx serves updated files:

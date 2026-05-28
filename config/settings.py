@@ -142,6 +142,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "/media/"
+
+# Strain line PDF uploads (max 10 MB each in app validation; allow headroom per request)
+FILE_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 12 * 1024 * 1024
+
 WHITENOISE_USE_FINDERS = DEBUG
 
 if not DEBUG:

@@ -36,7 +36,14 @@
         <dt>Death Date</dt><dd>{{ mouse.death_date|default:"-" }}</dd>
         <dt>Euthanasia Date</dt><dd>{{ mouse.euthanasia_date|default:"-" }}</dd>
         <dt>Death/Euthanasia Reason</dt><dd>{{ mouse.death_reason|default:"-" }}</dd>
-        <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
+        <dt>Strain Line</dt>
+        <dd>
+            {% if mouse.strain_line %}
+                <a class="link-primary" href="{% url 'colony:strain_line_detail' mouse.strain_line_id %}">{{ mouse.strain_line.label }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
         <dt>Project</dt>
         <dd>
             {% if mouse.project %}

@@ -3,9 +3,10 @@ from django.core.exceptions import ValidationError
 from datetime import timedelta
 
 from colony.models import Cage, Mouse, TimeStampedModel
+from core.models import ActorStampedModel
 
 
-class Breeding(models.Model):
+class Breeding(ActorStampedModel):
     class MemberRole(models.TextChoices):
         SIRE = "sire", "Sire"
         DAM = "dam", "Dam"

@@ -1,13 +1,15 @@
 import csv
+import json
 import logging
 from io import BytesIO
 
-from django.http import HttpRequest, HttpResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.contrib import messages
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.views.decorators.http import require_POST
 from django.db import transaction
 from django.db.models import Count, F, Max, Q
 from django.utils import timezone
@@ -31,7 +33,8 @@ from .importers import (
     parse_cage_import,
     parse_mouse_import,
 )
-from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine
+from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
+from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
@@ -294,9 +297,55 @@ def get_cage_inventory_rows(cage: Cage) -> list[list]:
     ]
 
 
-def get_mice_export_rows(user) -> list[list]:
+def _filtered_mice_queryset(request: HttpRequest, *, preserve_list_order: bool = True):
+    """Apply the same GET filters as the mouse list page."""
+    query = (request.GET.get("q") or "").strip()
+    sex = (request.GET.get("sex") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
+    age_sort = (request.GET.get("age_sort") or "").strip()
+    if age_sort not in ("", "old", "young"):
+        age_sort = ""
+
+    mice = _scoped_mouse_queryset(request.user)
+    if include_inactive != "yes":
+        mice = mice.filter(status=Mouse.Status.ACTIVE)
+
+    if query:
+        mice = mice.filter(
+            Q(mouse_uid__icontains=query)
+            | Q(genotype_summary__icontains=query)
+            | Q(ear_tag__icontains=query)
+            | Q(toe_tag__icontains=query)
+            | Q(origin__icontains=query)
+        )
+    if sex:
+        mice = mice.filter(sex=sex)
+    if status:
+        mice = mice.filter(status=status)
+    if strain_line:
+        mice = mice.filter(strain_line_id=strain_line)
+    if current_cage:
+        mice = mice.filter(current_cage_id=current_cage)
+    if project:
+        mice = mice.filter(project_id=project)
+
+    if preserve_list_order:
+        if age_sort == "old":
+            mice = mice.order_by(F("birth_date").asc(nulls_last=True), "mouse_uid")
+        elif age_sort == "young":
+            mice = mice.order_by(F("birth_date").desc(nulls_last=True), "mouse_uid")
+        else:
+            mice = mice.order_by("-birth_date", "mouse_uid")
+    return mice
+
+
+def get_mice_export_rows(request: HttpRequest) -> list[list]:
     mice = (
-        _scoped_mouse_queryset(user)
+        _filtered_mice_queryset(request, preserve_list_order=False)
         .select_related("project", "project__owner", "project__owner__profile", "sire", "dam")
         .prefetch_related("genotypes__gene")
         .order_by("mouse_uid")
@@ -308,7 +357,7 @@ def get_mice_export_rows(user) -> list[list]:
         row_map["sex"] = mouse.sex
         row_map["birth_date"] = str(mouse.birth_date) if mouse.birth_date else ""
         row_map["status"] = mouse.status
-        row_map["strain_line"] = mouse.strain_line.line_name if mouse.strain_line else ""
+        row_map["strain_line"] = mouse.strain_line.label if mouse.strain_line else ""
         row_map["current_cage"] = mouse.current_cage.cage_id if mouse.current_cage else ""
         row_map["project"] = mouse.project.name if mouse.project else ""
         row_map["ear_tag"] = mouse.ear_tag
@@ -557,6 +606,34 @@ def _mouse_component_loci_set(mouse: Mouse) -> set[str]:
         if locus:
             loci.add(locus.casefold())
     return loci
+
+
+def _propagate_strain_line_template_to_mice(line: StrainLine) -> tuple[int, int]:
+    """Add missing template loci and sync chromosome metadata for all mice on this strain line."""
+    entries = line.expected_loci_entries()
+    entry_by_key = {e["locus_name"].casefold(): e for e in entries}
+    mice_count = 0
+    components_added = 0
+    for mouse in Mouse.objects.filter(strain_line=line).iterator(chunk_size=100):
+        components_added += mouse.ensure_template_genotype_components(include_strain_template=True)
+        for comp in mouse.genotype_components.all():
+            locus = StrainLine.normalize_locus_name((comp.locus_name or "").strip())
+            if not locus:
+                continue
+            entry = entry_by_key.get(locus.casefold())
+            if not entry:
+                continue
+            chromosome_type = entry.get("chromosome_type", "")
+            if (
+                chromosome_type in MouseGenotypeComponent.ChromosomeType.values
+                and comp.chromosome_type != chromosome_type
+                and not _component_has_meaningful_truth(comp)
+            ):
+                comp.chromosome_type = chromosome_type
+                comp.save(update_fields=["chromosome_type", "updated_at"])
+        mouse.rebuild_genotype_summary(save=True)
+        mice_count += 1
+    return mice_count, components_added
 
 
 def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: list[str]) -> None:
@@ -1194,10 +1271,16 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     status = (request.GET.get("status") or "").strip()
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
 
     cages = _scoped_cage_queryset(request.user)
     if include_inactive != "yes":
         cages = cages.filter(status=Cage.Status.ACTIVE)
+    if strain_line:
+        cages = cages.filter(
+            current_mice__strain_line_id=strain_line,
+            current_mice__status=Mouse.Status.ACTIVE,
+        )
     if q:
         cages = cages.filter(cage_id__icontains=q)
     if room:
@@ -1227,6 +1310,12 @@ def cage_list(request: HttpRequest) -> HttpResponse:
             "current_mice__genotypes__gene",
         )
     )
+    strain_line_filter_label = ""
+    if strain_line:
+        strain_line_filter_label = (
+            StrainLine.objects.filter(pk=strain_line).values_list("line_name", flat=True).first() or ""
+        )
+
     page_ctx = paginate_queryset_for_list(request, cages, viewname="colony:cage_list")
     cages_page = list(page_ctx.pop("items"))
     for cage in cages_page:
@@ -1243,6 +1332,8 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "status": status,
         "is_empty": is_empty,
         "include_inactive": include_inactive,
+        "strain_line": strain_line,
+        "strain_line_filter_label": strain_line_filter_label,
         "room_options": Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
         "rack_options": Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
         "cage_type_options": Cage.CageType.choices,
@@ -1258,7 +1349,9 @@ def cage_list(request: HttpRequest) -> HttpResponse:
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     active = (request.GET.get("active") or "yes").strip()
-    lines = StrainLine.objects.select_related("owner", "owner__profile").all()
+    lines = StrainLine.objects.select_related("owner", "owner__profile", "created_by", "created_by__profile").annotate(
+        pdf_count=Count("documents")
+    )
     if q:
         lines = lines.filter(
             Q(name__icontains=q)
@@ -1355,12 +1448,22 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         ),
         pk=pk,
     )
+    documents = list(
+        line.documents.select_related("uploaded_by", "uploaded_by__profile").order_by("created_at", "id")
+    )
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
     actors = merge_actor_labels(line, audit_entries)
     return render(
         request,
         "colony/strain_line_detail.html",
-        {"line": line, "audit_entries": audit_entries, **actors},
+        {
+            "line": line,
+            "documents": documents,
+            "pdf_count": len(documents),
+            "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
+            "audit_entries": audit_entries,
+            **actors,
+        },
     )
 
 
@@ -1392,16 +1495,91 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
 
 
 @authenticated_required
+@require_POST
+def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
+    line = get_object_or_404(StrainLine, pk=pk)
+    next_url = (request.POST.get("next") or "").strip()
+    if not next_url:
+        next_url = reverse("colony:strain_line_detail", kwargs={"pk": line.pk})
+
+    uploads = request.FILES.getlist("pdf_files")
+    if not uploads:
+        messages.error(request, "No PDF files selected.")
+        return redirect(next_url)
+
+    existing = line.documents.count()
+    if existing + len(uploads) > MAX_STRAIN_LINE_PDF_COUNT:
+        messages.error(
+            request,
+            f"This strain line already has {existing} PDF(s). "
+            f"You can attach at most {MAX_STRAIN_LINE_PDF_COUNT} in total.",
+        )
+        return redirect(next_url)
+
+    created = 0
+    for uploaded in uploads:
+        try:
+            validate_strain_line_pdf_file(uploaded)
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
+            continue
+        StrainLineDocument.objects.create(
+            strain_line=line,
+            file=uploaded,
+            uploaded_by=request.user,
+        )
+        created += 1
+
+    if created:
+        messages.success(request, f"Uploaded {created} PDF file(s).")
+    return redirect(next_url)
+
+
+@authenticated_required
+def strain_line_document_download(request: HttpRequest, pk: int, doc_pk: int) -> HttpResponse:
+    doc = get_object_or_404(StrainLineDocument.objects.select_related("strain_line"), pk=doc_pk, strain_line_id=pk)
+    if not doc.file:
+        raise Http404("File not found.")
+    try:
+        handle = doc.file.open("rb")
+    except FileNotFoundError as exc:
+        raise Http404("File not found on disk.") from exc
+    response = FileResponse(handle, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{doc.display_name}"'
+    return response
+
+
+@authenticated_required
+@require_POST
+def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> HttpResponse:
+    doc = get_object_or_404(StrainLineDocument, pk=doc_pk, strain_line_id=pk)
+    next_url = (request.POST.get("next") or "").strip()
+    if not next_url:
+        next_url = reverse("colony:strain_line_detail", kwargs={"pk": pk})
+    label = doc.display_name
+    if doc.file:
+        doc.file.delete(save=False)
+    doc.delete()
+    messages.success(request, f"Removed PDF “{label}”.")
+    return redirect(next_url)
+
+
+@authenticated_required
 def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(StrainLine, pk=pk)
+    documents = list(
+        line.documents.select_related("uploaded_by", "uploaded_by__profile").order_by("created_at", "id")
+    )
     previous_active = line.is_active
     if request.method == "POST":
         form = StrainLineForm(request.POST, instance=line, user=request.user)
         if form.is_valid():
             if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
                 raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
+            before_template = json.dumps(line.expected_loci_entries(), sort_keys=True)
             msg = summarize_modelform_changes(form)
             line = form.save()
+            after_template = json.dumps(line.expected_loci_entries(), sort_keys=True)
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.UPDATE,
@@ -1409,6 +1587,14 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 message=msg[:4000],
             )
             messages.success(request, "Strain line updated.")
+            if before_template != after_template:
+                mice_updated, rows_added = _propagate_strain_line_template_to_mice(line)
+                if mice_updated:
+                    messages.info(
+                        request,
+                        f"Applied updated included-loci template to {mice_updated} mouse(s) "
+                        f"({rows_added} new locus row(s) added). Existing genotype values were kept.",
+                    )
             return redirect("colony:strain_line_detail", pk=line.pk)
     else:
         form = StrainLineForm(instance=line, user=request.user)
@@ -1417,6 +1603,10 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "colony/strain_line_form.html",
         {
             "form": form,
+            "line": line,
+            "documents": documents,
+            "pdf_count": len(documents),
+            "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
             "page_title": f"Edit Strain Line {line.line_name}",
             "submit_label": "Save Changes",
         },
@@ -1788,39 +1978,10 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     if age_sort not in ("", "old", "young"):
         age_sort = ""
 
-    mice = _scoped_mouse_queryset(request.user).select_related(
+    mice = _filtered_mice_queryset(request).select_related(
         "project__owner",
         "project__owner__profile",
     )
-    if include_inactive != "yes":
-        mice = mice.filter(status=Mouse.Status.ACTIVE)
-
-    if query:
-        mice = mice.filter(
-            Q(mouse_uid__icontains=query)
-            | Q(genotype_summary__icontains=query)
-            | Q(ear_tag__icontains=query)
-            | Q(toe_tag__icontains=query)
-            | Q(origin__icontains=query)
-        )
-    if sex:
-        mice = mice.filter(sex=sex)
-    if status:
-        mice = mice.filter(status=status)
-    if strain_line:
-        mice = mice.filter(strain_line_id=strain_line)
-    if current_cage:
-        mice = mice.filter(current_cage_id=current_cage)
-    if project:
-        mice = mice.filter(project_id=project)
-
-    if age_sort == "old":
-        mice = mice.order_by(F("birth_date").asc(nulls_last=True), "mouse_uid")
-    elif age_sort == "young":
-        mice = mice.order_by(F("birth_date").desc(nulls_last=True), "mouse_uid")
-    else:
-        mice = mice.order_by("-birth_date", "mouse_uid")
-
     mice = mice.prefetch_related(
         "genotype_components__strain_line",
         "genotypes__gene",
@@ -2083,7 +2244,7 @@ def mice_export(request: HttpRequest) -> HttpResponse:
             "updated_at",
         ]
     )
-    for row in get_mice_export_rows(request.user):
+    for row in get_mice_export_rows(request):
         writer.writerow(row)
     return response
 
@@ -2099,7 +2260,7 @@ def mice_export_xlsx(request: HttpRequest) -> HttpResponse:
         "created_at",
         "updated_at",
     ]
-    rows = get_mice_export_rows(request.user)
+    rows = get_mice_export_rows(request)
     return build_xlsx_response("mice.xlsx", "Mice", headers, rows)
 
 

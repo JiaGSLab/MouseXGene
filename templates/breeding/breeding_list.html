@@ -2,11 +2,25 @@
 
 {% block title %}Breedings | MouseXGene{% endblock %}
 
+{% block extra_head %}
+<style>
+    .data-table--breedings tbody tr.breeding-row-alert--warning > td { background-color: #fffbeb; }
+    .data-table--breedings tbody tr.breeding-row-alert--overdue > td { background-color: #fff7ed; }
+    .data-table--breedings tbody tr.breeding-row-alert--review > td { background-color: #fef2f2; }
+    .data-table--breedings tbody tr.breeding-row-alert--warning > td.breeding-alert-cell { border-left: 4px solid #f59e0b; }
+    .data-table--breedings tbody tr.breeding-row-alert--overdue > td.breeding-alert-cell { border-left: 4px solid #ea580c; }
+    .data-table--breedings tbody tr.breeding-row-alert--review > td.breeding-alert-cell { border-left: 4px solid #dc2626; }
+    .breeding-alert-badge--warning { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+    .breeding-alert-badge--overdue { background: #ffedd5; color: #9a3412; border: 1px solid #ea580c; }
+    .breeding-alert-badge--review { background: #fee2e2; color: #991b1b; border: 1px solid #dc2626; }
+</style>
+{% endblock %}
+
 {% block content %}
 <section class="page-header page-header-row">
     <div>
         <h1>Breedings</h1>
-        <p class="muted">Track active and historical breeding setups.</p>
+        <p class="muted">Track active and historical breeding setups. Rows with a left bar have been active &gt;21 days without a new litter.</p>
     </div>
     <div class="action-links">
         {% if can_manage_breeding %}
@@ -20,7 +34,13 @@
 <section class="card card--filters">
     <form method="get" class="filter-form" id="breeding-list-filters">
         <div class="filter-row filter-row--primary">
-            <input type="text" name="q" value="{{ q }}" placeholder="Search breeding_code or sire/dam UID" class="search-input filter-control">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search code, sire/dam UID, or set-up by" class="search-input filter-control" aria-label="Search breedings">
+            <select name="setup_by" class="filter-control" aria-label="Set up by">
+                <option value="">All set-up by</option>
+                {% for option in setup_by_options %}
+                    <option value="{{ option.pk }}" {% if setup_by == option.pk|stringformat:"s" %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
             <select name="status" class="filter-control">
                 <option value="">All Status</option>
                 {% for value, label in status_options %}
@@ -73,24 +93,41 @@
 </section>
 
 <section class="table-wrap">
-    <table class="data-table">
+    <table class="data-table data-table--breedings">
         <thead>
             <tr>
-                <th>Breeding Code</th>
-                <th>Cage</th>
-                <th>Breeding Type</th>
-                <th>Sire</th>
-                <th>Dams</th>
-                <th>Start Date</th>
-                <th>Plug Date</th>
-                <th>Expected Birth Date</th>
-                <th>Status</th>
-                <th>Litter Alert</th>
+                <th scope="col">Set up by</th>
+                <th class="col-breeding-alert" scope="col">Alert</th>
+                <th scope="col">Breeding Code</th>
+                <th scope="col">Cage</th>
+                <th scope="col">Breeding Type</th>
+                <th scope="col">Sire</th>
+                <th scope="col">Dams</th>
+                <th scope="col">Start Date</th>
+                <th scope="col">Plug Date</th>
+                <th scope="col">Expected Birth Date</th>
+                <th scope="col">Status</th>
             </tr>
         </thead>
         <tbody>
             {% for breeding in breedings %}
-            <tr class="{% if not breeding.active or breeding.status == 'closed' %}row-inactive{% endif %}">
+            <tr
+                class="{% if not breeding.active or breeding.status == 'closed' %}row-inactive{% endif %}{% if breeding.list_alert_level %} breeding-row-alert breeding-row-alert--{{ breeding.list_alert_level }}{% endif %}"
+                {% if breeding.alert_row_style %}style="{{ breeding.alert_row_style }}"{% endif %}
+            >
+                <td class="breeding-setup-by-cell">{{ breeding.setup_by_display|default:"—" }}</td>
+                <td class="breeding-alert-cell" {% if breeding.alert_cell_style %}style="{{ breeding.alert_cell_style }}"{% endif %}>
+                    {% if breeding.litter_timing_alert %}
+                        <span
+                            class="breeding-alert-badge breeding-alert-badge--{{ breeding.list_alert_level }}"
+                            style="{{ breeding.alert_badge_style }}"
+                            title="{{ breeding.litter_timing_alert.days_without_litter }} days without litter"
+                        >{{ breeding.litter_timing_alert.label }}</span>
+                        <div class="breeding-alert-days" style="{{ breeding.alert_days_style }}">{{ breeding.litter_timing_alert.days_without_litter }}d</div>
+                    {% else %}
+                        <span class="muted">—</span>
+                    {% endif %}
+                </td>
                 <td><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
                 <td>
                     {% if breeding.cage %}
@@ -139,14 +176,6 @@
                 <td>{{ breeding.plug_date|default:"-" }}</td>
                 <td>{{ breeding.display_expected_birth_date|default:"-" }}</td>
                 <td><span class="status-pill">{{ breeding.get_status_display }}</span></td>
-                <td>
-                    {% if breeding.litter_timing_alert %}
-                        <span class="status-pill status-pill--mouse status-pill--mouse-archived">{{ breeding.litter_timing_alert.label }}</span>
-                        <div class="muted small-print">{{ breeding.litter_timing_alert.days_without_litter }}d without litter</div>
-                    {% else %}
-                        <span class="muted">-</span>
-                    {% endif %}
-                </td>
             </tr>
             {% empty %}
             <tr>

@@ -3,6 +3,7 @@ import logging
 from datetime import timedelta
 from io import BytesIO
 
+from django.contrib.auth import get_user_model
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.contrib import messages
@@ -21,7 +22,8 @@ from .forms import BreedingForm, LitterForm, LitterPupFormSet, WeanLitterForm, g
 from .models import Breeding, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
-from core.models import AuditLog, Project, ProjectMembership
+from core.history import audit_entries_for_object, merge_actor_labels
+from core.models import AuditLog, Project, ProjectMembership, format_project_owner_label
 from users.permissions import (
     authenticated_required,
     ensure_can_edit_mice_projects,
@@ -129,7 +131,119 @@ def _scoped_breedings(user):
         "female_1__project",
         "female_2",
         "female_2__project",
+        "created_by",
+        "created_by__profile",
+        "updated_by",
+        "updated_by__profile",
     ).prefetch_related("extra_female_links__mouse")
+
+
+def _breeding_setup_by_label(breeding: Breeding, audit_entries: list | None = None) -> str:
+    if breeding.created_by_id:
+        label = (format_project_owner_label(breeding.created_by) or "").strip()
+        if label:
+            return label
+    if audit_entries is not None:
+        actors = merge_actor_labels(breeding, audit_entries)
+        created = (actors.get("created_by") or "").strip()
+        if created and created != "—":
+            return created
+    return "—"
+
+
+def _breeding_setup_by_filter_options():
+    User = get_user_model()
+    creator_ids = set(
+        Breeding.objects.filter(created_by_id__isnull=False).values_list("created_by_id", flat=True).distinct()
+    )
+    audit_creator_ids = AuditLog.objects.filter(
+        object_type="Breeding",
+        action=AuditLog.Action.CREATE,
+        user_id__isnull=False,
+    ).values_list("user_id", flat=True).distinct()
+    creator_ids.update(audit_creator_ids)
+    return list(User.objects.filter(pk__in=creator_ids).select_related("profile").order_by("username"))
+
+
+def _breeding_alert_display_styles(level: str) -> dict[str, str]:
+    """Inline styles so list alerts stay colored even when static CSS is stale."""
+    palettes = {
+        "warning": ("#fffbeb", "#f59e0b", "#fef3c7", "#92400e", "#b45309"),
+        "overdue": ("#fff7ed", "#ea580c", "#ffedd5", "#9a3412", "#c2410c"),
+        "review": ("#fef2f2", "#dc2626", "#fee2e2", "#991b1b", "#b91c1c"),
+    }
+    row_bg, border, badge_bg, badge_fg, days = palettes.get(level, palettes["warning"])
+    return {
+        "row_style": f"background-color: {row_bg};",
+        "cell_style": f"border-left: 4px solid {border}; background-color: {row_bg}; color: #1f2937;",
+        "badge_style": (
+            "display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; "
+            f"font-size: 0.72rem; font-weight: 700; line-height: 1.25; text-transform: uppercase; "
+            f"letter-spacing: 0.02em; background: {badge_bg}; color: {badge_fg}; border: 1px solid {border};"
+        ),
+        "days_style": f"margin-top: 0.15rem; font-size: 0.75rem; font-weight: 600; color: {days};",
+    }
+
+
+def _batch_audit_entries_by_breeding_pk(pks: list[int]) -> dict[int, list[AuditLog]]:
+    if not pks:
+        return {}
+    str_ids = [str(pk) for pk in pks]
+    logs = AuditLog.objects.filter(object_type="Breeding", object_id__in=str_ids).select_related(
+        "user",
+        "user__profile",
+    ).order_by("-created_at")
+    out: dict[int, list[AuditLog]] = {pk: [] for pk in pks}
+    for log in logs:
+        try:
+            pk = int(log.object_id)
+        except (TypeError, ValueError):
+            continue
+        if pk in out:
+            out[pk].append(log)
+    return out
+
+
+def _enrich_breedings_for_list(breedings: list[Breeding], *, today) -> None:
+    """Attach list-row display fields (alerts, setup-by, sire/dam summaries)."""
+    audit_map = _batch_audit_entries_by_breeding_pk([b.pk for b in breedings if b.pk])
+    for b in breedings:
+        b.display_expected_birth_date = b.expected_birth_date or (
+            b.start_date + timedelta(days=21) if b.start_date else None
+        )
+        alert = breeding_litter_timing_alert(
+            start_date=b.start_date,
+            latest_litter_date=getattr(b, "latest_litter_date", None),
+            litter_count=getattr(b, "litter_count", None) or 0,
+            is_active=b.active,
+            status=b.status,
+            today=today,
+        )
+        b.litter_timing_alert = alert
+        b.list_alert_level = ""
+        b.alert_row_style = ""
+        b.alert_cell_style = ""
+        b.alert_badge_style = ""
+        b.alert_days_style = ""
+        if alert:
+            b.list_alert_level = alert["level"]
+            alert_styles = _breeding_alert_display_styles(alert["level"])
+            b.alert_row_style = alert_styles["row_style"]
+            b.alert_cell_style = alert_styles["cell_style"]
+            b.alert_badge_style = alert_styles["badge_style"]
+            b.alert_days_style = alert_styles["days_style"]
+        b.display_sire, b.display_dams = _breeding_sire_and_dams(b)
+        b.display_sire_age_days = _mouse_age_days(b.display_sire, today=today)
+        b.display_sire_genotype = _mouse_genotype_summary(b.display_sire)
+        b.display_dam_rows = [
+            {
+                "mouse": dam,
+                "age_days": _mouse_age_days(dam, today=today),
+                "genotype": _mouse_genotype_summary(dam),
+            }
+            for dam in (b.display_dams or [])
+        ]
+        b.setup_by_display = _breeding_setup_by_label(b, audit_map.get(b.pk, []))
 
 
 def _breeding_member_mice(breeding: Breeding) -> list[Mouse]:
@@ -297,18 +411,35 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     status = (request.GET.get("status") or "").strip()
     breeding_type = (request.GET.get("breeding_type") or "").strip()
     cage = (request.GET.get("cage") or "").strip()
+    setup_by = (request.GET.get("setup_by") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     export = (request.GET.get("export") or "").strip().lower()
 
     breedings = _scoped_breedings(request.user)
     if include_inactive != "yes":
         breedings = breedings.filter(active=True)
+    if setup_by:
+        audit_pks: list[int] = []
+        for oid in AuditLog.objects.filter(
+            object_type="Breeding",
+            action=AuditLog.Action.CREATE,
+            user_id=setup_by,
+        ).values_list("object_id", flat=True):
+            try:
+                audit_pks.append(int(oid))
+            except (TypeError, ValueError):
+                continue
+        breedings = breedings.filter(Q(created_by_id=setup_by) | Q(pk__in=audit_pks))
     if q:
         breedings = breedings.filter(
             Q(breeding_code__icontains=q)
             | Q(male__mouse_uid__icontains=q)
             | Q(female_1__mouse_uid__icontains=q)
             | Q(female_2__mouse_uid__icontains=q)
+            | Q(created_by__username__icontains=q)
+            | Q(created_by__first_name__icontains=q)
+            | Q(created_by__last_name__icontains=q)
+            | Q(created_by__profile__display_name__icontains=q)
         )
     if status:
         breedings = breedings.filter(status=status)
@@ -321,34 +452,15 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         litter_count=Count("litters", distinct=True),
         latest_litter_date=Max("litters__birth_date"),
     ).order_by("-start_date", "breeding_code")
-    breedings_export_list = list(breedings)
     today = timezone.localdate()
-    for b in breedings_export_list:
-        b.display_expected_birth_date = b.expected_birth_date or (
-            b.start_date + timedelta(days=21) if b.start_date else None
-        )
-        b.litter_timing_alert = breeding_litter_timing_alert(
-            start_date=b.start_date,
-            latest_litter_date=b.latest_litter_date,
-            litter_count=b.litter_count or 0,
-            is_active=b.active,
-            status=b.status,
-            today=today,
-        )
-        b.display_sire, b.display_dams = _breeding_sire_and_dams(b)
-        b.display_sire_age_days = _mouse_age_days(b.display_sire, today=today)
-        b.display_sire_genotype = _mouse_genotype_summary(b.display_sire)
-        b.display_dam_rows = [
-            {
-                "mouse": dam,
-                "age_days": _mouse_age_days(dam, today=today),
-                "genotype": _mouse_genotype_summary(dam),
-            }
-            for dam in (b.display_dams or [])
-        ]
+    breedings_export_list = list(breedings)
+    _enrich_breedings_for_list(breedings_export_list, today=today)
 
     if export in {"csv", "xlsx"}:
         headers = [
+            "setup_by",
+            "litter_alert",
+            "days_without_litter",
             "breeding_code",
             "cage",
             "breeding_type",
@@ -359,12 +471,14 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
             "expected_birth_date",
             "status",
             "active",
-            "litter_alert",
         ]
         rows: list[list] = []
         for b in breedings_export_list:
             rows.append(
                 [
+                    b.setup_by_display,
+                    (b.litter_timing_alert.get("label") if b.litter_timing_alert else ""),
+                    (b.litter_timing_alert.get("days_without_litter") if b.litter_timing_alert else ""),
                     b.breeding_code,
                     b.cage.cage_id if b.cage else "",
                     b.get_breeding_type_display(),
@@ -375,7 +489,6 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
                     b.display_expected_birth_date or "",
                     b.get_status_display(),
                     "yes" if b.active else "no",
-                    b.litter_timing_alert.label if b.litter_timing_alert else "",
                 ]
             )
         if export == "csv":
@@ -389,18 +502,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
 
     pagination = _paginate_queryset_for_list(request, breedings, viewname="breeding:breeding_list")
     breedings_page_items = list(pagination["items"])
-    export_map = {b.pk: b for b in breedings_export_list}
-    for b in breedings_page_items:
-        enriched = export_map.get(b.pk)
-        if not enriched:
-            continue
-        b.display_expected_birth_date = enriched.display_expected_birth_date
-        b.litter_timing_alert = enriched.litter_timing_alert
-        b.display_sire = enriched.display_sire
-        b.display_dams = enriched.display_dams
-        b.display_sire_age_days = enriched.display_sire_age_days
-        b.display_sire_genotype = enriched.display_sire_genotype
-        b.display_dam_rows = enriched.display_dam_rows
+    _enrich_breedings_for_list(breedings_page_items, today=today)
 
     context = {
         "breedings": breedings_page_items,
@@ -408,6 +510,14 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "status": status,
         "breeding_type": breeding_type,
         "cage": cage,
+        "setup_by": setup_by,
+        "setup_by_options": [
+            {
+                "pk": user.pk,
+                "label": (format_project_owner_label(user) or user.get_username() or str(user.pk)).strip(),
+            }
+            for user in _breeding_setup_by_filter_options()
+        ],
         "include_inactive": include_inactive,
         "status_options": Breeding.Status.choices,
         "breeding_type_options": Breeding.BreedingType.choices,
@@ -574,11 +684,14 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     display_expected_birth_date = breeding.expected_birth_date or (
         breeding.start_date + timedelta(days=21) if breeding.start_date else None
     )
+    breeding_audit_entries = audit_entries_for_object("Breeding", breeding.pk)
+    actors = merge_actor_labels(breeding, breeding_audit_entries)
     return render(
         request,
         "breeding/breeding_detail.html",
         {
             "breeding": breeding,
+            "setup_by_display": _breeding_setup_by_label(breeding, breeding_audit_entries),
             "litters": litters,
             "expected_offspring_loci": expected_offspring_loci,
             "breeding_sire": breeding_sire,
@@ -589,6 +702,8 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "mendelian_flag_count": mendelian_flag_count,
             "breeder_member_rows": breeder_member_rows,
             "display_expected_birth_date": display_expected_birth_date,
+            "audit_entries": breeding_audit_entries,
+            **actors,
         },
     )
 

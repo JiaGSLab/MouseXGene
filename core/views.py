@@ -1,12 +1,14 @@
+from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
+from django.urls import reverse
 from django.db.models import Count, Max, Q
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 
-from colony.models import Cage, Mouse
+from colony.models import Cage, Mouse, StrainLine
 from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
 from breeding.analytics import breeding_litter_timing_alert
@@ -310,6 +312,20 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     memberships = list(project.memberships.select_related("user", "user__profile").order_by("user__username"))
     can_manage = is_admin(request.user) or can_manage_project_settings(request.user, project)
+    strain_lines = list(
+        StrainLine.objects.filter(mice__project=project)
+        .select_related("owner", "owner__profile", "created_by", "created_by__profile")
+        .annotate(
+            project_mice_count=Count("mice", filter=Q(mice__project=project), distinct=True),
+            project_active_mice_count=Count(
+                "mice",
+                filter=Q(mice__project=project, mice__status=Mouse.Status.ACTIVE),
+                distinct=True,
+            ),
+        )
+        .distinct()
+        .order_by("name", "line_name")
+    )
     audit_entries = audit_entries_for_object("Project", project.pk)
     actors = merge_actor_labels(project, audit_entries)
     return render(
@@ -318,6 +334,7 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "project": project,
             "memberships": memberships,
+            "strain_lines": strain_lines,
             "can_manage": can_manage,
             "audit_entries": audit_entries,
             **actors,
@@ -412,3 +429,19 @@ def project_membership_manage(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def guide(request: HttpRequest) -> HttpResponse:
     return render(request, "core/guide.html")
+
+
+def permission_denied(request: HttpRequest, exception: PermissionDenied) -> HttpResponse:
+    """Show a friendly flash message instead of a bare 403 page."""
+    message = str(exception) or "You do not have permission to perform this action."
+    if request.user.is_authenticated:
+        messages.error(request, message)
+        referer = request.META.get("HTTP_REFERER", "").strip()
+        if referer:
+            try:
+                if referer != request.build_absolute_uri():
+                    return redirect(referer)
+            except Exception:
+                pass
+        return redirect(reverse("home"))
+    return redirect(reverse("login") + f"?next={request.path}")

@@ -47,6 +47,8 @@
                 <span class="status-pill status-pill--muted">Inactive</span>
             {% endif %}
         </dd>
+        <dt>Set up by</dt>
+        <dd>{{ setup_by_display|default:"—" }}</dd>
     </dl>
     {% if litter_timing_alert %}
         <p class="muted">
@@ -225,4 +227,6 @@
     <h2>Notes</h2>
     <p>{{ breeding.notes|default:"No notes." }}</p>
 </section>
+
+{% include "includes/record_timeline.html" with created_at=breeding.created_at updated_at=breeding.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by only %}
 {% endblock %}

@@ -1228,6 +1228,92 @@ a.col-uid-link {
     border-left-color: #9ca3af;
 }
 
+/* Breedings list: overdue litter alerts (bar on alert column + badge) */
+.data-table--breedings tbody tr.breeding-row-alert > td.breeding-alert-cell {
+    border-left: 4px solid transparent;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--warning > td.breeding-alert-cell {
+    border-left-color: #f59e0b;
+    background-color: #fffbeb;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--overdue > td.breeding-alert-cell {
+    border-left-color: #ea580c;
+    background-color: #fff7ed;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--review > td.breeding-alert-cell {
+    border-left-color: #dc2626;
+    background-color: #fef2f2;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--warning > td {
+    background-color: #fffbeb;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--overdue > td {
+    background-color: #fff7ed;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert--review > td {
+    background-color: #fef2f2;
+}
+
+.data-table--breedings tbody tr.breeding-row-alert td.breeding-setup-by-cell,
+.data-table--breedings tbody tr.breeding-row-alert td.breeding-alert-cell {
+    color: #1f2937;
+}
+
+.col-breeding-alert {
+    width: 8.5rem;
+    white-space: nowrap;
+}
+
+.breeding-alert-cell {
+    vertical-align: middle;
+}
+
+.breeding-alert-badge {
+    display: inline-block;
+    padding: 0.2rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.breeding-alert-badge--warning {
+    background: #fef3c7 !important;
+    color: #92400e !important;
+    border: 1px solid #f59e0b !important;
+}
+
+.breeding-alert-badge--overdue {
+    background: #ffedd5 !important;
+    color: #9a3412 !important;
+    border: 1px solid #ea580c !important;
+}
+
+.breeding-alert-badge--review {
+    background: #fee2e2 !important;
+    color: #991b1b !important;
+    border: 1px solid #dc2626 !important;
+}
+
+.breeding-alert-days {
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #b45309;
+}
+
+.breeding-row-alert--review .breeding-alert-days {
+    color: #b91c1c;
+}
+
 .mouse-age-cell {
     white-space: nowrap;
 }
@@ -1681,4 +1767,38 @@ a.col-uid-link {
 .site-footer a:hover {
     color: var(--primary);
     text-decoration: underline;
+}
+
+.strain-pdf-list {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+}
+
+.strain-pdf-list__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fafbfc;
+}
+
+.strain-pdf-delete-form {
+    margin-left: auto;
+}
+
+.button-small {
+    padding: 4px 10px;
+    font-size: 0.82rem;
+}
+
+.strain-pdf-upload-form {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
 }

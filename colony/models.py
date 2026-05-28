@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
+from django.utils.text import get_valid_filename
 
 from django.conf import settings
 
@@ -65,26 +66,39 @@ class StrainLine(ActorStampedModel):
 
     def save(self, *args, **kwargs):
         # Backward-compatible synchronization between legacy and new naming fields.
-        if not self.name:
-            self.name = self.display_name or self.line_name
+        primary = (self.name or "").strip()
+        if primary:
+            self.display_name = primary
+            self.line_name = primary
+        else:
+            if not self.name:
+                self.name = self.display_name or self.line_name
+            if not self.display_name:
+                self.display_name = self.name
+            if not self.line_name:
+                self.line_name = self.short_name or self.name
         if not self.short_name:
             self.short_name = self.key_name or self.display_name or self.line_name
-        if not self.line_name:
-            self.line_name = self.short_name or self.name
-        if not self.display_name:
-            self.display_name = self.name
+        elif primary:
+            self.short_name = primary
         if not self.key_name and self.short_name:
             self.key_name = self.short_name
         super().save(*args, **kwargs)
 
+    @property
+    def label(self) -> str:
+        return (self.name or self.display_name or self.line_name or self.short_name or "").strip() or "—"
+
     def __str__(self) -> str:
-        return self.short_name or self.display_name or self.name or self.line_name
+        return self.label
 
     @property
     def owner_display(self) -> str:
-        if not self.owner_id:
-            return "—"
-        return format_project_owner_label(self.owner) or "—"
+        if self.owner_id:
+            return format_project_owner_label(self.owner) or "—"
+        if getattr(self, "created_by_id", None):
+            return format_project_owner_label(self.created_by) or "—"
+        return "—"
 
     @classmethod
     def normalize_locus_name(cls, raw_name: str) -> str:
@@ -161,6 +175,48 @@ class StrainLine(ActorStampedModel):
 
     def expected_loci_list(self) -> list[str]:
         return [entry["locus_name"] for entry in self.expected_loci_entries()]
+
+
+def strain_line_document_upload_to(instance: "StrainLineDocument", filename: str) -> str:
+    safe = get_valid_filename(filename) or "document.pdf"
+    line_id = instance.strain_line_id or "pending"
+    return f"strain_lines/{line_id}/{safe}"
+
+
+class StrainLineDocument(TimeStampedModel):
+    """PDF introductions / protocols attached to a strain line (max 10 per line, 10 MB each)."""
+
+    strain_line = models.ForeignKey(StrainLine, on_delete=models.CASCADE, related_name="documents")
+    file = models.FileField(upload_to=strain_line_document_upload_to)
+    original_filename = models.CharField(max_length=255, blank=True)
+    file_size = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="strain_line_documents",
+    )
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def save(self, *args, **kwargs):
+        if self.file and not self.original_filename:
+            self.original_filename = get_valid_filename(self.file.name) or self.file.name
+        if self.file:
+            try:
+                self.file_size = self.file.size
+            except Exception:
+                pass
+        super().save(*args, **kwargs)
+
+    @property
+    def display_name(self) -> str:
+        return self.original_filename or (self.file.name.split("/")[-1] if self.file else "PDF")
+
+    def __str__(self) -> str:
+        return f"{self.strain_line_id}: {self.display_name}"
 
 
 class Cage(ActorStampedModel):
