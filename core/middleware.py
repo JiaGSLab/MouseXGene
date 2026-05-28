@@ -20,6 +20,26 @@ class CurrentActorMiddleware:
         else:
             set_current_actor(None)
         try:
-            return self.get_response(request)
+            response = self.get_response(request)
         finally:
             clear_current_actor()
+        return response
+
+
+class NoCacheHtmlForAuthenticatedMiddleware:
+    """Prevent browsers from serving stale list pages (sort/export UI) to logged-in users."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        response = self.get_response(request)
+        user = getattr(request, "user", None)
+        if not getattr(user, "is_authenticated", False):
+            return response
+        content_type = (response.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type == "text/html":
+            response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response["Pragma"] = "no-cache"
+            response["Expires"] = "0"
+        return response

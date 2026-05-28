@@ -26,6 +26,9 @@ SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
 
 DEBUG = get_env("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
 
+# Bumped on each deploy; used for static cache-busting and support checks.
+APP_RELEASE = get_env("APP_RELEASE", "20260528b")
+
 ALLOWED_HOSTS = [
     host.strip()
     for host in get_env("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
@@ -63,6 +66,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "core.middleware.CurrentActorMiddleware",
+    "core.middleware.NoCacheHtmlForAuthenticatedMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -84,6 +88,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "users.context_processors.role_permissions",
+                "core.context_processors.app_release",
             ],
         },
     },

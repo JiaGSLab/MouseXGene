@@ -53,6 +53,9 @@
         {% block content %}{% endblock %}
     </main>
     <footer class="site-footer">
+        {% if user.is_authenticated %}
+            <script src="{% static 'js/list_filters.js' %}?v={{ APP_RELEASE }}"></script>
+        {% endif %}
         <div class="container site-footer-beian">
             <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">粤ICP备2026047049号-1</a>
             <span class="site-footer-beian__sep" aria-hidden="true">·</span>

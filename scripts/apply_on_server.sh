@@ -23,13 +23,17 @@ fi
 echo "Pending migrations check:"
 ${COMPOSE} exec web python manage.py showmigrations breeding colony | grep -E '^\s+\[ \]' || true
 
-echo "Collecting static files..."
-${COMPOSE} exec web python manage.py collectstatic --noinput
+echo "Collecting static files (clear stale manifest entries)..."
+${COMPOSE} exec web python manage.py collectstatic --noinput --clear
 
-echo "Recreating web container (loads mounted code from host)..."
-${COMPOSE} up -d web
+echo "Recreating web + nginx containers (pick up code, static, nginx config)..."
+${COMPOSE} up -d --force-recreate web nginx
 
-echo "Reloading nginx..."
-${COMPOSE} exec nginx nginx -s reload || true
+echo "Waiting for gunicorn..."
+sleep 4
+${COMPOSE} exec web python manage.py check
 
-echo "Done. Verify: https://jialabmouse.top/breedings/ (hard refresh)."
+BUILD="$(grep -E '^APP_RELEASE=' .env.prod 2>/dev/null | cut -d= -f2- || echo settings-default)"
+echo "Done. Build tag: ${BUILD}"
+echo "Verify cages page source contains: list_filters.js and table-sort-link"
+echo "Hard refresh: https://jialabmouse.top/cages/ (Cmd+Shift+R)"

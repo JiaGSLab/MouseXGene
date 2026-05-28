@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load list_sort_tags static %}
+{% load list_sort_tags %}
 
 {% block title %}Cages | MouseXGene{% endblock %}
 
@@ -21,8 +21,8 @@
         </div>
         {% if user.is_authenticated %}
             <div class="action-links action-links--stack">
-                <a class="button button-export" href="{% url 'colony:cage_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=csv">Export Cages (CSV)</a>
-                <a class="button button-export" href="{% url 'colony:cage_list' %}?{% if request.GET %}{{ request.GET.urlencode }}&{% endif %}export=xlsx">Export Cages (Excel)</a>
+                <a class="button button-export js-export-with-form" href="{% url 'colony:cage_list' %}" form="cage-list-filters" data-export-format="csv">Export Cages (CSV)</a>
+                <a class="button button-export js-export-with-form" href="{% url 'colony:cage_list' %}" form="cage-list-filters" data-export-format="xlsx">Export Cages (Excel)</a>
             </div>
         {% endif %}
     </div>
@@ -90,8 +90,8 @@
                 <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
             </select>
             {% if user.is_authenticated %}
-                <button type="button" class="button button-export" form="cage-list-filters" data-export-format="csv">Export Cages (CSV)</button>
-                <button type="button" class="button button-export" form="cage-list-filters" data-export-format="xlsx">Export Cages (Excel)</button>
+                <button type="submit" class="button button-export" name="export" value="csv">Export Cages (CSV)</button>
+                <button type="submit" class="button button-export" name="export" value="xlsx">Export Cages (Excel)</button>
             {% endif %}
             {% if total_count %}
                 <p class="list-range-meta muted">
@@ -165,6 +165,3 @@
 </section>
 {% endblock %}
 
-{% block extra_scripts %}
-<script src="{% static 'js/filter_form_export.js' %}"></script>
-{% endblock %}
