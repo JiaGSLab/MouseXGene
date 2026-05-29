@@ -25,14 +25,21 @@ class StrainLine(ActorStampedModel):
         Y_LINKED = "y_linked", "Y-linked"
 
     class Category(models.TextChoices):
-        CRE = "cre", "Cre"
-        CRE_ERT2 = "creERT2", "CreERT2"
-        FLOX = "flox", "Flox"
-        KO = "ko", "KO"
-        KI = "ki", "KI"
+        WILD_TYPE = "wild_type", "Wild type"
+        INBRED_STRAIN = "inbred_strain", "Inbred strain"
+        CRE_DRIVER = "cre_driver", "Cre driver"
         REPORTER = "reporter", "Reporter"
-        TRANSGENE = "transgene", "Transgene"
-        OTHER = "other", "Other"
+        FLOXED_ALLELE = "floxed_allele", "Floxed allele"
+        KNOCKOUT = "knockout", "Knockout"
+        KNOCK_IN = "knock_in", "Knock-in"
+        COMPOUND_STRAIN = "compound_strain", "Compound strain"
+
+    class BackgroundPreset(models.TextChoices):
+        C57BL_6J = "c57bl_6j", "C57BL/6J"
+        BALB_C = "balb_c", "BALB/c"
+        BALB_CJ = "balb_cj", "BALB/cJ"
+        NOD_SCID = "nod_scid", "NOD-SCID"
+        NSG = "nsg", "NSG"
 
     class Species(models.TextChoices):
         MOUSE = "mouse", "Mouse"
@@ -44,10 +51,14 @@ class StrainLine(ActorStampedModel):
     display_name = models.CharField(max_length=255, blank=True)
     name = models.CharField(max_length=255, blank=True)
     short_name = models.CharField(max_length=128, blank=True)
-    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    category = models.CharField(max_length=48, choices=Category.choices, default=Category.COMPOUND_STRAIN)
     gene_or_locus = models.CharField(max_length=255, blank=True)
     species = models.CharField(max_length=20, choices=Species.choices, default=Species.MOUSE)
-    background = models.CharField(max_length=128, blank=True)
+    background = models.CharField(
+        max_length=128,
+        blank=True,
+        default=BackgroundPreset.C57BL_6J,
+    )
     source = models.CharField(max_length=128, blank=True)
     expected_loci_template = models.TextField(blank=True)
     expected_loci_config = models.JSONField(default=list, blank=True)
@@ -175,6 +186,26 @@ class StrainLine(ActorStampedModel):
 
     def expected_loci_list(self) -> list[str]:
         return [entry["locus_name"] for entry in self.expected_loci_entries()]
+
+    @property
+    def category_display_label(self) -> str:
+        value = (self.category or "").strip()
+        if not value:
+            return "—"
+        try:
+            return self.Category(value).label
+        except ValueError:
+            return value
+
+    @property
+    def background_display_label(self) -> str:
+        value = (self.background or "").strip()
+        if not value:
+            return "—"
+        try:
+            return self.BackgroundPreset(value).label
+        except ValueError:
+            return value
 
 
 def strain_line_document_upload_to(instance: "StrainLineDocument", filename: str) -> str:
@@ -328,7 +359,8 @@ class Mouse(ActorStampedModel):
     def __str__(self) -> str:
         return self.mouse_uid
 
-    def rebuild_genotype_summary(self, *, save: bool = True) -> str:
+    def compute_genotype_summary(self) -> str:
+        """Build display text from genotype components (does not write to DB)."""
         components = self.genotype_components.select_related("strain_line").order_by("sort_order", "id")
         parts: list[str] = []
         for component in components:
@@ -348,7 +380,10 @@ class Mouse(ActorStampedModel):
                 genotype_part = component.zygosity.strip()
             if genotype_part:
                 parts.append(f"{label}{genotype_part}")
-        summary = "; ".join(parts)
+        return "; ".join(parts)
+
+    def rebuild_genotype_summary(self, *, save: bool = True) -> str:
+        summary = self.compute_genotype_summary()
         self.genotype_summary = summary
         if save:
             self.save(update_fields=["genotype_summary", "updated_at"])

@@ -12,6 +12,12 @@ from users.import_prefix import get_effective_import_prefix
 from core.models import format_project_owner_label
 
 from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
+from .strain_line_choices import (
+    CUSTOM_SELECT_VALUE,
+    choice_field_with_custom,
+    preset_select_initial,
+    resolve_choice_or_custom,
+)
 
 
 class CageForm(forms.ModelForm):
@@ -191,12 +197,46 @@ class MouseImportForm(forms.Form):
 
 class StrainLineForm(forms.ModelForm):
     expected_loci_config = forms.CharField(required=False, widget=forms.HiddenInput())
+    category = forms.ChoiceField(
+        choices=[],
+        widget=forms.Select(attrs={"class": "filter-control", "id": "id_category"}),
+        label="Category",
+    )
+    category_custom = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "filter-control strain-custom-field",
+                "id": "id_category_custom",
+                "placeholder": "Custom category",
+            }
+        ),
+        label="Custom category",
+    )
+    background = forms.ChoiceField(
+        choices=[],
+        widget=forms.Select(attrs={"class": "filter-control", "id": "id_background"}),
+        label="Background",
+    )
+    background_custom = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "filter-control strain-custom-field",
+                "id": "id_background_custom",
+                "placeholder": "Custom background",
+            }
+        ),
+        label="Custom background",
+    )
 
     class Meta:
         model = StrainLine
         fields = [
             "name",
             "owner",
+            "species",
+            "source",
             "expected_loci_template",
             "expected_loci_config",
             "is_active",
@@ -204,12 +244,16 @@ class StrainLineForm(forms.ModelForm):
         ]
         widgets = {
             "owner": forms.Select(attrs={"class": "filter-control"}),
+            "species": forms.Select(attrs={"class": "filter-control"}),
+            "source": forms.TextInput(attrs={"class": "filter-control"}),
             "expected_loci_template": forms.Textarea(attrs={"rows": 3}),
             "notes": forms.Textarea(attrs={"rows": 3}),
         }
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
             "owner": "Lab contact (shown on Strain Lines list). Defaults to the creating user; you can change it here.",
+            "species": "Species for this strain line record.",
+            "source": "Optional source or vendor reference.",
             "expected_loci_template": (
                 "Required. One locus per row (or comma/semicolon separated), e.g. Lyz2-Cre, Tet2, Gpr82. "
                 "This template is used to auto-populate loci on New Mouse / offspring workflows."
@@ -239,6 +283,24 @@ class StrainLineForm(forms.ModelForm):
     def __init__(self, *args, user=None, **kwargs):
         self._actor_user = user
         super().__init__(*args, **kwargs)
+        self.fields["category"].choices = choice_field_with_custom(StrainLine.Category)
+        self.fields["background"].choices = choice_field_with_custom(StrainLine.BackgroundPreset)
+        if self.instance and self.instance.pk:
+            cat_sel, cat_custom = preset_select_initial(self.instance.category, StrainLine.Category)
+            if cat_sel:
+                self.initial.setdefault("category", cat_sel)
+            if cat_custom:
+                self.initial.setdefault("category_custom", cat_custom)
+            bg_sel, bg_custom = preset_select_initial(self.instance.background, StrainLine.BackgroundPreset)
+            if bg_sel:
+                self.initial.setdefault("background", bg_sel)
+            elif not (self.instance.background or "").strip():
+                self.initial.setdefault("background", StrainLine.BackgroundPreset.C57BL_6J)
+            if bg_custom:
+                self.initial.setdefault("background_custom", bg_custom)
+        else:
+            self.initial.setdefault("category", StrainLine.Category.COMPOUND_STRAIN)
+            self.initial.setdefault("background", StrainLine.BackgroundPreset.C57BL_6J)
         self.fields["owner"].queryset = get_user_model().objects.order_by("username")
         self.fields["owner"].required = False
         self.fields["owner"].label_from_instance = (
@@ -261,6 +323,24 @@ class StrainLineForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        try:
+            cleaned["category"] = resolve_choice_or_custom(
+                cleaned.get("category") or "",
+                cleaned.get("category_custom") or "",
+                StrainLine.Category,
+                field_label="Category",
+            )
+        except ValueError as exc:
+            self.add_error("category", str(exc))
+        try:
+            cleaned["background"] = resolve_choice_or_custom(
+                cleaned.get("background") or "",
+                cleaned.get("background_custom") or "",
+                StrainLine.BackgroundPreset,
+                field_label="Background",
+            )
+        except ValueError as exc:
+            self.add_error("background", str(exc))
         raw_cfg = (cleaned.get("expected_loci_config") or "").strip()
         parsed: list[dict[str, str]] = []
         if raw_cfg:
@@ -330,6 +410,8 @@ class StrainLineForm(forms.ModelForm):
 
     def save(self, commit=True):
         obj = super().save(commit=False)
+        obj.category = self.cleaned_data.get("category") or StrainLine.Category.COMPOUND_STRAIN
+        obj.background = self.cleaned_data.get("background") or StrainLine.BackgroundPreset.C57BL_6J
         new_name = (self.cleaned_data.get("name") or "").strip()
         if new_name:
             obj.name = new_name

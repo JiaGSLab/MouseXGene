@@ -27,7 +27,7 @@ class MouseEditPermissionTests(TestCase):
             line_name="PermTestLine",
             name="PermTestLine",
             short_name="PTL",
-            category=StrainLine.Category.OTHER,
+            category=StrainLine.Category.COMPOUND_STRAIN,
         )
         self.cage = Cage.objects.create(cage_id="P-C01", status=Cage.Status.ACTIVE)
 

@@ -1416,6 +1416,42 @@ a.col-uid-link {
     gap: 12px;
 }
 
+.form-section-title {
+    margin: 8px 0 4px;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.form-subsection-title {
+    margin: 12px 0 6px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--muted, #6b7280);
+}
+
+.form-row--inline-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.form-row--inline-fields > .form-row {
+    flex: 1 1 200px;
+}
+
+.input-locked {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
+.loci-row {
+    align-items: center;
+}
+
+.strain-custom-row[hidden] {
+    display: none !important;
+}
+
 .filter-row {
     display: flex;
     flex-wrap: wrap;

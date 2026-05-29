@@ -25,9 +25,9 @@
                     {% if loci %}{{ loci|join:", " }}{% else %}<span class="cell-empty">—</span>{% endif %}
                 {% endwith %}
             </dd>
-            <dt>Category</dt><dd>{{ line.get_category_display }}</dd>
+            <dt>Category</dt><dd>{{ line.category_display_label }}</dd>
             <dt>Species</dt><dd>{{ line.get_species_display }}</dd>
-            <dt>Background</dt><dd>{{ line.background|default:"—" }}</dd>
+            <dt>Background</dt><dd>{{ line.background_display_label }}</dd>
             <dt>Source</dt><dd>{{ line.source|default:"—" }}</dd>
             <dt>Status</dt><dd>{% if line.is_active %}<span class="status-pill status-pill--ok">Active</span>{% else %}<span class="status-pill status-pill--muted">Archived</span>{% endif %}</dd>
             <dt>Notes</dt><dd>{{ line.notes|default:"—"|linebreaksbr }}</dd>

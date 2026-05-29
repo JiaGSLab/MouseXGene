@@ -489,6 +489,13 @@ def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
 
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
+    if mouse.genotype_components.exists():
+        fresh = mouse.compute_genotype_summary()
+        stored = (mouse.genotype_summary or "").strip()
+        if stored != fresh:
+            mouse.genotype_summary = fresh
+            mouse.save(update_fields=["genotype_summary", "updated_at"])
+        return fresh
     stored = (mouse.genotype_summary or "").strip()
     if stored and stored != "-":
         return mouse.genotype_summary
@@ -682,32 +689,62 @@ def _mouse_component_loci_set(mouse: Mouse) -> set[str]:
     return loci
 
 
-def _propagate_strain_line_template_to_mice(line: StrainLine) -> tuple[int, int]:
-    """Add missing template loci and sync chromosome metadata for all mice on this strain line."""
+def _apply_locus_renames_on_mice(
+    line: StrainLine,
+    before_entries: list[dict[str, str]],
+    after_entries: list[dict[str, str]],
+) -> int:
+    """When loci are renamed in-place (same row count), update mouse component locus names."""
+    if len(before_entries) != len(after_entries):
+        return 0
+    renamed = 0
+    for old, new in zip(before_entries, after_entries, strict=True):
+        old_name = StrainLine.normalize_locus_name(str(old.get("locus_name", "")).strip())
+        new_name = StrainLine.normalize_locus_name(str(new.get("locus_name", "")).strip())
+        if not old_name or not new_name or old_name.casefold() == new_name.casefold():
+            continue
+        renamed += MouseGenotypeComponent.objects.filter(
+            mouse__strain_line=line,
+            locus_name__iexact=old_name,
+        ).update(locus_name=new_name)
+    return renamed
+
+
+def _propagate_strain_line_template_to_mice(
+    line: StrainLine,
+    *,
+    before_entries: list[dict[str, str]] | None = None,
+) -> tuple[int, int, int]:
+    """Sync template loci to mice on this strain line and refresh genotype summaries."""
     entries = line.expected_loci_entries()
     entry_by_key = {e["locus_name"].casefold(): e for e in entries}
+    if before_entries:
+        _apply_locus_renames_on_mice(line, before_entries, entries)
     mice_count = 0
     components_added = 0
+    components_removed = 0
     for mouse in Mouse.objects.filter(strain_line=line).iterator(chunk_size=100):
         components_added += mouse.ensure_template_genotype_components(include_strain_template=True)
-        for comp in mouse.genotype_components.all():
+        for comp in list(mouse.genotype_components.all()):
             locus = StrainLine.normalize_locus_name((comp.locus_name or "").strip())
             if not locus:
                 continue
-            entry = entry_by_key.get(locus.casefold())
-            if not entry:
+            locus_key = locus.casefold()
+            entry = entry_by_key.get(locus_key)
+            if entry is None:
+                comp.delete()
+                components_removed += 1
                 continue
             chromosome_type = entry.get("chromosome_type", "")
             if (
                 chromosome_type in MouseGenotypeComponent.ChromosomeType.values
                 and comp.chromosome_type != chromosome_type
-                and not _component_has_meaningful_truth(comp)
             ):
                 comp.chromosome_type = chromosome_type
                 comp.save(update_fields=["chromosome_type", "updated_at"])
         mouse.rebuild_genotype_summary(save=True)
         mice_count += 1
-    return mice_count, components_added
+    return mice_count, components_added, components_removed
 
 
 def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: list[str]) -> None:
@@ -847,8 +884,7 @@ def _apply_mouse_genotype_rows_to_template(mouse: Mouse, rows: list[dict[str, st
         if after != before:
             component.save()
             updated += 1
-    if updated:
-        mouse.rebuild_genotype_summary(save=True)
+    mouse.rebuild_genotype_summary(save=True)
     return updated
 
 
@@ -1006,7 +1042,7 @@ def _execute_two_pass_mouse_import(
                     line_name=name,
                     name=name,
                     short_name=name,
-                    category=StrainLine.Category.OTHER,
+                    category=StrainLine.Category.COMPOUND_STRAIN,
                     notes="Auto-created during mouse import.",
                 )
                 for name in missing_strains
@@ -1298,6 +1334,7 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
         posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
         _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
         _apply_mouse_genotype_rows_to_template(mouse, posted_genotype_rows, template_rows)
+        mouse.refresh_from_db()
         after_signature = _genotype_components_signature(mouse)
         _log_specific_genotype_changes(
             user=request.user,
@@ -1623,10 +1660,14 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if form.is_valid():
             if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
                 raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
-            before_template = json.dumps(line.expected_loci_entries(), sort_keys=True)
+            before_entries = line.expected_loci_entries()
+            before_template = json.dumps(before_entries, sort_keys=True)
+            before_name = (line.name or line.line_name or "").strip()
             msg = summarize_modelform_changes(form)
             line = form.save()
-            after_template = json.dumps(line.expected_loci_entries(), sort_keys=True)
+            after_entries = line.expected_loci_entries()
+            after_template = json.dumps(after_entries, sort_keys=True)
+            after_name = (line.name or line.line_name or "").strip()
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.UPDATE,
@@ -1634,13 +1675,20 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 message=msg[:4000],
             )
             messages.success(request, "Strain line updated.")
-            if before_template != after_template:
-                mice_updated, rows_added = _propagate_strain_line_template_to_mice(line)
+            if before_template != after_template or before_name != after_name:
+                mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
+                    line,
+                    before_entries=before_entries if before_template != after_template else None,
+                )
                 if mice_updated:
+                    detail_parts = [f"synced {mice_updated} mouse(s)"]
+                    if rows_added:
+                        detail_parts.append(f"{rows_added} locus row(s) added")
+                    if rows_removed:
+                        detail_parts.append(f"{rows_removed} locus row(s) removed from mice")
                     messages.info(
                         request,
-                        f"Applied updated included-loci template to {mice_updated} mouse(s) "
-                        f"({rows_added} new locus row(s) added). Existing genotype values were kept.",
+                        "Definition changes applied: " + ", ".join(detail_parts) + "; genotype summaries refreshed.",
                     )
             return redirect("colony:strain_line_detail", pk=line.pk)
     else:
