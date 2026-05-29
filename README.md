@@ -105,6 +105,32 @@ POSTGRES_USER=mousexgene POSTGRES_DB=mousexgene ./scripts/backup_db.sh ./backups
 
 This runs `pg_dump` from the DB container and writes a timestamped `.sql` file.
 
+## Sync production data to local dev
+
+On your Mac (SSH to the server must work):
+
+```bash
+# 1) Download a fresh SQL dump from the server
+./scripts/pull_db_from_server.sh
+
+# 2) Replace your local dev database (prompts for confirmation)
+./scripts/restore_db_local.sh backups/mousexgene_prod_YYYYMMDD_HHMMSS.sql
+
+# 3) Optional: strain-line PDFs and other uploads
+./scripts/pull_media_from_server.sh
+
+docker compose up
+```
+
+`-y` skips the restore confirmation. Local `.env` should keep the same `POSTGRES_DB` / `POSTGRES_USER` names as production (password may differ). You log in with **production accounts and passwords**. `backups/*.sql` is gitignored—do not commit dumps.
+
+To use an existing server backup instead of a live dump:
+
+```bash
+scp ubuntu@118.195.218.49:~/backups/mousexgene_*.sql ./backups/
+./scripts/restore_db_local.sh backups/mousexgene_YYYYMMDD_HHMMSS.sql
+```
+
 ## Notes
 
 - Keep `docker-compose.yml` for dev convenience.

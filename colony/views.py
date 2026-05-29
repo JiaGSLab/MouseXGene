@@ -489,7 +489,10 @@ def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
 
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
-    if mouse.genotype_components.exists():
+    has_template = bool(
+        mouse.strain_line_id and mouse.strain_line.expected_loci_entries()
+    )
+    if mouse.genotype_components.exists() or has_template:
         fresh = mouse.compute_genotype_summary()
         stored = (mouse.genotype_summary or "").strip()
         if stored != fresh:

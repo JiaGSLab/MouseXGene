@@ -17,6 +17,7 @@ venv/
 
 # Django
 *.sqlite3
+backups/
 media/
 staticfiles/
 

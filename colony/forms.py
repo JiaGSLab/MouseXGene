@@ -238,7 +238,6 @@ class StrainLineForm(forms.ModelForm):
             "species",
             "source",
             "expected_loci_template",
-            "expected_loci_config",
             "is_active",
             "notes",
         ]
@@ -405,7 +404,7 @@ class StrainLineForm(forms.ModelForm):
             return cleaned
 
         cleaned["expected_loci_template"] = "\n".join(item["locus_name"] for item in parsed)
-        cleaned["expected_loci_config"] = json.dumps(parsed)
+        cleaned["_expected_loci_config_list"] = parsed
         return cleaned
 
     def save(self, commit=True):
@@ -418,12 +417,7 @@ class StrainLineForm(forms.ModelForm):
             obj.display_name = new_name
             obj.line_name = new_name
             obj.short_name = new_name
-        raw_cfg = (self.cleaned_data.get("expected_loci_config") or "").strip()
-        if raw_cfg:
-            try:
-                obj.expected_loci_config = json.loads(raw_cfg)
-            except Exception:
-                obj.expected_loci_config = []
+        obj.expected_loci_config = list(self.cleaned_data.get("_expected_loci_config_list") or [])
         if (
             not self.instance.pk
             and not obj.owner_id

@@ -311,6 +311,10 @@
         appendRow("");
     }
     addBtn.addEventListener("click", () => appendRow(""));
+    const form = rows.closest("form");
+    if (form) {
+        form.addEventListener("submit", () => syncHidden());
+    }
     syncHidden();
 })();
 </script>

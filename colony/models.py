@@ -1,3 +1,4 @@
+import json
 import re
 
 from django.db import models
@@ -288,6 +289,10 @@ class Cage(ActorStampedModel):
         return self.cage_id
 
 
+GENOTYPE_SUMMARY_UNCHARACTERIZED = "ND"
+GENOTYPE_SUMMARY_MAX_LENGTH = 512
+
+
 class Mouse(ActorStampedModel):
     class Sex(models.TextChoices):
         MALE = "M", "Male"
@@ -359,28 +364,78 @@ class Mouse(ActorStampedModel):
     def __str__(self) -> str:
         return self.mouse_uid
 
+    @staticmethod
+    def _genotype_component_display(component: "MouseGenotypeComponent | None") -> str:
+        if component is None:
+            return ""
+        allele_1 = (component.allele_display_1 or "").strip()
+        allele_2 = (component.allele_display_2 or "").strip()
+        zygosity = (component.zygosity or "").strip()
+        if allele_1 == "-":
+            allele_1 = ""
+        if allele_2 == "-":
+            allele_2 = ""
+        if zygosity == "-":
+            zygosity = ""
+        if allele_1 and allele_2:
+            return f"{allele_1}/{allele_2}"
+        if zygosity:
+            return zygosity
+        return ""
+
+    def _genotype_summary_part(self, label: str, component: "MouseGenotypeComponent | None") -> str:
+        display = self._genotype_component_display(component)
+        if display:
+            return f"{label}:{display}"
+        return f"{label}:{GENOTYPE_SUMMARY_UNCHARACTERIZED}"
+
     def compute_genotype_summary(self) -> str:
-        """Build display text from genotype components (does not write to DB)."""
-        components = self.genotype_components.select_related("strain_line").order_by("sort_order", "id")
-        parts: list[str] = []
+        """List every template locus; use ND when genotype is blank or missing."""
+        components = list(
+            self.genotype_components.select_related("strain_line").order_by("sort_order", "id")
+        )
+        comp_by_key: dict[str, MouseGenotypeComponent] = {}
         for component in components:
-            fallback_label = (
-                component.strain_line.short_name
-                or component.strain_line.display_name
-                or component.strain_line.name
-                or component.strain_line.line_name
-            )
-            label = (component.locus_name or "").strip() or fallback_label
-            allele_1 = (component.allele_display_1 or "").strip()
-            allele_2 = (component.allele_display_2 or "").strip()
-            genotype_part = ""
-            if allele_1 and allele_2:
-                genotype_part = f"{allele_1}/{allele_2}"
-            elif component.zygosity:
-                genotype_part = component.zygosity.strip()
-            if genotype_part:
-                parts.append(f"{label}{genotype_part}")
-        return "; ".join(parts)
+            locus = StrainLine.normalize_locus_name((component.locus_name or "").strip())
+            if not locus:
+                continue
+            comp_by_key[locus.casefold()] = component
+
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        if self.strain_line_id:
+            for entry in self.strain_line.expected_loci_entries():
+                label = entry["locus_name"]
+                key = label.casefold()
+                seen.add(key)
+                parts.append(self._genotype_summary_part(label, comp_by_key.get(key)))
+
+        for component in components:
+            label = StrainLine.normalize_locus_name((component.locus_name or "").strip())
+            if not label:
+                continue
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            parts.append(self._genotype_summary_part(label, component))
+
+        if not parts and not self.strain_line_id:
+            for component in components:
+                fallback_label = (
+                    component.strain_line.short_name
+                    or component.strain_line.display_name
+                    or component.strain_line.name
+                    or component.strain_line.line_name
+                )
+                label = (component.locus_name or "").strip() or fallback_label
+                parts.append(self._genotype_summary_part(label, component))
+
+        summary = "; ".join(parts)
+        if len(summary) <= GENOTYPE_SUMMARY_MAX_LENGTH:
+            return summary
+        return summary[: GENOTYPE_SUMMARY_MAX_LENGTH - 3].rstrip() + "..."
 
     def rebuild_genotype_summary(self, *, save: bool = True) -> str:
         summary = self.compute_genotype_summary()
@@ -410,6 +465,10 @@ class Mouse(ActorStampedModel):
                 loci.append(text)
         if not loci:
             return 0
+        entry_by_key = {
+            e["locus_name"].casefold(): e
+            for e in (self.strain_line.expected_loci_entries() if self.strain_line_id else [])
+        }
         existing: set[str] = set()
         for c in self.genotype_components.all():
             raw = (c.locus_name or "").strip()
@@ -427,12 +486,16 @@ class Mouse(ActorStampedModel):
         for locus in loci:
             if locus.casefold() in existing:
                 continue
+            entry = entry_by_key.get(locus.casefold()) or {}
+            chromosome_type = str(entry.get("chromosome_type") or "").strip()
+            if chromosome_type not in MouseGenotypeComponent.ChromosomeType.values:
+                chromosome_type = MouseGenotypeComponent.ChromosomeType.UNKNOWN
             to_create.append(
                 MouseGenotypeComponent(
                     mouse=self,
                     strain_line=self.strain_line,
                     locus_name=locus,
-                    chromosome_type=MouseGenotypeComponent.ChromosomeType.UNKNOWN,
+                    chromosome_type=chromosome_type,
                     zygosity_class=MouseGenotypeComponent.ZygosityClass.UNKNOWN,
                     sort_order=next_sort,
                 )
