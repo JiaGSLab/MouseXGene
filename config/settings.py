@@ -27,7 +27,7 @@ SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
 DEBUG = get_env("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
 
 # Bumped on each deploy; used for static cache-busting and support checks.
-APP_RELEASE = get_env("APP_RELEASE", "20260528b")
+APP_RELEASE = get_env("APP_RELEASE", "20260529d")
 
 ALLOWED_HOSTS = [
     host.strip()

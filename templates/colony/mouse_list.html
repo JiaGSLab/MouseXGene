@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load list_sort_tags %}
+{% load list_sort_tags static %}
 
 {% block title %}Mice | MouseXGene{% endblock %}
 
@@ -10,6 +10,7 @@
         <p class="muted">Browse all mice and search by key identifiers. Use the export buttons in the filter section below (includes all filter fields without clicking Apply first).</p>
         <p class="muted small-print">
             Age column: gray <strong>Age unknown</strong> if birth date is missing; amber <strong>≥6mo</strong> (≥183d) and red bar <strong>≥1yr</strong> (≥365d) include a left row marker.
+            Drag the <strong>Genotype Summary</strong> header border (dark vertical line) to set any width; truncated rows show <strong>›</strong>. Other columns size to their content.
         </p>
     </div>
     <div class="toolbar-actions">
@@ -96,7 +97,20 @@
 </section>
 
 <section class="table-wrap table-wrap--data">
-    <table class="data-table data-table--compact">
+    <table class="data-table data-table--compact data-table--mice data-table--col-resize" id="mice-list-table" data-col-resize-key="mice-list">
+        <colgroup>
+            <col class="col-w-uid">
+            <col class="col-w-genotype" data-min-width="72" data-resizable="1">
+            <col class="col-w-sex">
+            <col class="col-w-birth">
+            <col class="col-w-age">
+            <col class="col-w-status">
+            <col class="col-w-breeding">
+            <col class="col-w-strain">
+            <col class="col-w-cage">
+            <col class="col-w-project">
+            <col class="col-w-owner">
+        </colgroup>
         <thead>
             <tr>
                 {% sort_th "mouse_uid" "Mouse UID" extra_class="col-uid" %}
@@ -118,9 +132,9 @@
                 <td class="col-uid"><a class="table-link col-uid-link" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
                 <td class="col-genotype">
                     {% if mouse.genotype_summary %}
-                        <div class="genotype-scroll-wrap">
-                            <div class="genotype-scroll" title="{{ mouse.genotype_summary }}">{{ mouse.genotype_summary }}</div>
-                            <span class="genotype-scroll-hint" aria-hidden="true">↔ scroll</span>
+                        <div class="col-genotype-cell">
+                            <span class="col-genotype-text" title="{{ mouse.genotype_summary }}">{{ mouse.genotype_summary }}</span>
+                            <span class="col-genotype-more" aria-hidden="true" title="More text — drag the column border to widen">›</span>
                         </div>
                     {% else %}
                         <span class="cell-empty" title="No genotype data: add genotype components, legacy genotype records, or import">—</span>
@@ -188,15 +202,8 @@
     </table>
     {% include "includes/pagination_nav.html" %}
 </section>
-<script>
-(() => {
-    const items = document.querySelectorAll(".genotype-scroll-wrap");
-    items.forEach((wrap) => {
-        const scroller = wrap.querySelector(".genotype-scroll");
-        if (!scroller) return;
-        const overflowing = scroller.scrollWidth > scroller.clientWidth + 4;
-        if (overflowing) wrap.classList.add("is-overflowing");
-    });
-})();
-</script>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'js/table_col_resize.js' %}?v={{ APP_RELEASE }}"></script>
 {% endblock %}

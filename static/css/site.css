@@ -451,54 +451,119 @@ a.col-uid-link {
     font-weight: 400;
 }
 
-.col-genotype {
-    min-width: 220px;
-    max-width: 320px;
-    line-height: 1.35;
+/* Mice list: auto columns + freely resizable Genotype Summary */
+.data-table--mice {
+    table-layout: auto;
+    width: 100%;
+}
+
+.data-table--mice col.col-w-genotype {
+    width: var(--genotype-col-width, 176px);
+}
+
+.data-table--mice th.col-genotype,
+.data-table--mice td.col-genotype {
+    width: var(--genotype-col-width, 176px);
+    min-width: var(--genotype-col-width, 176px);
+    max-width: var(--genotype-col-width, 176px);
+    white-space: nowrap !important;
+    overflow: hidden;
     vertical-align: top;
     font-size: 0.8125rem;
+    line-height: 1.35;
     color: #374151;
 }
 
-.genotype-scroll {
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    white-space: nowrap;
-    display: block;
-    scrollbar-width: thin;
-}
-
-.genotype-scroll-wrap {
+.data-table--mice th.th-resizable {
     position: relative;
+    overflow: visible;
 }
 
-.genotype-scroll-wrap.is-overflowing::after {
-    content: "";
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 20px;
-    pointer-events: none;
-    background: linear-gradient(to right, rgba(255, 255, 255, 0), #fff);
-}
-
-.genotype-scroll-hint {
-    display: none;
-    position: absolute;
-    right: 2px;
-    top: -14px;
-    font-size: 0.65rem;
-    color: #6b7280;
-    background: rgba(255, 255, 255, 0.95);
-    padding: 0 4px;
-    border-radius: 999px;
-    pointer-events: none;
-}
-
-.genotype-scroll-wrap.is-overflowing .genotype-scroll-hint {
+.data-table--mice th.col-genotype.th-resizable .table-sort-link {
     display: inline-block;
+    max-width: calc(100% - 12px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    padding-right: 4px;
+}
+
+.col-resizer {
+    position: absolute;
+    top: 0;
+    right: -5px;
+    width: 10px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    touch-action: none;
+    z-index: 3;
+    box-sizing: border-box;
+    border-right: 1px solid #cbd5e1;
+}
+
+.data-table--mice th.col-genotype .col-resizer {
+    border-right: 2px solid #64748b;
+    background: linear-gradient(to right, transparent 0%, rgba(100, 116, 139, 0.12) 100%);
+}
+
+.col-resizer:hover,
+body.col-resize-active .col-resizer {
+    border-right-color: #2563eb;
+    background: rgba(37, 99, 235, 0.16);
+}
+
+.data-table--mice th.col-genotype .col-resizer:hover,
+body.col-resize-active .data-table--mice th.col-genotype .col-resizer {
+    border-right-color: #1d4ed8;
+    background: rgba(37, 99, 235, 0.22);
+}
+
+body.col-resize-active {
+    cursor: col-resize !important;
+    user-select: none;
+}
+
+body.col-resize-active * {
+    cursor: col-resize !important;
+}
+
+.col-genotype-cell {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.col-genotype-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: top;
+}
+
+.col-genotype-more {
+    display: none;
+    flex: 0 0 auto;
+    color: #475569;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    padding-right: 2px;
+    user-select: none;
+}
+
+.col-genotype-cell.is-truncated .col-genotype-more {
+    display: inline-block;
+}
+
+.col-genotype {
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    color: #374151;
 }
 
 .cage-genotype-overview {
