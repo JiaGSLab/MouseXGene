@@ -121,6 +121,12 @@ class CageImportForm(forms.Form):
         label="Prefix cage IDs with my import prefix",
         help_text="Prepends your profile prefix to each cage_id (e.g. C001 → JG-C001).",
     )
+    update_existing = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Update existing cages when cage_id matches",
+        help_text="When checked, rows whose cage_id already exists update that cage instead of failing validation. You will be asked to confirm before any overwrite runs.",
+    )
 
     def __init__(self, *args, user=None, **kwargs):
         self.user = user
@@ -176,6 +182,12 @@ class MouseImportForm(forms.Form):
             "Prepends your profile prefix to mouse_uid and to cage references when they are new. "
             "Existing cage/mouse IDs in the database are left unchanged so you can reference legacy records."
         ),
+    )
+    update_existing = forms.BooleanField(
+        required=False,
+        initial=True,
+        label="Update existing mice when mouse_uid matches",
+        help_text="When checked, rows whose mouse_uid already exists update that mouse instead of failing validation. You will be asked to confirm before any overwrite runs.",
     )
 
     def __init__(self, *args, user=None, **kwargs):

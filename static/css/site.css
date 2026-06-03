@@ -322,6 +322,18 @@ a.link-primary:hover {
     margin-left: 0;
 }
 
+.button-danger {
+    background: #b42318;
+    color: #ffffff;
+    border-color: #912018;
+}
+
+.button-danger:hover {
+    background: #912018;
+    color: #ffffff;
+    text-decoration: none;
+}
+
 .button-export {
     background: #d6e5f6;
     color: #3f5f86;
@@ -883,6 +895,32 @@ body.col-resize-active * {
     border-radius: 8px;
     padding: 8px 10px;
     font-size: 0.92rem;
+}
+
+.import-overwrite-warning {
+    border-color: #e8b4b0;
+    background: #fff8f7;
+}
+
+.import-overwrite-warning__lead {
+    margin-top: 0;
+}
+
+.import-overwrite-id-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin: 12px 0 16px;
+    padding: 0;
+    list-style: none;
+}
+
+.import-overwrite-id-list li {
+    margin: 0;
+}
+
+.import-overwrite-actions {
+    margin-top: 0;
 }
 
 .print-toolbar {

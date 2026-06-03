@@ -108,6 +108,8 @@
         <code>+/Y</code>、<code>Cre/Y</code>、<code>-/Y</code>。
     </p>
 
+    {% include "includes/import_overwrite_confirm.html" %}
+
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
 
@@ -150,6 +152,10 @@
                 {% endif %}
             </div>
             <div class="form-row">
+                <label for="{{ form.update_existing.id_for_label }}">{{ form.update_existing }} {{ form.update_existing.label }}</label>
+                <small class="muted">{{ form.update_existing.help_text }}</small>
+            </div>
+            <div class="form-row">
                 <label for="{{ form.auto_create_missing_strain_lines.id_for_label }}">{{ form.auto_create_missing_strain_lines }} {{ form.auto_create_missing_strain_lines.label }}</label>
                 <small class="muted">{{ form.auto_create_missing_strain_lines.help_text }}</small>
             </div>
@@ -179,7 +185,11 @@
         {% endif %}
 
         <div class="form-actions">
-            <button type="submit" class="button">Import Mice</button>
+            {% if not overwrite_warning %}
+                <button type="submit" class="button">Import Mice</button>
+            {% else %}
+                <p class="muted">Confirm or cancel the pending import above before uploading again.</p>
+            {% endif %}
             <a href="{% url 'mice:mouse_list' %}" class="button button-light">Cancel</a>
         </div>
     </form>

@@ -68,6 +68,8 @@
     <p class="muted">Example row: <code>C001,2026-04-10,Room-A,Rack-1,A1,standard,holding,active,Example note</code></p>
     <p class="muted">示例行（Example row）：<code>C001,2026-04-10,Room-A,Rack-1,A1,standard,holding,active,Example note</code></p>
 
+    {% include "includes/import_overwrite_confirm.html" %}
+
     <form method="post" enctype="multipart/form-data" class="form-layout">
         {% csrf_token %}
 
@@ -93,6 +95,15 @@
                         <div>{{ error }}</div>
                     {% endfor %}
                 </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.update_existing.id_for_label }}">
+                {{ form.update_existing }} {{ form.update_existing.label }}
+            </label>
+            {% if form.update_existing.help_text %}
+                <small class="muted">{{ form.update_existing.help_text }}</small>
             {% endif %}
         </div>
 
@@ -124,7 +135,11 @@
         {% endif %}
 
         <div class="form-actions">
-            <button type="submit" class="button">Import Cages</button>
+            {% if not overwrite_warning %}
+                <button type="submit" class="button">Import Cages</button>
+            {% else %}
+                <p class="muted">Confirm or cancel the pending import above before uploading again.</p>
+            {% endif %}
             <a href="{% url 'colony:cage_list' %}" class="button button-light">Cancel</a>
         </div>
     </form>

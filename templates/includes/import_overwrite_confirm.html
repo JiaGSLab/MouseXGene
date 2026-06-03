@@ -1,0 +1,36 @@
+{% if overwrite_warning %}
+<section class="card import-overwrite-warning">
+    <h2>Overwrite warning</h2>
+    <p class="import-overwrite-warning__lead">
+        This file will <strong>overwrite {{ overwrite_update_count }}</strong> existing
+        {{ record_label }}{% if overwrite_update_count != 1 %}s{% endif %}
+        {% if overwrite_create_count %}
+            and create <strong>{{ overwrite_create_count }}</strong> new
+            {{ record_label }}{% if overwrite_create_count != 1 %}s{% endif %}
+        {% endif %}.
+        Review the IDs below, then confirm to proceed.
+    </p>
+    <p class="muted">
+        此文件将覆盖 {{ overwrite_update_count }} 条已有{{ record_label }}记录
+        {% if overwrite_create_count %}，并新建 {{ overwrite_create_count }} 条{% endif %}。
+        请核对下方 ID 后确认继续。
+    </p>
+    {% if staged_filename %}
+        <p class="muted small-print">File: {{ staged_filename }}</p>
+    {% endif %}
+    <ul class="import-overwrite-id-list">
+        {% for item_id in overwrite_ids %}
+            <li><code>{{ item_id }}</code></li>
+        {% endfor %}
+        {% if overwrite_ids_truncated %}
+            <li class="muted">… and {{ overwrite_ids_truncated }} more</li>
+        {% endif %}
+    </ul>
+    <form method="post" class="form-actions import-overwrite-actions">
+        {% csrf_token %}
+        <input type="hidden" name="confirm_overwrite" value="1">
+        <button type="submit" class="button button-danger">Confirm overwrite</button>
+        <button type="submit" name="cancel_overwrite" value="1" class="button button-light">Cancel</button>
+    </form>
+</section>
+{% endif %}

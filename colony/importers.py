@@ -80,7 +80,12 @@ def _missing_columns_error(missing_columns: list[str], actual_columns: list[str]
     )
 
 
-def parse_cage_import(uploaded_file, *, id_prefix: str | None = None) -> CageImportResult:
+def parse_cage_import(
+    uploaded_file,
+    *,
+    id_prefix: str | None = None,
+    update_existing: bool = True,
+) -> CageImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
         dataframe = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
@@ -155,9 +160,15 @@ def parse_cage_import(uploaded_file, *, id_prefix: str | None = None) -> CageImp
         existing_cage_ids = set(
             Cage.objects.filter(cage_id__in=seen_cage_ids).values_list("cage_id", flat=True)
         )
-        for cage_id in sorted(existing_cage_ids):
-            row_number = cage_id_to_row_number.get(cage_id, "?")
-            errors.append(f"Row {row_number}: cage_id '{cage_id}' already exists in database.")
+        for row in rows:
+            row["_update"] = row["cage_id"] in existing_cage_ids
+        if not update_existing:
+            for cage_id in sorted(existing_cage_ids):
+                row_number = cage_id_to_row_number.get(cage_id, "?")
+                errors.append(f"Row {row_number}: cage_id '{cage_id}' already exists in database.")
+    else:
+        for row in rows:
+            row["_update"] = False
 
     return CageImportResult(rows=rows, errors=errors)
 
@@ -289,7 +300,12 @@ def _parse_bool(value, row_number: int, field_name: str, errors: list[str]) -> b
     return None
 
 
-def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseImportResult:
+def parse_mouse_import(
+    uploaded_file,
+    *,
+    id_prefix: str | None = None,
+    update_existing: bool = True,
+) -> MouseImportResult:
     filename = (uploaded_file.name or "").lower()
     if filename.endswith(".csv"):
         dataframe = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
@@ -477,8 +493,14 @@ def parse_mouse_import(uploaded_file, *, id_prefix: str | None = None) -> MouseI
 
     if seen_mouse_uids:
         existing_uids = set(Mouse.objects.filter(mouse_uid__in=seen_mouse_uids).values_list("mouse_uid", flat=True))
-        for mouse_uid in sorted(existing_uids):
-            row_number = uid_to_row_number.get(mouse_uid, "?")
-            errors.append(f"Row {row_number}: mouse_uid '{mouse_uid}' already exists in database.")
+        for row in rows:
+            row["_update"] = row["mouse_uid"] in existing_uids
+        if not update_existing:
+            for mouse_uid in sorted(existing_uids):
+                row_number = uid_to_row_number.get(mouse_uid, "?")
+                errors.append(f"Row {row_number}: mouse_uid '{mouse_uid}' already exists in database.")
+    else:
+        for row in rows:
+            row["_update"] = False
 
     return MouseImportResult(rows=rows, errors=errors)

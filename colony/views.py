@@ -44,6 +44,17 @@ from users.forms import UserImportPrefixForm
 from colony.mouse_age import mouse_list_age_band
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
+from colony.import_staging import (
+    ImportStagingError,
+    clear_staged_cage_import,
+    clear_staged_mouse_import,
+    decode_staged_file,
+    file_bytes_to_upload,
+    pop_staged_cage_import,
+    pop_staged_mouse_import,
+    stage_cage_import,
+    stage_mouse_import,
+)
 from core.list_sort import (
     CAGE_LIST_SORT,
     FAMILY_TREE_SORT,
@@ -77,6 +88,163 @@ DEFAULT_MOUSE_IMPORT_OPTIONS = MouseImportOptions(
     auto_create_missing_cages=True,
     resolve_pedigree_within_file=True,
 )
+
+CAGE_IMPORT_UPDATE_FIELDS = (
+    "created_date",
+    "room",
+    "rack",
+    "position",
+    "cage_type",
+    "purpose",
+    "status",
+    "notes",
+)
+IMPORT_OVERWRITE_ID_PREVIEW_LIMIT = 30
+
+
+def _partition_import_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    create_rows = [row for row in rows if not row.get("_update")]
+    update_rows = [row for row in rows if row.get("_update")]
+    return create_rows, update_rows
+
+
+def _build_import_overwrite_context(
+    *,
+    rows: list[dict],
+    id_key: str,
+    record_label: str,
+    staged_filename: str,
+) -> dict | None:
+    create_rows, update_rows = _partition_import_rows(rows)
+    if not update_rows:
+        return None
+    ids = [row[id_key] for row in update_rows]
+    truncated = 0
+    if len(ids) > IMPORT_OVERWRITE_ID_PREVIEW_LIMIT:
+        truncated = len(ids) - IMPORT_OVERWRITE_ID_PREVIEW_LIMIT
+        ids = ids[:IMPORT_OVERWRITE_ID_PREVIEW_LIMIT]
+    return {
+        "overwrite_warning": True,
+        "overwrite_update_count": len(update_rows),
+        "overwrite_create_count": len(create_rows),
+        "overwrite_ids": ids,
+        "overwrite_ids_truncated": truncated,
+        "record_label": record_label,
+        "staged_filename": staged_filename,
+    }
+
+
+def _apply_cage_import_rows(rows: list[dict], *, acting_user) -> tuple[int, int]:
+    create_rows, update_rows = _partition_import_rows(rows)
+    with transaction.atomic():
+        if create_rows:
+            Cage.objects.bulk_create(
+                [Cage(**{k: v for k, v in row.items() if k != "_update"}) for row in create_rows]
+            )
+            Cage.objects.filter(cage_id__in=[row["cage_id"] for row in create_rows]).update(
+                created_by_id=acting_user.pk,
+                updated_by_id=acting_user.pk,
+            )
+        for row in update_rows:
+            cage = Cage.objects.get(cage_id=row["cage_id"])
+            for field in CAGE_IMPORT_UPDATE_FIELDS:
+                setattr(cage, field, row[field])
+            cage.updated_by_id = acting_user.pk
+            cage.save(update_fields=[*CAGE_IMPORT_UPDATE_FIELDS, "updated_by_id", "updated_at"])
+    return len(create_rows), len(update_rows)
+
+
+def _mouse_import_options_from_dict(data: dict[str, bool]) -> MouseImportOptions:
+    return MouseImportOptions(
+        auto_create_missing_strain_lines=data["auto_create_missing_strain_lines"],
+        auto_create_missing_projects=data["auto_create_missing_projects"],
+        auto_create_missing_cages=data["auto_create_missing_cages"],
+        resolve_pedigree_within_file=data["resolve_pedigree_within_file"],
+    )
+
+
+def _complete_mouse_import(request, stats: dict[str, int], upload_name: str) -> HttpResponse:
+    log_audit_event(
+        user=request.user,
+        action=AuditLog.Action.IMPORT,
+        message=(
+            f"Imported mice via file upload "
+            f"({stats['created_mice']} created, {stats['updated_mice']} updated; "
+            f"auto-created: {stats['auto_created_strain_lines']} strain lines, "
+            f"{stats['auto_created_projects']} projects, "
+            f"{stats['auto_created_cages']} cages; "
+            f"genotypes: +{stats['genotype_rows_created']} / ~{stats['genotype_rows_updated']})."
+        ),
+        object_type="Mouse",
+        object_id=str(stats["created_mice"] + stats["updated_mice"]),
+        object_repr="Bulk Mouse Import",
+    )
+    record_import_log(
+        user=request.user,
+        import_type=ImportLog.ImportType.MOUSE,
+        filename=upload_name,
+        success=True,
+        created_count=stats["created_mice"] + stats["updated_mice"],
+        errors=[],
+    )
+    messages.success(
+        request,
+        (
+            f"Import complete: {stats['created_mice']} mouse(s) created, "
+            f"{stats['updated_mice']} updated "
+            f"(auto-created: {stats['auto_created_strain_lines']} strain lines, "
+            f"{stats['auto_created_projects']} projects, "
+            f"{stats['auto_created_cages']} cages; "
+            f"genotypes created {stats['genotype_rows_created']}, "
+            f"updated {stats['genotype_rows_updated']})."
+        ),
+    )
+    return redirect("mice:mouse_list")
+
+
+def _run_mouse_import_execution(
+    request,
+    rows: list[dict],
+    *,
+    import_options: MouseImportOptions,
+    upload_name: str,
+) -> tuple[HttpResponse | None, list[str]]:
+    try:
+        with transaction.atomic():
+            stats = _execute_two_pass_mouse_import(
+                rows,
+                options=import_options,
+                import_date=timezone.localdate(),
+                acting_user=request.user,
+            )
+    except MouseImportExecutionError as exc:
+        record_import_log(
+            user=request.user,
+            import_type=ImportLog.ImportType.MOUSE,
+            filename=upload_name,
+            success=False,
+            created_count=0,
+            errors=exc.errors,
+        )
+        return None, exc.errors
+    except Exception:
+        logger.exception("Unexpected error during mouse import.")
+        errors = [
+            (
+                "Import failed due to an unexpected server error. "
+                "Please retry once; if it still fails, check your row values and contact admin."
+            )
+        ]
+        record_import_log(
+            user=request.user,
+            import_type=ImportLog.ImportType.MOUSE,
+            filename=upload_name,
+            success=False,
+            created_count=0,
+            errors=errors,
+        )
+        return None, errors
+    return _complete_mouse_import(request, stats, upload_name), []
 
 
 class MouseImportExecutionError(Exception):
@@ -1118,12 +1286,12 @@ def _execute_two_pass_mouse_import(
         raise MouseImportExecutionError(errors)
 
     # Preserve currently-existing mice for optional pedigree resolution behavior.
-    preexisting_mouse_lookup = {
-        mouse.mouse_uid: mouse for mouse in Mouse.objects.filter(mouse_uid__in=referenced_pedigree_uids)
-    }
+    uids_in_file = [row["mouse_uid"] for row in rows]
+    preexisting_mouse_lookup = {mouse.mouse_uid: mouse for mouse in Mouse.objects.filter(mouse_uid__in=uids_in_file)}
 
-    created_mice_by_uid: dict[str, Mouse] = {}
+    mice_by_uid: dict[str, Mouse] = {}
     mice_to_create: list[Mouse] = []
+    updated_mouse_count = 0
     for row in rows:
         row_number = row["row_number"]
         strain_name = _normalize_name(row.get("strain_line_name"))
@@ -1142,6 +1310,25 @@ def _execute_two_pass_mouse_import(
         if not can_edit_project_data(acting_user, project):
             errors.append(f"Row {row_number}: project '{project_name}': you do not have edit permission.")
             continue
+
+        existing = preexisting_mouse_lookup.get(row["mouse_uid"])
+        if existing is not None:
+            if existing.project_id and existing.project_id != project.pk:
+                if not can_edit_project_data(acting_user, existing.project):
+                    errors.append(
+                        f"Row {row_number}: mouse '{row['mouse_uid']}' belongs to project "
+                        f"'{existing.project.name}' which you cannot edit."
+                    )
+                    continue
+            existing.sex = row["sex"]
+            existing.birth_date = row["birth_date"]
+            existing.status = row["status"]
+            existing.strain_line = strain_line
+            existing.project = project
+            mice_by_uid[row["mouse_uid"]] = existing
+            updated_mouse_count += 1
+            continue
+
         mice_to_create.append(
             Mouse(
                 mouse_uid=row["mouse_uid"],
@@ -1156,25 +1343,37 @@ def _execute_two_pass_mouse_import(
     if errors:
         raise MouseImportExecutionError(errors)
 
-    Mouse.objects.bulk_create(mice_to_create)
-    if getattr(acting_user, "is_authenticated", False):
-        Mouse.objects.filter(mouse_uid__in=[row["mouse_uid"] for row in rows]).update(
-            created_by_id=acting_user.pk, updated_by_id=acting_user.pk
-        )
-    created_mice = list(Mouse.objects.filter(mouse_uid__in=[row["mouse_uid"] for row in rows]))
-    created_mice_by_uid = {mouse.mouse_uid: mouse for mouse in created_mice}
+    if mice_to_create:
+        Mouse.objects.bulk_create(mice_to_create)
+        if getattr(acting_user, "is_authenticated", False):
+            Mouse.objects.filter(mouse_uid__in=[m.mouse_uid for m in mice_to_create]).update(
+                created_by_id=acting_user.pk,
+                updated_by_id=acting_user.pk,
+            )
+    mice_by_uid.update({mouse.mouse_uid: mouse for mouse in Mouse.objects.filter(mouse_uid__in=uids_in_file)})
 
-    pedigree_lookup = dict(preexisting_mouse_lookup)
+    pedigree_lookup = {
+        mouse.mouse_uid: mouse
+        for mouse in Mouse.objects.filter(mouse_uid__in=referenced_pedigree_uids)
+    }
     if options.resolve_pedigree_within_file:
-        pedigree_lookup.update(created_mice_by_uid)
+        pedigree_lookup.update(mice_by_uid)
 
-    mice_with_membership: list[Mouse] = []
+    mice_with_membership: list[tuple[Mouse, int | None]] = []
     for row in rows:
         row_number = row["row_number"]
-        mouse = created_mice_by_uid.get(row["mouse_uid"])
+        mouse = mice_by_uid.get(row["mouse_uid"])
         if mouse is None:
             errors.append(f"Row {row_number}: failed to materialize mouse '{row['mouse_uid']}'.")
             continue
+
+        project_name = _normalize_name(row.get("project_name"))
+        project = project_lookup.get(project_name)
+        if project is None:
+            errors.append(f"Row {row_number}: unresolved project '{project_name}'.")
+            continue
+
+        previous_cage_id = mouse.current_cage_id
 
         current_cage = None
         cage_id = _normalize_name(row.get("current_cage_id"))
@@ -1212,13 +1411,21 @@ def _execute_two_pass_mouse_import(
         mouse.notes = row.get("notes", "")
         mouse.sire = sire
         mouse.dam = dam
+        if getattr(acting_user, "is_authenticated", False):
+            mouse.updated_by_id = acting_user.pk
         mouse.save()
-        if current_cage:
-            mice_with_membership.append(mouse)
+        if current_cage and current_cage.id != previous_cage_id:
+            mice_with_membership.append((mouse, previous_cage_id))
 
     if errors:
         raise MouseImportExecutionError(errors)
 
+    for mouse, previous_cage_id in mice_with_membership:
+        if previous_cage_id:
+            CageMembership.objects.filter(mouse=mouse, is_current=True).update(
+                is_current=False,
+                end_date=import_date,
+            )
     CageMembership.objects.bulk_create(
         [
             CageMembership(
@@ -1230,7 +1437,7 @@ def _execute_two_pass_mouse_import(
                 reason="Imported with initial cage assignment",
                 notes="",
             )
-            for mouse in mice_with_membership
+            for mouse, _previous_cage_id in mice_with_membership
             if mouse.current_cage_id
         ]
     )
@@ -1240,10 +1447,10 @@ def _execute_two_pass_mouse_import(
     genotype_to_update: list[MouseGenotypeComponent] = []
     existing_by_mouse_locus = {
         (gt.mouse_id, (gt.locus_name or "").casefold()): gt
-        for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in created_mice_by_uid.values()])
+        for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in mice_by_uid.values()])
     }
     for row in rows:
-        mouse = created_mice_by_uid.get(row["mouse_uid"])
+        mouse = mice_by_uid.get(row["mouse_uid"])
         if mouse is None:
             continue
         for slot in row.get("genotype_components", row.get("genotype_slots", [])):
@@ -1292,11 +1499,13 @@ def _execute_two_pass_mouse_import(
             ],
         )
     if genotype_to_create or genotype_to_update:
-        for mouse in created_mice_by_uid.values():
+        for mouse in mice_by_uid.values():
             mouse.rebuild_genotype_summary(save=True)
 
+    created_mouse_count = len(mice_to_create)
     return {
-        "created_mice": len(created_mice_by_uid),
+        "created_mice": created_mouse_count,
+        "updated_mice": updated_mouse_count,
         "auto_created_strain_lines": len(missing_strains),
         "auto_created_projects": len(missing_projects),
         "auto_created_cages": len(missing_cages),
@@ -1775,6 +1984,7 @@ def cage_import(request: HttpRequest) -> HttpResponse:
     row_errors: list[str] = []
     prefix_form = UserImportPrefixForm(instance=profile)
     form = CageImportForm(user=request.user)
+    overwrite_context: dict = {}
 
     if request.method == "POST" and request.POST.get("save_import_prefix"):
         prefix_form = UserImportPrefixForm(request.POST, instance=profile)
@@ -1783,6 +1993,63 @@ def cage_import(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Import ID prefix saved.")
             return redirect("colony:cage_import")
         form = CageImportForm(user=request.user)
+    elif request.method == "POST" and request.POST.get("cancel_overwrite") == "1":
+        clear_staged_cage_import(request)
+        messages.info(request, "Import cancelled.")
+        return redirect("colony:cage_import")
+    elif request.method == "POST" and request.POST.get("confirm_overwrite") == "1":
+        staged = pop_staged_cage_import(request)
+        if not staged:
+            messages.error(request, "Import confirmation expired. Please upload the file again.")
+            return redirect("colony:cage_import")
+        try:
+            handle = file_bytes_to_upload(decode_staged_file(staged["content_b64"]), staged["filename"])
+            result = parse_cage_import(
+                handle,
+                id_prefix=staged["id_prefix"],
+                update_existing=staged["update_existing"],
+            )
+        except ImportStagingError as exc:
+            messages.error(request, str(exc))
+            return redirect("colony:cage_import")
+        upload_name = staged["filename"] or ""
+        if result.errors:
+            row_errors = result.errors
+            record_import_log(
+                user=request.user,
+                import_type=ImportLog.ImportType.CAGE,
+                filename=upload_name,
+                success=False,
+                created_count=0,
+                errors=result.errors,
+            )
+        else:
+            created_count, updated_count = _apply_cage_import_rows(result.rows, acting_user=request.user)
+            total = created_count + updated_count
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.IMPORT,
+                message=(
+                    f"Imported {total} cages via file upload "
+                    f"({created_count} created, {updated_count} updated)."
+                ),
+                object_type="Cage",
+                object_id=str(total),
+                object_repr="Bulk Cage Import",
+            )
+            record_import_log(
+                user=request.user,
+                import_type=ImportLog.ImportType.CAGE,
+                filename=upload_name,
+                success=True,
+                created_count=total,
+                errors=[],
+            )
+            messages.success(
+                request,
+                f"Import complete: {created_count} cage(s) created, {updated_count} updated.",
+            )
+            return redirect("colony:cage_list")
     elif request.method == "POST":
         form = CageImportForm(request.POST, request.FILES, user=request.user)
         prefix_form = UserImportPrefixForm(instance=profile)
@@ -1792,7 +2059,12 @@ def cage_import(request: HttpRequest) -> HttpResponse:
             id_prefix = None
             if form.cleaned_data.get("apply_import_prefix"):
                 id_prefix = get_effective_import_prefix(request.user)
-            result = parse_cage_import(uploaded_file, id_prefix=id_prefix)
+            update_existing = form.cleaned_data.get("update_existing", True)
+            result = parse_cage_import(
+                uploaded_file,
+                id_prefix=id_prefix,
+                update_existing=update_existing,
+            )
             if result.errors:
                 row_errors = result.errors
                 record_import_log(
@@ -1804,30 +2076,58 @@ def cage_import(request: HttpRequest) -> HttpResponse:
                     errors=result.errors,
                 )
             else:
-                with transaction.atomic():
-                    Cage.objects.bulk_create([Cage(**row) for row in result.rows])
-                    cage_ids = [row["cage_id"] for row in result.rows]
-                    Cage.objects.filter(cage_id__in=cage_ids).update(
-                        created_by_id=request.user.pk, updated_by_id=request.user.pk
+                overwrite_context = (
+                    _build_import_overwrite_context(
+                        rows=result.rows,
+                        id_key="cage_id",
+                        record_label="cage",
+                        staged_filename=upload_name,
                     )
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.IMPORT,
-                    message=f"Imported {len(result.rows)} cages via file upload.",
-                    object_type="Cage",
-                    object_id=str(len(result.rows)),
-                    object_repr="Bulk Cage Import",
+                    or {}
                 )
-                record_import_log(
-                    user=request.user,
-                    import_type=ImportLog.ImportType.CAGE,
-                    filename=upload_name,
-                    success=True,
-                    created_count=len(result.rows),
-                    errors=[],
-                )
-                messages.success(request, f"Successfully imported {len(result.rows)} cages.")
-                return redirect("colony:cage_list")
+                if overwrite_context and update_existing:
+                    try:
+                        uploaded_file.seek(0)
+                        stage_cage_import(
+                            request,
+                            filename=upload_name,
+                            content=uploaded_file.read(),
+                            id_prefix=id_prefix,
+                            update_existing=update_existing,
+                        )
+                    except ImportStagingError as exc:
+                        row_errors = [str(exc)]
+                        overwrite_context = {}
+                else:
+                    created_count, updated_count = _apply_cage_import_rows(
+                        result.rows,
+                        acting_user=request.user,
+                    )
+                    total = created_count + updated_count
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.IMPORT,
+                        message=(
+                            f"Imported {total} cages via file upload "
+                            f"({created_count} created, {updated_count} updated)."
+                        ),
+                        object_type="Cage",
+                        object_id=str(total),
+                        object_repr="Bulk Cage Import",
+                    )
+                    record_import_log(
+                        user=request.user,
+                        import_type=ImportLog.ImportType.CAGE,
+                        filename=upload_name,
+                        success=True,
+                        created_count=total,
+                        errors=[],
+                    )
+                    messages.success(
+                        request,
+                        f"Import complete: {created_count} cage(s) created, {updated_count} updated.",
+                    )
+                    return redirect("colony:cage_list")
 
     context = {
         "form": form,
@@ -1835,6 +2135,7 @@ def cage_import(request: HttpRequest) -> HttpResponse:
         "row_errors": row_errors,
         "expected_columns": EXPECTED_COLUMNS,
         "import_prefix_hint": get_effective_import_prefix(request.user),
+        **overwrite_context,
     }
     return render(request, "colony/cage_import.html", context)
 
@@ -2152,6 +2453,7 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
     row_errors: list[str] = []
     prefix_form = UserImportPrefixForm(instance=profile)
     form = MouseImportForm(user=request.user)
+    overwrite_context: dict = {}
 
     if request.method == "POST" and request.POST.get("save_import_prefix"):
         prefix_form = UserImportPrefixForm(request.POST, instance=profile)
@@ -2160,6 +2462,47 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
             messages.success(request, "Import ID prefix saved.")
             return redirect("mice:mouse_import")
         form = MouseImportForm(user=request.user)
+    elif request.method == "POST" and request.POST.get("cancel_overwrite") == "1":
+        clear_staged_mouse_import(request)
+        messages.info(request, "Import cancelled.")
+        return redirect("mice:mouse_import")
+    elif request.method == "POST" and request.POST.get("confirm_overwrite") == "1":
+        staged = pop_staged_mouse_import(request)
+        if not staged:
+            messages.error(request, "Import confirmation expired. Please upload the file again.")
+            return redirect("mice:mouse_import")
+        try:
+            handle = file_bytes_to_upload(decode_staged_file(staged["content_b64"]), staged["filename"])
+            result = parse_mouse_import(
+                handle,
+                id_prefix=staged["id_prefix"],
+                update_existing=staged["update_existing"],
+            )
+        except ImportStagingError as exc:
+            messages.error(request, str(exc))
+            return redirect("mice:mouse_import")
+        upload_name = staged["filename"] or ""
+        import_options = _mouse_import_options_from_dict(staged["import_options"])
+        if result.errors:
+            row_errors = result.errors
+            record_import_log(
+                user=request.user,
+                import_type=ImportLog.ImportType.MOUSE,
+                filename=upload_name,
+                success=False,
+                created_count=0,
+                errors=result.errors,
+            )
+        else:
+            response, exec_errors = _run_mouse_import_execution(
+                request,
+                result.rows,
+                import_options=import_options,
+                upload_name=upload_name,
+            )
+            if response is not None:
+                return response
+            row_errors = exec_errors
     elif request.method == "POST":
         form = MouseImportForm(request.POST, request.FILES, user=request.user)
         prefix_form = UserImportPrefixForm(instance=profile)
@@ -2175,7 +2518,12 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
             id_prefix = None
             if form.cleaned_data.get("apply_import_prefix"):
                 id_prefix = get_effective_import_prefix(request.user)
-            result = parse_mouse_import(uploaded_file, id_prefix=id_prefix)
+            update_existing = form.cleaned_data.get("update_existing", True)
+            result = parse_mouse_import(
+                uploaded_file,
+                id_prefix=id_prefix,
+                update_existing=update_existing,
+            )
             if result.errors:
                 row_errors = result.errors
                 record_import_log(
@@ -2187,75 +2535,44 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
                     errors=result.errors,
                 )
             else:
-                try:
-                    with transaction.atomic():
-                        stats = _execute_two_pass_mouse_import(
-                            result.rows,
-                            options=import_options,
-                            import_date=timezone.localdate(),
-                            acting_user=request.user,
-                        )
-                except MouseImportExecutionError as exc:
-                    row_errors = exc.errors
-                    record_import_log(
-                        user=request.user,
-                        import_type=ImportLog.ImportType.MOUSE,
-                        filename=upload_name,
-                        success=False,
-                        created_count=0,
-                        errors=row_errors,
+                overwrite_context = (
+                    _build_import_overwrite_context(
+                        rows=result.rows,
+                        id_key="mouse_uid",
+                        record_label="mouse",
+                        staged_filename=upload_name,
                     )
-                except Exception:
-                    logger.exception("Unexpected error during mouse import.")
-                    row_errors = [
-                        (
-                            "Import failed due to an unexpected server error. "
-                            "Please retry once; if it still fails, check your row values and contact admin."
+                    or {}
+                )
+                if overwrite_context and update_existing:
+                    try:
+                        uploaded_file.seek(0)
+                        stage_mouse_import(
+                            request,
+                            filename=upload_name,
+                            content=uploaded_file.read(),
+                            id_prefix=id_prefix,
+                            update_existing=update_existing,
+                            import_options={
+                                "auto_create_missing_strain_lines": import_options.auto_create_missing_strain_lines,
+                                "auto_create_missing_projects": import_options.auto_create_missing_projects,
+                                "auto_create_missing_cages": import_options.auto_create_missing_cages,
+                                "resolve_pedigree_within_file": import_options.resolve_pedigree_within_file,
+                            },
                         )
-                    ]
-                    record_import_log(
-                        user=request.user,
-                        import_type=ImportLog.ImportType.MOUSE,
-                        filename=upload_name,
-                        success=False,
-                        created_count=0,
-                        errors=row_errors,
-                    )
+                    except ImportStagingError as exc:
+                        row_errors = [str(exc)]
+                        overwrite_context = {}
                 else:
-                    log_audit_event(
-                        user=request.user,
-                        action=AuditLog.Action.IMPORT,
-                        message=(
-                            f"Imported {stats['created_mice']} mice via file upload "
-                            f"(auto-created: {stats['auto_created_strain_lines']} strain lines, "
-                            f"{stats['auto_created_projects']} projects, "
-                            f"{stats['auto_created_cages']} cages; "
-                            f"genotypes: +{stats['genotype_rows_created']} / ~{stats['genotype_rows_updated']})."
-                        ),
-                        object_type="Mouse",
-                        object_id=str(stats["created_mice"]),
-                        object_repr="Bulk Mouse Import",
-                    )
-                    record_import_log(
-                        user=request.user,
-                        import_type=ImportLog.ImportType.MOUSE,
-                        filename=upload_name,
-                        success=True,
-                        created_count=stats["created_mice"],
-                        errors=[],
-                    )
-                    messages.success(
+                    response, exec_errors = _run_mouse_import_execution(
                         request,
-                        (
-                            f"Successfully imported {stats['created_mice']} mice "
-                            f"(auto-created: {stats['auto_created_strain_lines']} strain lines, "
-                            f"{stats['auto_created_projects']} projects, "
-                            f"{stats['auto_created_cages']} cages; "
-                            f"genotypes created {stats['genotype_rows_created']}, "
-                            f"updated {stats['genotype_rows_updated']})."
-                        ),
+                        result.rows,
+                        import_options=import_options,
+                        upload_name=upload_name,
                     )
-                    return redirect("mice:mouse_list")
+                    if response is not None:
+                        return response
+                    row_errors = exec_errors
 
     context = {
         "form": form,
@@ -2263,6 +2580,7 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
         "row_errors": row_errors,
         "expected_columns": MOUSE_IMPORT_TEMPLATE_COLUMNS,
         "import_prefix_hint": get_effective_import_prefix(request.user),
+        **overwrite_context,
     }
     return render(request, "colony/mouse_import.html", context)
 
