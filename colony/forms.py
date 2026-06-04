@@ -436,9 +436,6 @@ class StrainLineForm(forms.ModelForm):
         new_name = (self.cleaned_data.get("name") or "").strip()
         if new_name:
             obj.name = new_name
-            obj.display_name = new_name
-            obj.line_name = new_name
-            obj.short_name = new_name
         obj.expected_loci_config = list(self.cleaned_data.get("_expected_loci_config_list") or [])
         if (
             not self.instance.pk

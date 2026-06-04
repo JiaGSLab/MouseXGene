@@ -84,25 +84,38 @@ class StrainLine(ActorStampedModel):
     class Meta:
         ordering = ("line_name",)
 
+    def _canonical_primary_name(self) -> str:
+        return (self.name or self.display_name or self.line_name or self.short_name or "").strip()
+
+    def _sync_naming_fields(self, *, previous_line_name: str | None = None) -> None:
+        primary = self._canonical_primary_name()
+        if not primary:
+            return
+        canonical_line = primary[: self._meta.get_field("line_name").max_length]
+        self.name = primary
+        self.display_name = primary
+        self.line_name = canonical_line
+        self.short_name = canonical_line
+        prev_line = (previous_line_name or "").strip()
+        if not self.key_name or (prev_line and self.key_name == prev_line):
+            self.key_name = canonical_line
+
     def save(self, *args, **kwargs):
-        # Backward-compatible synchronization between legacy and new naming fields.
-        primary = (self.name or "").strip()
-        if primary:
-            self.display_name = primary
-            self.line_name = primary
-        else:
-            if not self.name:
-                self.name = self.display_name or self.line_name
-            if not self.display_name:
-                self.display_name = self.name
-            if not self.line_name:
-                self.line_name = self.short_name or self.name
-        if not self.short_name:
-            self.short_name = self.key_name or self.display_name or self.line_name
-        elif primary:
-            self.short_name = primary
-        if not self.key_name and self.short_name:
-            self.key_name = self.short_name
+        previous_line_name = None
+        if self.pk:
+            previous_line_name = (
+                type(self).objects.filter(pk=self.pk).values_list("line_name", flat=True).first()
+            )
+        self._sync_naming_fields(previous_line_name=previous_line_name)
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            fields = set(update_fields)
+            fields.add("updated_at")
+            naming = {"name", "display_name", "line_name", "short_name", "key_name"}
+            if fields & naming or (previous_line_name or "") != (self.line_name or ""):
+                fields |= naming
+            kwargs["update_fields"] = list(fields)
         super().save(*args, **kwargs)
 
     @property
