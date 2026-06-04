@@ -1488,7 +1488,7 @@ def _execute_two_pass_mouse_import(
     genotype_to_create: list[MouseGenotypeComponent] = []
     genotype_to_update: list[MouseGenotypeComponent] = []
     existing_by_mouse_locus = {
-        (gt.mouse_id, (gt.locus_name or "").casefold()): gt
+        (gt.mouse_id, StrainLine.normalize_locus_name((gt.locus_name or "").strip()).casefold()): gt
         for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in mice_by_uid.values()])
     }
     for row in rows:
@@ -1496,7 +1496,7 @@ def _execute_two_pass_mouse_import(
         if mouse is None:
             continue
         for slot in row.get("genotype_components", row.get("genotype_slots", [])):
-            locus_name = (slot.get("locus_name") or "").strip()
+            locus_name = StrainLine.normalize_locus_name((slot.get("locus_name") or "").strip())
             if not locus_name:
                 continue
             key = (mouse.id, locus_name.casefold())
@@ -1512,17 +1512,19 @@ def _execute_two_pass_mouse_import(
                     allele_display_1=slot.get("allele_1", ""),
                     allele_display_2=slot.get("allele_2", ""),
                     sort_order=slot.get("slot", 0) or 0,
-                    notes=slot["notes"],
+                    notes=slot.get("notes", ""),
                 )
                 genotype_to_create.append(obj)
+                existing_by_mouse_locus[key] = obj
             else:
                 existing.strain_line = mouse.strain_line
+                existing.locus_name = locus_name
                 existing.chromosome_type = slot.get("chromosome_type") or existing.chromosome_type
                 existing.zygosity_class = slot.get("zygosity_class") or existing.zygosity_class
                 existing.zygosity = slot.get("zygosity_display", "")
                 existing.allele_display_1 = slot.get("allele_1", "")
                 existing.allele_display_2 = slot.get("allele_2", "")
-                existing.notes = slot["notes"]
+                existing.notes = slot.get("notes", "")
                 genotype_to_update.append(existing)
 
     if genotype_to_create:

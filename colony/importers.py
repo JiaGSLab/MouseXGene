@@ -6,7 +6,7 @@ import pandas as pd
 
 from users.import_prefix import apply_import_prefix_to_id
 
-from .models import Cage, Mouse
+from .models import Cage, Mouse, StrainLine
 
 
 EXPECTED_COLUMNS = [
@@ -207,13 +207,21 @@ def _genotype_slot_columns(slot: int) -> list[str]:
 
 
 def _detect_genotype_slots(columns: list[str]) -> list[int]:
-    slots = set(range(1, GENOTYPE_SLOT_COUNT + 1))
+    slots: set[int] = set()
     pattern = re.compile(r"^genotype_(\d+)_")
     for col in columns:
         match = pattern.match(col)
         if match:
             slots.add(int(match.group(1)))
     return sorted(slots)
+
+
+def _import_locus_name(raw_name: str) -> str:
+    return StrainLine.normalize_locus_name(_to_text(raw_name))
+
+
+def _import_locus_key(raw_name: str) -> str:
+    return _import_locus_name(raw_name).casefold()
 
 
 GENOTYPE_EXPECTED_COLUMNS = [
@@ -261,11 +269,20 @@ def _parse_genotype_display(text: str, row_number: int, locus_name: str, errors:
     if not raw:
         return None
     normalized = raw.replace(" ", "")
+    alias_map = {
+        "wt": ("+", "+"),
+        "het": ("+", "-"),
+        "hom": ("-", "-"),
+        "+": ("+", "+"),
+        "-": ("-", "-"),
+    }
+    alias = normalized.casefold()
+    if alias in alias_map:
+        allele_1, allele_2 = alias_map[alias]
+        return allele_1, allele_2, f"{allele_1}/{allele_2}"
     if "/" not in normalized:
-        errors.append(
-            f"Row {row_number}: locus '{locus_name}' value '{raw}' is invalid. Use genotype like +/-, fl/fl, Cre/Y."
-        )
-        return None
+        # Custom free-text genotype (matches mouse form "Custom" entries).
+        return "", "", raw
     allele_1, allele_2 = [part.strip() for part in normalized.split("/", 1)]
     if not allele_1 or not allele_2:
         errors.append(
@@ -416,6 +433,10 @@ def parse_mouse_import(
             if not locus:
                 errors.append(f"Row {row_number}: {prefix}locus is required when genotype slot has data.")
                 continue
+            locus = _import_locus_name(locus)
+            if not locus:
+                errors.append(f"Row {row_number}: {prefix}locus is required when genotype slot has data.")
+                continue
             if not (allele_1 and allele_2) and zygosity:
                 parsed = _parse_genotype_display(zygosity, row_number, locus, errors)
                 if parsed is not None:
@@ -446,17 +467,20 @@ def parse_mouse_import(
             display_value = _to_text(record.get(locus_col))
             if not display_value:
                 continue
-            parsed = _parse_genotype_display(display_value, row_number, locus_col, errors)
+            locus_name = _import_locus_name(locus_col)
+            if not locus_name:
+                continue
+            parsed = _parse_genotype_display(display_value, row_number, locus_name, errors)
             if parsed is None:
                 continue
             allele_1, allele_2, zygosity = parsed
-            key = locus_col.casefold()
+            key = locus_name.casefold()
             if key in component_by_locus:
-                errors.append(f"Row {row_number}: duplicate genotype locus '{locus_col}' in import row.")
+                errors.append(f"Row {row_number}: duplicate genotype locus '{locus_name}' in import row.")
                 continue
             comp = {
                 "slot": 0,
-                "locus_name": locus_col,
+                "locus_name": locus_name,
                 "allele_1": allele_1,
                 "allele_2": allele_2,
                 "zygosity_display": zygosity,
