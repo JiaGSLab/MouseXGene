@@ -107,10 +107,11 @@ This runs `pg_dump` from the DB container and writes a timestamped `.sql` file.
 
 ## Sync production data to local dev
 
-On your Mac (SSH to the server must work). Set your server once per shell:
+On your Mac (SSH to the server must work). One-time setup (local only, not pushed to GitHub):
 
 ```bash
-export SERVER=ubuntu@your.host
+cp .env.deploy.example .env.deploy
+# edit .env.deploy and set SERVER=ubuntu@your.host
 ```
 
 ```bash
