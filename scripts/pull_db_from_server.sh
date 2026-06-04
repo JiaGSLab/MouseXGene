@@ -7,11 +7,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="${SERVER:-ubuntu@118.195.218.49}"
+SERVER="${SERVER:-ubuntu@YOUR_SERVER}"
 REMOTE_DIR="${REMOTE_DIR:-~/apps/MouseXGene}"
 OUTPUT_DIR="${1:-${ROOT}/backups}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 BACKUP_FILE="${OUTPUT_DIR}/mousexgene_prod_${TIMESTAMP}.sql"
+
+if [[ "${SERVER}" == "ubuntu@YOUR_SERVER" ]]; then
+  echo "ERROR: Set SERVER before running, e.g. export SERVER=ubuntu@your.host" >&2
+  exit 1
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 

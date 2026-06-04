@@ -107,7 +107,11 @@ This runs `pg_dump` from the DB container and writes a timestamped `.sql` file.
 
 ## Sync production data to local dev
 
-On your Mac (SSH to the server must work):
+On your Mac (SSH to the server must work). Set your server once per shell:
+
+```bash
+export SERVER=ubuntu@your.host
+```
 
 ```bash
 # 1) Download a fresh SQL dump from the server
@@ -127,7 +131,7 @@ docker compose up
 To use an existing server backup instead of a live dump:
 
 ```bash
-scp ubuntu@118.195.218.49:~/backups/mousexgene_*.sql ./backups/
+scp "${SERVER}:~/backups/mousexgene_*.sql" ./backups/
 ./scripts/restore_db_local.sh backups/mousexgene_YYYYMMDD_HHMMSS.sql
 ```
 

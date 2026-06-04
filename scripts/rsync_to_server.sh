@@ -6,8 +6,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="${SERVER:-ubuntu@118.195.218.49}"
+SERVER="${SERVER:-ubuntu@YOUR_SERVER}"
 REMOTE_DIR="${REMOTE_DIR:-~/apps/MouseXGene}"
+
+if [[ "${SERVER}" == "ubuntu@YOUR_SERVER" ]]; then
+  echo "ERROR: Set SERVER before running, e.g. export SERVER=ubuntu@your.host" >&2
+  exit 1
+fi
 
 echo "Syncing ${ROOT} -> ${SERVER}:${REMOTE_DIR}"
 rsync -avz --delete \
