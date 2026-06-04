@@ -69,7 +69,8 @@
             <tr>
                 {% sort_th "mouse_uid" "Mouse" %}
                 {% sort_th "sire" "Sire (Father)" %}
-                {% sort_th "dam" "Dam (Mother)" %}
+                {% sort_th "breeding_cage" "Breeding cage" %}
+                {% sort_th "dam" "Mothers" %}
                 {% sort_th "cage" "Cage" %}
                 {% sort_th "strain_line" "Strain" %}
                 {% sort_th "genotype" "Genotype" %}
@@ -83,7 +84,20 @@
                 <tr>
                     <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">{{ m.mouse_uid }}</a></td>
                     <td>{% if m.sire %}<a class="link-primary" href="{% url 'mice:mouse_pedigree' m.sire.pk %}">{{ m.sire.mouse_uid }}</a>{% else %}-{% endif %}</td>
-                    <td>{% if m.dam %}<a class="link-primary" href="{% url 'mice:mouse_pedigree' m.dam.pk %}">{{ m.dam.mouse_uid }}</a>{% else %}-{% endif %}</td>
+                    <td>
+                        {% if m.family_breeding_cage %}
+                            {{ m.family_breeding_cage }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if m.family_mothers_display %}
+                            {{ m.family_mothers_display }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
                     <td>
                         {% if m.current_cage %}
                             <a href="{% url 'colony:cage_detail' m.current_cage.pk %}">{{ m.current_cage }}</a>
@@ -122,7 +136,7 @@
                     <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="9" class="empty-row">No mice matched your filters.</td></tr>
+                <tr><td colspan="10" class="empty-row">No mice matched your filters.</td></tr>
             {% endfor %}
         </tbody>
     </table>

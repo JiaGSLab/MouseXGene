@@ -355,6 +355,14 @@ class Mouse(ActorStampedModel):
         null=True,
         blank=True,
     )
+    source_breeding = models.ForeignKey(
+        "breeding.Breeding",
+        on_delete=models.SET_NULL,
+        related_name="offspring_mice",
+        null=True,
+        blank=True,
+        help_text="Breeding cage / mating this mouse was born from (when specific dam is unknown).",
+    )
     project = models.ForeignKey(
         "core.Project",
         on_delete=models.PROTECT,

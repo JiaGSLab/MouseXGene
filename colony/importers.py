@@ -186,6 +186,7 @@ MOUSE_BASE_COLUMNS = [
     "origin",
     "coat_color",
     "notes",
+    "breeding_cage",
     "sire",
     "dam",
 ]
@@ -404,12 +405,14 @@ def parse_mouse_import(
         strain_line_name = _to_text(record.get("strain_line"))
         current_cage_id = _to_text(record.get("current_cage"))
         project_name = _to_text(record.get("project"))
+        breeding_cage_id = _to_text(record.get("breeding_cage"))
         sire_uid = _to_text(record.get("sire"))
         dam_uid = _to_text(record.get("dam"))
 
         if id_prefix:
             mouse_uid = apply_import_prefix_to_id(mouse_uid, id_prefix)
             current_cage_id = _resolve_prefixed_cage_ref(current_cage_id, id_prefix, existing_cages)
+            breeding_cage_id = _resolve_prefixed_cage_ref(breeding_cage_id, id_prefix, existing_cages)
             sire_uid = _resolve_prefixed_pedigree_uid(sire_uid, id_prefix, existing_mice)
             dam_uid = _resolve_prefixed_pedigree_uid(dam_uid, id_prefix, existing_mice)
 
@@ -541,6 +544,7 @@ def parse_mouse_import(
                 "origin": _to_text(record.get("origin")),
                 "coat_color": _to_text(record.get("coat_color")),
                 "notes": _to_text(record.get("notes")),
+                "breeding_cage_id": breeding_cage_id,
                 "sire_uid": sire_uid,
                 "dam_uid": dam_uid,
                 "genotype_components": genotype_components,

@@ -52,6 +52,7 @@ class MouseImportGenotypeTests(TestCase):
             "origin": "",
             "coat_color": "",
             "notes": "",
+            "breeding_cage": "",
             "sire": "",
             "dam": "",
             **(extra_genotype_columns or {}),

@@ -79,7 +79,7 @@ class ImportOverwriteConfirmTests(TestCase):
 
     def test_mouse_import_shows_warning_before_overwrite(self):
         csv_content = (
-            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,sire,dam\n"
+            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,breeding_cage,sire,dam\n"
             "M-UPSERT-1,F,2026-01-01,active,TestStrain,SYJ-GMZ-01,P1,ET-NEW,,lab,,Updated mouse,,\n"
         )
         upload = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")
@@ -103,7 +103,7 @@ class ImportOverwriteConfirmTests(TestCase):
 
     def test_mouse_import_overwrites_after_confirm(self):
         csv_content = (
-            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,sire,dam\n"
+            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,breeding_cage,sire,dam\n"
             "M-UPSERT-1,F,2026-01-01,active,TestStrain,SYJ-GMZ-01,P1,ET-NEW,,lab,,Updated mouse,,\n"
         )
         upload = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")

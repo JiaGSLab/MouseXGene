@@ -48,6 +48,15 @@
         若要更新品系模板占位行，请让列名与模板中的位点名一致。
     </p>
     <p class="muted">
+        Use <code>breeding_cage</code> (cage ID of the mating cage) for pups born in-house when the specific dam is unknown.
+        The system links the breeding record, auto-fills the sire, and lists all dams from that mating in pedigree views.
+        Legacy optional columns <code>sire</code> / <code>dam</code> remain for purchased or known-parent founders.
+    </p>
+    <p class="muted">
+        使用 <code>breeding_cage</code>（配对笼号）标注体内繁殖来源；系统会关联配对记录、自动填入父亲，并在谱系页显示该笼全部母鼠（1–3 只）。
+        外购或父母明确的个体仍可使用可选列 <code>sire</code> / <code>dam</code>。
+    </p>
+    <p class="muted">
         Legacy <code>genotype_N_*</code> slot columns are still supported for backward compatibility.
         After import, review genotype results in each Mouse detail page under <strong>Genotype Workspace</strong>.
     </p>
@@ -113,11 +122,11 @@
     </p>
     <p class="muted">
         Example row (per-locus columns):
-        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
+        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,BC001,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
     </p>
     <p class="muted">
         示例行（每个 locus 一列）：
-        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
+        <code>M001,F,2026-01-15,active,Tet2 flox,C001,Inflammation Study,ET-001,TT-001,Vendor A,black,healthy,BC001,,,Cre/+,fl/fl,+/-,+/+,+/+,KI/+</code>
     </p>
     <p class="muted">
         You can add any number of locus columns in this format. For X-linked male loci, use forms like

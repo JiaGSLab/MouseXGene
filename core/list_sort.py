@@ -322,6 +322,12 @@ FAMILY_TREE_SORT = ListSortRegistry(
     columns={
         "mouse_uid": SortColumn("mouse_uid", SortKind.TEXT, ("mouse_uid",)),
         "sire": SortColumn("sire", SortKind.TEXT, ("sire__mouse_uid",), tie_breaker=("mouse_uid",)),
+        "breeding_cage": SortColumn(
+            "breeding_cage",
+            SortKind.TEXT,
+            ("source_breeding__cage__cage_id",),
+            tie_breaker=("mouse_uid",),
+        ),
         "dam": SortColumn("dam", SortKind.TEXT, ("dam__mouse_uid",), tie_breaker=("mouse_uid",)),
         "cage": SortColumn("cage", SortKind.TEXT, ("current_cage__cage_id",), tie_breaker=("mouse_uid",)),
         "strain_line": SortColumn(

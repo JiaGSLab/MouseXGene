@@ -25,8 +25,8 @@ class ImportPrefixMouseParseTests(TestCase):
     def test_mouse_import_prefixes_new_refs(self):
         csv_content = (
             "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,"
-            "ear_tag,toe_tag,origin,coat_color,notes,sire,dam\n"
-            "M001,F,2026-01-15,active,TestStrain,C001,Proj,,,,,,,\n"
+            "ear_tag,toe_tag,origin,coat_color,notes,breeding_cage,sire,dam\n"
+            "M001,F,2026-01-15,active,TestStrain,C001,Proj,,,,,,,,\n"
         )
         f = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")
         result = parse_mouse_import(f, id_prefix="JG")

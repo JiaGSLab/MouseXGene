@@ -164,9 +164,21 @@
                 —
             {% endif %}
         </dd>
-        <dt>Dam</dt>
+        <dt>Breeding cage</dt>
         <dd>
-            {% if family_dam %}
+            {% if family_breeding_cage %}
+                <a href="{% url 'colony:cage_detail' family_breeding_cage.pk %}">{{ family_breeding_cage.cage_id }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Mothers</dt>
+        <dd>
+            {% if family_dams %}
+                {% for rel in family_dams %}
+                    <a href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+            {% elif family_dam %}
                 <a href="{% url 'mice:mouse_detail' family_dam.mouse.pk %}">{{ family_dam.mouse.mouse_uid }}</a>
                 · {{ family_dam.genotype_summary }}
             {% else %}

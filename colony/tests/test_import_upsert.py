@@ -43,7 +43,7 @@ class ImportUpsertParseTests(TestCase):
 
     def test_mouse_import_allows_existing_uid_when_update_enabled(self):
         csv_content = (
-            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,sire,dam\n"
+            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,breeding_cage,sire,dam\n"
             "M-UPSERT-1,F,2026-01-01,active,TestStrain,SYJ-GMZ-01,P1,ET1,,lab,,Updated mouse,,\n"
         )
         f = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")
@@ -55,7 +55,7 @@ class ImportUpsertParseTests(TestCase):
 
     def test_mouse_import_rejects_existing_uid_when_update_disabled(self):
         csv_content = (
-            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,sire,dam\n"
+            "mouse_uid,sex,birth_date,status,strain_line,current_cage,project,ear_tag,toe_tag,origin,coat_color,notes,breeding_cage,sire,dam\n"
             "M-UPSERT-1,F,2026-01-01,active,TestStrain,SYJ-GMZ-01,P1,ET1,,lab,,Updated mouse,,\n"
         )
         f = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")

@@ -17,6 +17,9 @@
 </section>
 
 <section class="pedigree-tree" aria-label="Pedigree tree">
+    {% if family_breeding_cage %}
+        <p class="muted">Breeding cage origin: <strong>{{ family_breeding_cage.cage_id }}</strong></p>
+    {% endif %}
     <div class="pedigree-tree__parents">
         <article class="pedigree-tree__node card">
             <h2 class="pedigree-tree__node-title">Father (Sire)</h2>
@@ -32,8 +35,23 @@
             {% endif %}
         </article>
         <article class="pedigree-tree__node card">
-            <h2 class="pedigree-tree__node-title">Mother (Dam)</h2>
-            {% if dam %}
+            <h2 class="pedigree-tree__node-title">
+                {% if family_pedigree.source_breeding %}Mothers (breeding cage){% else %}Mother (Dam){% endif %}
+            </h2>
+            {% if dams %}
+                <ul class="pedigree-tree__list">
+                    {% for rel in dams %}
+                        <li class="pedigree-tree__list-item">
+                            <span>
+                                <a class="table-link" href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
+                                · {{ rel.mouse.get_sex_display }} · {{ rel.mouse.birth_date|default:"-" }}
+                                · Cage: {{ rel.mouse.current_cage|default:"-" }}
+                                · Genotype: {{ rel.genotype_summary }}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% elif dam %}
                 <p class="pedigree-tree__line">
                     <a class="table-link" href="{% url 'mice:mouse_detail' dam.mouse.pk %}">{{ dam.mouse.mouse_uid }}</a>
                     · {{ dam.mouse.get_sex_display }} · {{ dam.mouse.birth_date|default:"-" }}

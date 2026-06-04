@@ -33,6 +33,12 @@ from .importers import (
     parse_cage_import,
     parse_mouse_import,
 )
+from .breeding_pedigree import (
+    breeding_sire_and_dams,
+    littermate_queryset_for_mouse,
+    mouse_family_pedigree,
+    resolve_breeding_for_import_cage,
+)
 from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
 from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
@@ -595,7 +601,7 @@ def _filtered_mice_queryset(request: HttpRequest):
 def get_mice_export_rows(request: HttpRequest) -> list[list]:
     mice = apply_list_sort(
         _filtered_mice_queryset(request)
-        .select_related("project", "project__owner", "project__owner__profile", "sire", "dam")
+        .select_related("project", "project__owner", "project__owner__profile", "sire", "dam", "source_breeding", "source_breeding__cage")
         .prefetch_related("genotypes__gene"),
         request,
         MICE_LIST_SORT,
@@ -615,6 +621,9 @@ def get_mice_export_rows(request: HttpRequest) -> list[list]:
         row_map["origin"] = mouse.origin
         row_map["coat_color"] = mouse.coat_color
         row_map["notes"] = mouse.notes
+        row_map["breeding_cage"] = ""
+        if mouse.source_breeding_id and mouse.source_breeding.cage_id:
+            row_map["breeding_cage"] = mouse.source_breeding.cage.cage_id
         row_map["sire"] = mouse.sire.mouse_uid if mouse.sire else ""
         row_map["dam"] = mouse.dam.mouse_uid if mouse.dam else ""
 
@@ -808,6 +817,7 @@ def _template_loci_union_for_mouse_relations(
     strain_line: StrainLine | None = None,
     sire: Mouse | None = None,
     dam: Mouse | None = None,
+    dams: list[Mouse] | None = None,
 ) -> list[dict[str, str]]:
     ordered: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -837,6 +847,9 @@ def _template_loci_union_for_mouse_relations(
         add_many(sire.strain_line.expected_loci_entries())
     if dam is not None and dam.strain_line_id:
         add_many(dam.strain_line.expected_loci_entries())
+    for parent in dams or []:
+        if parent is not None and parent.strain_line_id:
+            add_many(parent.strain_line.expected_loci_entries())
     return ordered
 
 
@@ -845,10 +858,20 @@ def _editable_template_loci_for_mouse(mouse: Mouse) -> tuple[list[str], bool]:
     Return editable loci template + whether parent-union source is used.
 
     Priority:
-    1) If mouse has both sire and dam, use union of sire+dam strain-line templates.
-    2) Else fallback to mouse strain-line template.
-    3) Else no loci.
+    1) If mouse has source_breeding, use union of sire + all breeding-cage dams.
+    2) If mouse has both sire and dam, use union of sire+dam strain-line templates.
+    3) Else fallback to mouse strain-line template.
+    4) Else no loci.
     """
+    if mouse.source_breeding_id:
+        pedigree = mouse_family_pedigree(mouse)
+        parent_rows = _template_loci_union_for_mouse_relations(
+            sire=pedigree.sire,
+            dams=pedigree.dams,
+        )
+        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
+        if parent_loci:
+            return parent_loci, True
     if mouse.sire_id and mouse.dam_id:
         parent_rows = _template_loci_union_for_mouse_relations(sire=mouse.sire, dam=mouse.dam)
         parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
@@ -864,8 +887,15 @@ def _resolved_template_loci_for_context(
     strain_line: StrainLine | None,
     sire: Mouse | None,
     dam: Mouse | None,
+    source_breeding: Breeding | None = None,
 ) -> list[str]:
     """Resolve logical template loci with parental-union priority."""
+    if source_breeding is not None:
+        parent_sire, parent_dams = breeding_sire_and_dams(source_breeding)
+        parent_rows = _template_loci_union_for_mouse_relations(sire=parent_sire, dams=parent_dams)
+        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
+        if parent_loci:
+            return parent_loci
     if sire is not None and dam is not None:
         parent_rows = _template_loci_union_for_mouse_relations(sire=sire, dam=dam)
         parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
@@ -1240,7 +1270,14 @@ def _execute_two_pass_mouse_import(
         {_normalize_name(r.get("project_name")) for r in rows if _normalize_name(r.get("project_name"))}
     )
     referenced_cage_ids = sorted(
-        {_normalize_name(r.get("current_cage_id")) for r in rows if _normalize_name(r.get("current_cage_id"))}
+        {
+            cage_id
+            for cage_id in (
+                *(_normalize_name(r.get("current_cage_id")) for r in rows),
+                *(_normalize_name(r.get("breeding_cage_id")) for r in rows),
+            )
+            if cage_id
+        }
     )
     referenced_pedigree_uids = sorted(
         {
@@ -1433,23 +1470,57 @@ def _execute_two_pass_mouse_import(
 
         sire = None
         sire_uid = _normalize_name(row.get("sire_uid"))
-        if sire_uid:
-            sire = pedigree_lookup.get(sire_uid)
-            if sire is None:
-                errors.append(
-                    f"Row {row_number}: unresolved sire '{sire_uid}'. "
-                    "Enable resolve_pedigree_within_file or include an existing founder."
-                )
-
         dam = None
         dam_uid = _normalize_name(row.get("dam_uid"))
-        if dam_uid:
-            dam = pedigree_lookup.get(dam_uid)
-            if dam is None:
-                errors.append(
-                    f"Row {row_number}: unresolved dam '{dam_uid}'. "
-                    "Enable resolve_pedigree_within_file or include an existing founder."
+        source_breeding = None
+        breeding_cage_id = _normalize_name(row.get("breeding_cage_id"))
+        if breeding_cage_id:
+            breeding_cage = cage_lookup.get(breeding_cage_id)
+            if breeding_cage is None:
+                errors.append(f"Row {row_number}: unresolved breeding_cage '{breeding_cage_id}'.")
+            else:
+                source_breeding, breeding_error = resolve_breeding_for_import_cage(
+                    breeding_cage,
+                    birth_date=row.get("birth_date"),
                 )
+                if breeding_error:
+                    errors.append(f"Row {row_number}: {breeding_error}")
+                elif source_breeding is not None:
+                    breeding_sire, _breeding_dams = breeding_sire_and_dams(source_breeding)
+                    if breeding_sire is not None:
+                        sire = breeding_sire
+                    if sire_uid and sire is not None and sire.mouse_uid != sire_uid:
+                        errors.append(
+                            f"Row {row_number}: sire '{sire_uid}' does not match breeding sire "
+                            f"'{sire.mouse_uid}' for cage '{breeding_cage_id}'."
+                        )
+                    elif sire_uid and sire is None:
+                        sire = pedigree_lookup.get(sire_uid)
+                        if sire is None:
+                            errors.append(
+                                f"Row {row_number}: unresolved sire '{sire_uid}' for breeding_cage import."
+                            )
+                    dam = None
+                    if dam_uid:
+                        errors.append(
+                            f"Row {row_number}: dam '{dam_uid}' ignored when breeding_cage is set "
+                            "(specific dam cannot be determined)."
+                        )
+        if not breeding_cage_id:
+            if sire_uid:
+                sire = pedigree_lookup.get(sire_uid)
+                if sire is None:
+                    errors.append(
+                        f"Row {row_number}: unresolved sire '{sire_uid}'. "
+                        "Enable resolve_pedigree_within_file or include an existing founder."
+                    )
+            if dam_uid:
+                dam = pedigree_lookup.get(dam_uid)
+                if dam is None:
+                    errors.append(
+                        f"Row {row_number}: unresolved dam '{dam_uid}'. "
+                        "Enable resolve_pedigree_within_file or include an existing founder."
+                    )
 
         mouse.current_cage = current_cage
         mouse.project = project
@@ -1458,6 +1529,7 @@ def _execute_two_pass_mouse_import(
         mouse.origin = row.get("origin", "")
         mouse.coat_color = row.get("coat_color", "")
         mouse.notes = row.get("notes", "")
+        mouse.source_breeding = source_breeding
         mouse.sire = sire
         mouse.dam = dam
         if getattr(acting_user, "is_authenticated", False):
@@ -2705,6 +2777,7 @@ def mouse_import_template(request: HttpRequest) -> HttpResponse:
             "In-house breeding",
             "black",
             "Example imported mouse",
+            "BC001",
             "",
             "",
             "Cre/+",
@@ -2734,6 +2807,7 @@ def mouse_import_template_xlsx(request: HttpRequest) -> HttpResponse:
             "In-house breeding",
             "black",
             "Example imported mouse",
+            "BC001",
             "",
             "",
             "Cre/+",
@@ -2771,6 +2845,8 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         _scoped_mouse_queryset(request.user).select_related(
             "sire",
             "dam",
+            "source_breeding",
+            "source_breeding__cage",
             "project",
             "project__owner",
             "project__owner__profile",
@@ -2791,15 +2867,16 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("mouse_uid")
     )
-    littermates = Mouse.objects.none()
-    if mouse.sire_id and mouse.dam_id:
-        littermates = (
-            _scoped_mouse_queryset(request.user).filter(sire_id=mouse.sire_id, dam_id=mouse.dam_id)
-            .exclude(pk=mouse.pk)
-            .select_related("current_cage")
-            .prefetch_related("genotypes__gene")
-            .order_by("mouse_uid")
+    littermates = (
+        littermate_queryset_for_mouse(
+            mouse,
+            _scoped_mouse_queryset(request.user),
         )
+        .select_related("current_cage")
+        .prefetch_related("genotypes__gene")
+        .order_by("mouse_uid")
+    )
+    family_pedigree = mouse_family_pedigree(mouse)
 
     mouse_audit_entries = audit_entries_for_object("Mouse", mouse.pk)
     genotype_history_entries = [
@@ -2815,8 +2892,13 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "cage_history": cage_history,
         "family_offspring": [build_mouse_relation_card(m) for m in offspring],
         "family_littermates": [build_mouse_relation_card(m) for m in littermates],
-        "family_sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
-        "family_dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
+        "family_pedigree": family_pedigree,
+        "family_breeding_cage": family_pedigree.breeding_cage,
+        "family_sire": build_mouse_relation_card(family_pedigree.sire) if family_pedigree.sire else None,
+        "family_dams": [build_mouse_relation_card(d) for d in family_pedigree.dams],
+        "family_dam": build_mouse_relation_card(mouse.dam)
+        if mouse.dam and not family_pedigree.source_breeding
+        else None,
         "audit_entries": mouse_audit_entries,
         "genotype_history_entries": genotype_history_entries,
         "active_breeding_badges": active_breeding_badges,
@@ -2828,7 +2910,12 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(
-        _scoped_mouse_queryset(request.user).select_related("sire", "dam"),
+        _scoped_mouse_queryset(request.user).select_related(
+            "sire",
+            "dam",
+            "source_breeding",
+            "source_breeding__cage",
+        ),
         pk=pk,
     )
     offspring = (
@@ -2838,20 +2925,24 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("mouse_uid")
     )
-    littermates = Mouse.objects.none()
-    if mouse.sire_id and mouse.dam_id:
-        littermates = (
-            _scoped_mouse_queryset(request.user).filter(sire_id=mouse.sire_id, dam_id=mouse.dam_id)
-            .exclude(pk=mouse.pk)
-            .select_related("current_cage")
-            .prefetch_related("genotypes__gene")
-            .order_by("mouse_uid")
+    littermates = (
+        littermate_queryset_for_mouse(
+            mouse,
+            _scoped_mouse_queryset(request.user),
         )
+        .select_related("current_cage")
+        .prefetch_related("genotypes__gene")
+        .order_by("mouse_uid")
+    )
+    family_pedigree = mouse_family_pedigree(mouse)
 
     context = {
         "mouse": mouse,
-        "sire": build_mouse_relation_card(mouse.sire) if mouse.sire else None,
-        "dam": build_mouse_relation_card(mouse.dam) if mouse.dam else None,
+        "family_pedigree": family_pedigree,
+        "family_breeding_cage": family_pedigree.breeding_cage,
+        "sire": build_mouse_relation_card(family_pedigree.sire) if family_pedigree.sire else None,
+        "dams": [build_mouse_relation_card(d) for d in family_pedigree.dams],
+        "dam": build_mouse_relation_card(mouse.dam) if mouse.dam and not family_pedigree.source_breeding else None,
         "offspring": [build_mouse_relation_card(m) for m in offspring],
         "littermates": [build_mouse_relation_card(m) for m in littermates],
         "focal_summary": build_short_genotype_summary(mouse),
@@ -2873,6 +2964,8 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         .select_related(
             "sire",
             "dam",
+            "source_breeding",
+            "source_breeding__cage",
             "current_cage",
             "strain_line",
             "project",
@@ -2891,20 +2984,30 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         mice = mice.filter(strain_line_id=strain_line)
     if project:
         mice = mice.filter(project_id=project)
-    if parent == "sire":
+    if parent == "breeding":
+        mice = mice.filter(source_breeding__isnull=False)
+    elif parent == "sire":
         mice = mice.filter(sire__isnull=False)
     elif parent == "dam":
         mice = mice.filter(dam__isnull=False)
     elif parent == "both":
         mice = mice.filter(sire__isnull=False, dam__isnull=False)
     elif parent == "either":
-        mice = mice.filter(Q(sire__isnull=False) | Q(dam__isnull=False))
+        mice = mice.filter(Q(sire__isnull=False) | Q(dam__isnull=False) | Q(source_breeding__isnull=False))
     elif parent == "none":
-        mice = mice.filter(sire__isnull=True, dam__isnull=True)
+        mice = mice.filter(sire__isnull=True, dam__isnull=True, source_breeding__isnull=True)
 
     mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
     for m in mice:
         m.family_genotype_summary = build_short_genotype_summary(m)
+        pedigree = mouse_family_pedigree(m)
+        m.family_breeding_cage = pedigree.breeding_cage.cage_id if pedigree.breeding_cage else ""
+        if pedigree.dams:
+            m.family_mothers_display = ", ".join(d.mouse_uid for d in pedigree.dams)
+        elif m.dam_id and not pedigree.source_breeding:
+            m.family_mothers_display = m.dam.mouse_uid
+        else:
+            m.family_mothers_display = ""
     strain_line_model = Mouse._meta.get_field("strain_line").related_model
     return render(
         request,
@@ -2922,7 +3025,8 @@ def family_tree(request: HttpRequest) -> HttpResponse:
             "project_options": Project.objects.order_by("name"),
             "parent_options": [
                 ("", "All parent records"),
-                ("either", "Has sire or dam"),
+                ("breeding", "Has breeding cage origin"),
+                ("either", "Has sire, dam, or breeding origin"),
                 ("both", "Has sire and dam"),
                 ("sire", "Has sire only"),
                 ("dam", "Has dam only"),
@@ -2947,6 +3051,7 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                 strain_line=mouse.strain_line,
                 sire=mouse.sire,
                 dam=mouse.dam,
+                source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
             )
             prefilled = mouse.ensure_template_genotype_components(
                 extra_loci=template_loci,
@@ -3046,11 +3151,13 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     strain_line=original_strain,
                     sire=mouse.sire,
                     dam=mouse.dam,
+                    source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
                 )
                 new_loci = _resolved_template_loci_for_context(
                     strain_line=new_strain,
                     sire=mouse.sire,
                     dam=mouse.dam,
+                    source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
                 )
                 old_keys = {StrainLine.normalize_locus_name(x).casefold() for x in old_loci if StrainLine.normalize_locus_name(x)}
                 new_keys = {StrainLine.normalize_locus_name(x).casefold() for x in new_loci if StrainLine.normalize_locus_name(x)}
@@ -3085,6 +3192,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 strain_line=mouse.strain_line,
                 sire=mouse.sire,
                 dam=mouse.dam,
+                source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
             )
             prefilled = 0
             filled = 0
