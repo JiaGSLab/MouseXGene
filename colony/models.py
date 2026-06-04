@@ -156,13 +156,12 @@ class StrainLine(ActorStampedModel):
             for raw in self.expected_loci_config:
                 if not isinstance(raw, dict):
                     continue
-                name = self.normalize_locus_name(str(raw.get("locus_name", "")).strip())
+                name = str(raw.get("locus_name", "")).strip()
                 if not name:
                     continue
-                key = name.casefold()
-                if key in seen:
+                if name in seen:
                     continue
-                seen.add(key)
+                seen.add(name)
                 raw_locus_type = str(raw.get("locus_type", self.LocusType.CUSTOM)).strip()
                 chromosome_type = str(raw.get("chromosome_type", self.ChromosomeType.AUTOSOMAL)).strip()
 
@@ -192,11 +191,10 @@ class StrainLine(ActorStampedModel):
         for token in tokens:
             if not token:
                 continue
-            normalized = self.normalize_locus_name(token)
-            key = normalized.casefold()
-            if key in seen:
+            normalized = token.strip()
+            if normalized in seen:
                 continue
-            seen.add(key)
+            seen.add(normalized)
             out.append(
                 {
                     "locus_name": normalized,
@@ -472,42 +470,33 @@ class Mouse(ActorStampedModel):
         include_strain_template: bool = True,
     ) -> int:
         loci = self.strain_line.expected_loci_list() if (include_strain_template and self.strain_line_id) else []
-        loci = [self.strain_line.normalize_locus_name(l) for l in loci if self.strain_line.normalize_locus_name(l)]
+        loci = [(l or "").strip() for l in loci if (l or "").strip()]
         if extra_loci:
-            seen = {l.casefold() for l in loci}
+            seen = set(loci)
             for locus in extra_loci:
-                text = self.strain_line.normalize_locus_name((locus or "").strip())
-                if not text:
+                text = (locus or "").strip()
+                if not text or text in seen:
                     continue
-                key = text.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
+                seen.add(text)
                 loci.append(text)
         if not loci:
             return 0
         entry_by_key = {
-            e["locus_name"].casefold(): e
+            e["locus_name"]: e
             for e in (self.strain_line.expected_loci_entries() if self.strain_line_id else [])
         }
         existing: set[str] = set()
         for c in self.genotype_components.all():
             raw = (c.locus_name or "").strip()
-            if not raw:
-                continue
-            normalized = self.strain_line.normalize_locus_name(raw)
-            if normalized and raw != normalized:
-                c.locus_name = normalized
-                c.save(update_fields=["locus_name", "updated_at"])
-            if normalized:
-                existing.add(normalized.casefold())
+            if raw:
+                existing.add(raw)
         current_max_sort = self.genotype_components.aggregate(models.Max("sort_order")).get("sort_order__max") or 0
         to_create: list["MouseGenotypeComponent"] = []
         next_sort = current_max_sort + 1
         for locus in loci:
-            if locus.casefold() in existing:
+            if locus in existing:
                 continue
-            entry = entry_by_key.get(locus.casefold()) or {}
+            entry = entry_by_key.get(locus) or {}
             chromosome_type = str(entry.get("chromosome_type") or "").strip()
             if chromosome_type not in MouseGenotypeComponent.ChromosomeType.values:
                 chromosome_type = MouseGenotypeComponent.ChromosomeType.UNKNOWN

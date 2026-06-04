@@ -90,6 +90,14 @@ class MouseImportGenotypeTests(TestCase):
         self.assertEqual(comps[0]["locus_name"], "SlotGene")
         self.assertEqual(comps[0]["zygosity_display"], "+/-")
 
+    def test_empty_locus_column_adds_placeholder(self):
+        rows = self._parse_xlsx({"Foxp3": "Cre/+", "CustomGene": ""})
+        comps = rows[0]["genotype_components"]
+        by_locus = {c["locus_name"]: c for c in comps}
+        self.assertEqual(by_locus["Foxp3"]["zygosity_display"], "Cre/+")
+        self.assertIn("CustomGene", by_locus)
+        self.assertEqual(by_locus["CustomGene"]["zygosity_display"], "")
+
     def test_execute_import_creates_genotype_components(self):
         rows = self._parse_xlsx({"CustomGene": "Het", "Foxp3": "Cre/+"})
         stats = _execute_two_pass_mouse_import(
@@ -103,7 +111,8 @@ class MouseImportGenotypeTests(TestCase):
             import_date=timezone.localdate(),
             acting_user=self.user,
         )
-        self.assertEqual(stats["genotype_rows_created"], 2)
+        self.assertEqual(stats["genotype_rows_created"], 0)
+        self.assertEqual(stats["genotype_rows_updated"], 2)
         mouse = Mouse.objects.get(mouse_uid="M-GT-1")
         comps = {
             c.locus_name: c.zygosity
@@ -112,7 +121,50 @@ class MouseImportGenotypeTests(TestCase):
         self.assertEqual(comps["CustomGene"], "+/-")
         self.assertEqual(comps["Foxp3"], "Cre/+")
 
-    def test_execute_import_updates_existing_template_locus_by_normalized_name(self):
+    def test_execute_import_seeds_empty_strain_template_loci(self):
+        rows = self._parse_xlsx({"Foxp3": "Cre/+"})
+        _execute_two_pass_mouse_import(
+            rows,
+            options=MouseImportOptions(
+                auto_create_missing_strain_lines=True,
+                auto_create_missing_projects=True,
+                auto_create_missing_cages=True,
+                resolve_pedigree_within_file=True,
+            ),
+            import_date=timezone.localdate(),
+            acting_user=self.user,
+        )
+        mouse = Mouse.objects.get(mouse_uid="M-GT-1")
+        comps = {
+            c.locus_name: c.zygosity
+            for c in MouseGenotypeComponent.objects.filter(mouse=mouse)
+        }
+        self.assertEqual(comps["Foxp3"], "Cre/+")
+        self.assertIn("CustomGene", comps)
+        self.assertEqual(comps["CustomGene"], "")
+
+    def test_execute_import_keeps_empty_locus_column_placeholder(self):
+        rows = self._parse_xlsx({"Foxp3": "Cre/+", "CustomGene": ""})
+        _execute_two_pass_mouse_import(
+            rows,
+            options=MouseImportOptions(
+                auto_create_missing_strain_lines=True,
+                auto_create_missing_projects=True,
+                auto_create_missing_cages=True,
+                resolve_pedigree_within_file=True,
+            ),
+            import_date=timezone.localdate(),
+            acting_user=self.user,
+        )
+        mouse = Mouse.objects.get(mouse_uid="M-GT-1")
+        comps = {
+            c.locus_name: c.zygosity
+            for c in MouseGenotypeComponent.objects.filter(mouse=mouse)
+        }
+        self.assertEqual(comps["Foxp3"], "Cre/+")
+        self.assertEqual(comps["CustomGene"], "")
+
+    def test_execute_import_creates_separate_row_when_locus_name_differs(self):
         mouse = Mouse.objects.create(
             mouse_uid="M-GT-EXIST",
             sex=Mouse.Sex.FEMALE,
@@ -122,6 +174,35 @@ class MouseImportGenotypeTests(TestCase):
         mouse.ensure_template_genotype_components(include_strain_template=True)
         rows = self._parse_xlsx({"Foxp3 flox": "+/+"})
         rows[0]["mouse_uid"] = "M-GT-EXIST"
+        rows[0]["_update"] = True
+        stats = _execute_two_pass_mouse_import(
+            rows,
+            options=MouseImportOptions(
+                auto_create_missing_strain_lines=True,
+                auto_create_missing_projects=True,
+                auto_create_missing_cages=True,
+                resolve_pedigree_within_file=True,
+            ),
+            import_date=timezone.localdate(),
+            acting_user=self.user,
+        )
+        self.assertEqual(stats["genotype_rows_updated"], 0)
+        self.assertEqual(stats["genotype_rows_created"], 1)
+        template_row = MouseGenotypeComponent.objects.get(mouse=mouse, locus_name="Foxp3")
+        self.assertEqual(template_row.zygosity, "")
+        imported_row = MouseGenotypeComponent.objects.get(mouse=mouse, locus_name="Foxp3 flox")
+        self.assertEqual(imported_row.zygosity, "+/+")
+
+    def test_execute_import_updates_row_when_locus_name_matches_exactly(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-GT-EXIST2",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+        )
+        mouse.ensure_template_genotype_components(include_strain_template=True)
+        rows = self._parse_xlsx({"Foxp3": "+/+"})
+        rows[0]["mouse_uid"] = "M-GT-EXIST2"
         rows[0]["_update"] = True
         stats = _execute_two_pass_mouse_import(
             rows,

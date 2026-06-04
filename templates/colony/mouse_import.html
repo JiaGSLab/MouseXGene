@@ -28,6 +28,14 @@
         本导入支持更多基因位点。你可以按需持续增加 locus 列（在常规使用中基本不限数量）。
     </p>
     <p class="muted">
+        If a locus column is present but the cell is empty, the locus is still added with a blank genotype (to fill in later).
+        Strain-line template loci missing from the file are also created as empty placeholders.
+    </p>
+    <p class="muted">
+        若 Excel 中有 locus 列但单元格为空，仍会创建该位点行，基因型留空待填。
+        品系模板里未出现在表格中的位点，也会自动创建空占位行。
+    </p>
+    <p class="muted">
         Legacy <code>genotype_N_*</code> slot columns are still supported for backward compatibility.
         After import, review genotype results in each Mouse detail page under <strong>Genotype Workspace</strong>.
     </p>

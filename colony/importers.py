@@ -217,11 +217,39 @@ def _detect_genotype_slots(columns: list[str]) -> list[int]:
 
 
 def _import_locus_name(raw_name: str) -> str:
-    return StrainLine.normalize_locus_name(_to_text(raw_name))
+    return _to_text(raw_name).strip()
 
 
-def _import_locus_key(raw_name: str) -> str:
-    return _import_locus_name(raw_name).casefold()
+def _empty_import_genotype_component(locus_name: str, *, slot: int = 0, chromosome_type: str = "unknown") -> dict:
+    return {
+        "slot": slot,
+        "locus_name": locus_name,
+        "allele_1": "",
+        "allele_2": "",
+        "zygosity_display": "",
+        "zygosity_class": "unknown",
+        "chromosome_type": chromosome_type,
+        "is_confirmed": False,
+        "assay_date": None,
+        "notes": "",
+    }
+
+
+def _append_import_genotype_component(
+    component_by_locus: dict[str, dict],
+    genotype_components: list[dict],
+    comp: dict,
+    *,
+    row_number: int,
+    errors: list[str],
+) -> bool:
+    locus = (comp.get("locus_name") or "").strip()
+    if locus in component_by_locus:
+        errors.append(f"Row {row_number}: duplicate genotype locus '{locus}' in import row.")
+        return False
+    component_by_locus[locus] = comp
+    genotype_components.append(comp)
+    return True
 
 
 GENOTYPE_EXPECTED_COLUMNS = [
@@ -456,42 +484,47 @@ def parse_mouse_import(
                 "assay_date": assay_date,
                 "notes": genotype_notes,
             }
-            key = locus.casefold()
-            if key in component_by_locus:
-                errors.append(f"Row {row_number}: duplicate genotype locus '{locus}' in import row.")
-                continue
-            component_by_locus[key] = comp
-            genotype_components.append(comp)
+            _append_import_genotype_component(
+                component_by_locus,
+                genotype_components,
+                comp,
+                row_number=row_number,
+                errors=errors,
+            )
 
         for locus_col in locus_columns:
-            display_value = _to_text(record.get(locus_col))
-            if not display_value:
-                continue
             locus_name = _import_locus_name(locus_col)
             if not locus_name:
                 continue
-            parsed = _parse_genotype_display(display_value, row_number, locus_name, errors)
-            if parsed is None:
+            if locus_name in component_by_locus:
                 continue
-            allele_1, allele_2, zygosity = parsed
-            key = locus_name.casefold()
-            if key in component_by_locus:
-                errors.append(f"Row {row_number}: duplicate genotype locus '{locus_name}' in import row.")
-                continue
-            comp = {
-                "slot": 0,
-                "locus_name": locus_name,
-                "allele_1": allele_1,
-                "allele_2": allele_2,
-                "zygosity_display": zygosity,
-                "zygosity_class": _infer_zygosity_class(allele_1, allele_2),
-                "chromosome_type": _infer_chromosome_type(allele_1, allele_2),
-                "is_confirmed": False,
-                "assay_date": None,
-                "notes": "",
-            }
-            component_by_locus[key] = comp
-            genotype_components.append(comp)
+            display_value = _to_text(record.get(locus_col))
+            if display_value:
+                parsed = _parse_genotype_display(display_value, row_number, locus_name, errors)
+                if parsed is None:
+                    continue
+                allele_1, allele_2, zygosity = parsed
+                comp = {
+                    "slot": 0,
+                    "locus_name": locus_name,
+                    "allele_1": allele_1,
+                    "allele_2": allele_2,
+                    "zygosity_display": zygosity,
+                    "zygosity_class": _infer_zygosity_class(allele_1, allele_2),
+                    "chromosome_type": _infer_chromosome_type(allele_1, allele_2),
+                    "is_confirmed": False,
+                    "assay_date": None,
+                    "notes": "",
+                }
+            else:
+                comp = _empty_import_genotype_component(locus_name)
+            _append_import_genotype_component(
+                component_by_locus,
+                genotype_components,
+                comp,
+                row_number=row_number,
+                errors=errors,
+            )
 
         rows.append(
             {

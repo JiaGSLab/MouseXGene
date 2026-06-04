@@ -1213,6 +1213,14 @@ def _build_strain_line_lookup() -> dict[str, StrainLine]:
     return lookup
 
 
+def _import_genotype_slot_has_truth(slot: dict) -> bool:
+    return bool(
+        (slot.get("allele_1") or "").strip()
+        or (slot.get("allele_2") or "").strip()
+        or (slot.get("zygosity_display") or "").strip()
+    )
+
+
 def _execute_two_pass_mouse_import(
     rows: list[dict],
     *,
@@ -1484,11 +1492,14 @@ def _execute_two_pass_mouse_import(
         ]
     )
 
-    # Pass 3: import structured genotype components from per-locus columns / legacy slots.
+    # Pass 3: seed strain-line template loci, then merge import genotype data.
+    for mouse in mice_by_uid.values():
+        mouse.ensure_template_genotype_components(include_strain_template=True)
+
     genotype_to_create: list[MouseGenotypeComponent] = []
     genotype_to_update: list[MouseGenotypeComponent] = []
     existing_by_mouse_locus = {
-        (gt.mouse_id, StrainLine.normalize_locus_name((gt.locus_name or "").strip()).casefold()): gt
+        (gt.mouse_id, (gt.locus_name or "").strip()): gt
         for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in mice_by_uid.values()])
     }
     for row in rows:
@@ -1496,10 +1507,10 @@ def _execute_two_pass_mouse_import(
         if mouse is None:
             continue
         for slot in row.get("genotype_components", row.get("genotype_slots", [])):
-            locus_name = StrainLine.normalize_locus_name((slot.get("locus_name") or "").strip())
+            locus_name = (slot.get("locus_name") or "").strip()
             if not locus_name:
                 continue
-            key = (mouse.id, locus_name.casefold())
+            key = (mouse.id, locus_name)
             existing = existing_by_mouse_locus.get(key)
             if existing is None:
                 obj = MouseGenotypeComponent(
@@ -1516,7 +1527,7 @@ def _execute_two_pass_mouse_import(
                 )
                 genotype_to_create.append(obj)
                 existing_by_mouse_locus[key] = obj
-            else:
+            elif _import_genotype_slot_has_truth(slot):
                 existing.strain_line = mouse.strain_line
                 existing.locus_name = locus_name
                 existing.chromosome_type = slot.get("chromosome_type") or existing.chromosome_type
