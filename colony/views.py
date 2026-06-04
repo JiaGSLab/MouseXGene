@@ -896,9 +896,9 @@ def _mouse_has_meaningful_genotype_truth(mouse: Mouse) -> bool:
 def _mouse_component_loci_set(mouse: Mouse) -> set[str]:
     loci: set[str] = set()
     for c in mouse.genotype_components.all():
-        locus = StrainLine.normalize_locus_name((c.locus_name or "").strip())
+        locus = (c.locus_name or "").strip()
         if locus:
-            loci.add(locus.casefold())
+            loci.add(locus)
     return loci
 
 
@@ -912,13 +912,13 @@ def _apply_locus_renames_on_mice(
         return 0
     renamed = 0
     for old, new in zip(before_entries, after_entries, strict=True):
-        old_name = StrainLine.normalize_locus_name(str(old.get("locus_name", "")).strip())
-        new_name = StrainLine.normalize_locus_name(str(new.get("locus_name", "")).strip())
-        if not old_name or not new_name or old_name.casefold() == new_name.casefold():
+        old_name = str(old.get("locus_name", "")).strip()
+        new_name = str(new.get("locus_name", "")).strip()
+        if not old_name or not new_name or old_name == new_name:
             continue
         renamed += MouseGenotypeComponent.objects.filter(
             mouse__strain_line=line,
-            locus_name__iexact=old_name,
+            locus_name=old_name,
         ).update(locus_name=new_name)
     return renamed
 
@@ -930,7 +930,7 @@ def _propagate_strain_line_template_to_mice(
 ) -> tuple[int, int, int]:
     """Sync template loci to mice on this strain line and refresh genotype summaries."""
     entries = line.expected_loci_entries()
-    entry_by_key = {e["locus_name"].casefold(): e for e in entries}
+    entry_by_name = {e["locus_name"]: e for e in entries}
     if before_entries:
         _apply_locus_renames_on_mice(line, before_entries, entries)
     mice_count = 0
@@ -939,11 +939,10 @@ def _propagate_strain_line_template_to_mice(
     for mouse in Mouse.objects.filter(strain_line=line).iterator(chunk_size=100):
         components_added += mouse.ensure_template_genotype_components(include_strain_template=True)
         for comp in list(mouse.genotype_components.all()):
-            locus = StrainLine.normalize_locus_name((comp.locus_name or "").strip())
+            locus = (comp.locus_name or "").strip()
             if not locus:
                 continue
-            locus_key = locus.casefold()
-            entry = entry_by_key.get(locus_key)
+            entry = entry_by_name.get(locus)
             if entry is None:
                 comp.delete()
                 components_removed += 1
@@ -1851,6 +1850,7 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
             )
             messages.success(request, "Strain line created.")
             return redirect("colony:strain_line_detail", pk=line.pk)
+        messages.error(request, "Could not save strain line. Please fix the errors below.")
     else:
         form = StrainLineForm(user=request.user, initial={"owner": request.user})
     return render(
@@ -1949,8 +1949,9 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
             before_entries = line.expected_loci_entries()
             before_template = json.dumps(before_entries, sort_keys=True)
             before_name = (line.name or line.line_name or "").strip()
-            msg = summarize_modelform_changes(form)
             line = form.save()
+            line.refresh_from_db()
+            msg = summarize_modelform_changes(form)
             after_entries = line.expected_loci_entries()
             after_template = json.dumps(after_entries, sort_keys=True)
             after_name = (line.name or line.line_name or "").strip()
@@ -1977,6 +1978,7 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
                         "Definition changes applied: " + ", ".join(detail_parts) + "; genotype summaries refreshed.",
                     )
             return redirect("colony:strain_line_detail", pk=line.pk)
+        messages.error(request, "Could not save strain line. Please fix the errors below.")
     else:
         form = StrainLineForm(instance=line, user=request.user)
     return render(

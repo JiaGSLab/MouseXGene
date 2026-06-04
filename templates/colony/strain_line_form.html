@@ -174,7 +174,7 @@
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="button">{{ submit_label }}</button>
+            <button type="submit" class="button" id="strain-line-save">{{ submit_label }}</button>
             <a href="{% url 'colony:strain_line_list' %}" class="button button-light">Cancel</a>
         </div>
     </form>
@@ -230,13 +230,16 @@
             try {
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed)) {
-                    return parsed
+                    const fromConfig = parsed
                         .map(item => ({
                             locus_name: String(item?.locus_name || "").trim(),
                             locus_type: String(item?.locus_type || "custom").trim() || "custom",
                             chromosome_type: String(item?.chromosome_type || "autosomal").trim() || "autosomal",
                         }))
                         .filter(item => item.locus_name);
+                    if (fromConfig.length) {
+                        return fromConfig;
+                    }
                 }
             } catch (_) {}
         }
@@ -328,7 +331,13 @@
     addBtn.addEventListener("click", () => appendRow(""));
     const form = rows.closest("form");
     if (form) {
-        form.addEventListener("submit", () => syncHidden());
+        form.addEventListener("submit", () => {
+            syncHidden();
+        }, { capture: true });
+    }
+    const saveBtn = document.getElementById("strain-line-save");
+    if (saveBtn) {
+        saveBtn.addEventListener("click", () => syncHidden());
     }
     syncHidden();
 })();

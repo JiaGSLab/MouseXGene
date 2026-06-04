@@ -20,6 +20,14 @@
         <h2>Definition</h2>
         <dl class="detail-grid">
             <dt>Owner</dt><dd>{{ line.owner_display }}</dd>
+            <dt>Default project</dt>
+            <dd>
+                {% if line.default_project %}
+                    <a class="link-primary" href="{% url 'project_detail' line.default_project.pk %}">{{ line.default_project.name }}</a>
+                {% else %}
+                    <span class="muted">—</span>
+                {% endif %}
+            </dd>
             <dt>Projects</dt>
             <dd>
                 {% if related_projects %}

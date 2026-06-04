@@ -250,6 +250,8 @@ class StrainLineForm(forms.ModelForm):
             "default_project",
             "species",
             "source",
+            "category",
+            "background",
             "expected_loci_template",
             "is_active",
             "notes",
@@ -375,7 +377,7 @@ class StrainLineForm(forms.ModelForm):
             for row in data:
                 if not isinstance(row, dict):
                     continue
-                locus = StrainLine.normalize_locus_name(str(row.get("locus_name", "")).strip())
+                locus = str(row.get("locus_name", "")).strip()
                 locus_type = str(row.get("locus_type", "")).strip()
                 chromosome_type = str(row.get("chromosome_type", "")).strip()
                 if not locus:
@@ -388,10 +390,9 @@ class StrainLineForm(forms.ModelForm):
                     locus_type = StrainLine.LocusType.CUSTOM
                 if chromosome_type not in StrainLine.ChromosomeType.values:
                     chromosome_type = StrainLine.ChromosomeType.AUTOSOMAL
-                key = locus.casefold()
-                if key in seen:
+                if locus in seen:
                     continue
-                seen.add(key)
+                seen.add(locus)
                 parsed.append(
                     {
                         "locus_name": locus,
@@ -406,13 +407,12 @@ class StrainLineForm(forms.ModelForm):
             tokens = [part.strip() for part in text.replace(";", "\n").replace(",", "\n").splitlines()]
             seen_fallback: set[str] = set()
             for token in tokens:
-                normalized = StrainLine.normalize_locus_name(token)
+                normalized = token.strip()
                 if not normalized:
                     continue
-                key = normalized.casefold()
-                if key in seen_fallback:
+                if normalized in seen_fallback:
                     continue
-                seen_fallback.add(key)
+                seen_fallback.add(normalized)
                 parsed.append(
                     {
                         "locus_name": normalized,
@@ -437,6 +437,7 @@ class StrainLineForm(forms.ModelForm):
         if new_name:
             obj.name = new_name
         obj.expected_loci_config = list(self.cleaned_data.get("_expected_loci_config_list") or [])
+        obj.expected_loci_template = (self.cleaned_data.get("expected_loci_template") or "").strip()
         if (
             not self.instance.pk
             and not obj.owner_id
