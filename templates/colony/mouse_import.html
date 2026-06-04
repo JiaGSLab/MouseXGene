@@ -36,6 +36,18 @@
         品系模板里未出现在表格中的位点，也会自动创建空占位行。
     </p>
     <p class="muted">
+        Locus names are kept exactly as written in the spreadsheet column header (aside from leading/trailing spaces).
+        Re-import or update only merges into an existing genotype row when the name matches <strong>character-for-character</strong>
+        (for example, <code>Foxp3</code> and <code>Foxp3 flox</code> are separate rows).
+        Align column headers with your strain-line template names when you intend to fill in template placeholders.
+    </p>
+    <p class="muted">
+        位点名称按 Excel 列名原样保留（仅去掉首尾空格）。
+        再次导入或覆盖更新时，只有名称<strong>完全一致</strong>才会合并到已有行
+        （例如 <code>Foxp3</code> 与 <code>Foxp3 flox</code> 是两条独立记录）。
+        若要更新品系模板占位行，请让列名与模板中的位点名一致。
+    </p>
+    <p class="muted">
         Legacy <code>genotype_N_*</code> slot columns are still supported for backward compatibility.
         After import, review genotype results in each Mouse detail page under <strong>Genotype Workspace</strong>.
     </p>
