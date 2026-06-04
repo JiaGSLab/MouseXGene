@@ -41,9 +41,14 @@ from core.audit import log_audit_event
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from core.models import AuditLog, ImportLog, Project, ProjectMembership
 from users.forms import UserImportPrefixForm
-from colony.mouse_age import mouse_list_age_band
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
+from colony.mouse_age import mouse_list_age_band
+from colony.cage_lifecycle import (
+    breeding_setup_message,
+    sync_cage_breeding_workflow,
+    sync_cage_status_from_mice,
+)
 from colony.import_staging import (
     ImportStagingError,
     clear_staged_cage_import,
@@ -151,6 +156,10 @@ def _apply_cage_import_rows(rows: list[dict], *, acting_user) -> tuple[int, int]
                 setattr(cage, field, row[field])
             cage.updated_by_id = acting_user.pk
             cage.save(update_fields=[*CAGE_IMPORT_UPDATE_FIELDS, "updated_by_id", "updated_at"])
+    for row in create_rows + update_rows:
+        cage = Cage.objects.get(cage_id=row["cage_id"])
+        sync_cage_breeding_workflow(cage)
+        sync_cage_status_from_mice(cage)
     return len(create_rows), len(update_rows)
 
 
@@ -432,10 +441,9 @@ def _filtered_cages_queryset(request: HttpRequest):
     if include_inactive != "yes":
         cages = cages.filter(status=Cage.Status.ACTIVE)
     if strain_line:
-        cages = cages.filter(
-            current_mice__strain_line_id=strain_line,
-            current_mice__status=Mouse.Status.ACTIVE,
-        )
+        cages = cages.filter(current_mice__strain_line_id=strain_line)
+        if include_inactive != "yes":
+            cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
     if q:
         cages = cages.filter(cage_id__icontains=q)
     if room:
@@ -743,6 +751,40 @@ def _strain_template_loci_map() -> dict[str, list[dict[str, str]]]:
     for line in StrainLine.objects.filter(is_active=True).order_by("line_name"):
         out[str(line.pk)] = line.expected_loci_entries()
     return out
+
+
+def _strain_default_project_map() -> dict[str, str]:
+    out: dict[str, str] = {
+        str(line.pk): str(line.default_project_id)
+        for line in StrainLine.objects.filter(is_active=True, default_project_id__isnull=False)
+    }
+    single_project_lines = (
+        StrainLine.objects.filter(is_active=True, default_project_id__isnull=True)
+        .annotate(project_count=Count("mice__project", distinct=True))
+        .filter(project_count=1)
+    )
+    for line in single_project_lines:
+        project_id = (
+            Mouse.objects.filter(strain_line=line)
+            .values_list("project_id", flat=True)
+            .first()
+        )
+        if project_id:
+            out[str(line.pk)] = str(project_id)
+    return out
+
+
+def _effective_default_project_id(line: StrainLine) -> int | None:
+    if line.default_project_id:
+        return line.default_project_id
+    project_ids = list(
+        Mouse.objects.filter(strain_line=line)
+        .values_list("project_id", flat=True)
+        .distinct()
+    )
+    if len(project_ids) == 1:
+        return project_ids[0]
+    return None
 
 
 def _extract_mouse_genotype_rows_from_post(request: HttpRequest) -> list[dict[str, str]]:
@@ -1639,6 +1681,46 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_list.html", context)
 
 
+def _strain_line_usage_annotations() -> dict:
+    active_litter_statuses = [
+        Litter.LitterStatus.ACTIVE,
+        Litter.LitterStatus.WEANED,
+        Litter.LitterStatus.TAIL_TAGGED,
+    ]
+    return {
+        "active_mice_count": Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
+        "total_mice_count": Count("mice", distinct=True),
+        "active_cages_count": Count(
+            "mice__current_cage",
+            filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
+            distinct=True,
+        ),
+        "total_cages_count": Count(
+            "mice__current_cage",
+            filter=Q(mice__current_cage__isnull=False),
+            distinct=True,
+        ),
+        "active_breedings_count": Count(
+            "mice__maternal_breedings_primary",
+            filter=Q(mice__maternal_breedings_primary__active=True),
+            distinct=True,
+        )
+        + Count(
+            "mice__sired_breedings",
+            filter=Q(mice__sired_breedings__active=True),
+            distinct=True,
+        ),
+        "total_breedings_count": Count("mice__maternal_breedings_primary", distinct=True)
+        + Count("mice__sired_breedings", distinct=True),
+        "active_litters_count": Count(
+            "mice__maternal_breedings_primary__litters",
+            filter=Q(mice__maternal_breedings_primary__litters__litter_status__in=active_litter_statuses),
+            distinct=True,
+        ),
+        "total_litters_count": Count("mice__maternal_breedings_primary__litters", distinct=True),
+    }
+
+
 @authenticated_required
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
@@ -1663,35 +1745,7 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
         lines = lines.filter(is_active=True)
     elif active == "no":
         lines = lines.filter(is_active=False)
-    lines = lines.annotate(
-        active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
-        active_cages_count=Count(
-            "mice__current_cage",
-            filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
-            distinct=True,
-        ),
-        active_breedings_count=Count(
-            "mice__maternal_breedings_primary",
-            filter=Q(mice__maternal_breedings_primary__active=True),
-            distinct=True,
-        )
-        + Count(
-            "mice__sired_breedings",
-            filter=Q(mice__sired_breedings__active=True),
-            distinct=True,
-        ),
-        active_litters_count=Count(
-            "mice__maternal_breedings_primary__litters",
-            filter=Q(
-                mice__maternal_breedings_primary__litters__litter_status__in=[
-                    Litter.LitterStatus.ACTIVE,
-                    Litter.LitterStatus.WEANED,
-                    Litter.LitterStatus.TAIL_TAGGED,
-                ]
-            ),
-            distinct=True,
-        ),
-    )
+    lines = lines.annotate(**_strain_line_usage_annotations())
     lines = apply_list_sort(lines, request, STRAIN_LINE_LIST_SORT)
     context = {
         "lines": lines,
@@ -1705,38 +1759,13 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(
-        StrainLine.objects.annotate(
-            active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
-            active_cages_count=Count(
-                "mice__current_cage",
-                filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
-                distinct=True,
-            ),
-            active_breedings_count=Count(
-                "mice__maternal_breedings_primary",
-                filter=Q(mice__maternal_breedings_primary__active=True),
-                distinct=True,
-            )
-            + Count(
-                "mice__sired_breedings",
-                filter=Q(mice__sired_breedings__active=True),
-                distinct=True,
-            ),
-            active_litters_count=Count(
-                "mice__maternal_breedings_primary__litters",
-                filter=Q(
-                    mice__maternal_breedings_primary__litters__litter_status__in=[
-                        Litter.LitterStatus.ACTIVE,
-                        Litter.LitterStatus.WEANED,
-                        Litter.LitterStatus.TAIL_TAGGED,
-                    ]
-                ),
-                distinct=True,
-            ),
-        )
+        StrainLine.objects.annotate(**_strain_line_usage_annotations())
         .select_related(
             "owner",
             "owner__profile",
+            "default_project",
+            "default_project__owner",
+            "default_project__owner__profile",
             "created_by",
             "created_by__profile",
             "updated_by",
@@ -1749,11 +1778,43 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
     actors = merge_actor_labels(line, audit_entries)
+    related_mice = list(
+        Mouse.objects.filter(strain_line=line)
+        .select_related("current_cage", "project")
+        .order_by("status", "mouse_uid")
+    )
+    related_cages = list(
+        Cage.objects.filter(current_mice__strain_line=line)
+        .distinct()
+        .prefetch_related("current_mice__strain_line")
+        .order_by("status", "cage_id")
+    )
+    for cage in related_cages:
+        strain_mice = [mouse for mouse in cage.current_mice.all() if mouse.strain_line_id == line.pk]
+        cage.strain_active_mouse_count = sum(1 for mouse in strain_mice if mouse.status == Mouse.Status.ACTIVE)
+        cage.strain_total_mouse_count = len(strain_mice)
+    related_projects = list(
+        Project.objects.filter(mice__strain_line=line)
+        .select_related("owner", "owner__profile")
+        .annotate(
+            strain_active_mice_count=Count(
+                "mice",
+                filter=Q(mice__strain_line=line, mice__status=Mouse.Status.ACTIVE),
+                distinct=True,
+            ),
+            strain_total_mice_count=Count("mice", filter=Q(mice__strain_line=line), distinct=True),
+        )
+        .distinct()
+        .order_by("name")
+    )
     return render(
         request,
         "colony/strain_line_detail.html",
         {
             "line": line,
+            "related_mice": related_mice,
+            "related_cages": related_cages,
+            "related_projects": related_projects,
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
@@ -1926,6 +1987,18 @@ def cage_create(request: HttpRequest) -> HttpResponse:
         form = CageForm(request.POST)
         if form.is_valid():
             cage = form.save()
+            breeding = sync_cage_breeding_workflow(cage)
+            sync_cage_status_from_mice(cage)
+            if cage.purpose == Cage.Purpose.BREEDING:
+                if breeding:
+                    messages.success(
+                        request,
+                        f"Breeding {breeding.breeding_code} created for cage {cage.cage_id}.",
+                    )
+                else:
+                    setup_msg = breeding_setup_message(cage)
+                    if setup_msg:
+                        messages.warning(request, setup_msg)
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.CREATE,
@@ -1958,6 +2031,18 @@ def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 ensure_cage_status_change(request.user, cage, previous_status, new_status)
             msg = summarize_modelform_changes(form)
             cage = form.save()
+            breeding = sync_cage_breeding_workflow(cage)
+            sync_cage_status_from_mice(cage)
+            if cage.purpose == Cage.Purpose.BREEDING:
+                if breeding:
+                    messages.success(
+                        request,
+                        f"Breeding {breeding.breeding_code} linked to cage {cage.cage_id}.",
+                    )
+                else:
+                    setup_msg = breeding_setup_message(cage)
+                    if setup_msg:
+                        messages.warning(request, setup_msg)
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.UPDATE,
@@ -2876,7 +2961,20 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                 messages.info(request, f"Applied {filled} genotype row(s) from New Mouse form.")
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
-        form = MouseForm(user=request.user)
+        initial: dict = {}
+        strain_id = (request.GET.get("strain_line_id") or "").strip()
+        if strain_id.isdigit():
+            line = (
+                StrainLine.objects.filter(pk=int(strain_id))
+                .select_related("default_project")
+                .first()
+            )
+            if line:
+                initial["strain_line"] = line.pk
+                default_project_id = _effective_default_project_id(line)
+                if default_project_id:
+                    initial["project"] = default_project_id
+        form = MouseForm(user=request.user, initial=initial)
 
     context = {
         "form": form,
@@ -2885,6 +2983,8 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
         "cancel_url": "mice:mouse_list",
         "strain_template_loci_map": _strain_template_loci_map(),
         "mouse_strain_line_map": _mouse_to_strain_line_map(),
+        "strain_default_project_map": _strain_default_project_map(),
+        "apply_strain_default_project": True,
         "existing_genotype_map": {},
         "posted_genotype_rows": posted_genotype_rows,
     }
@@ -3023,6 +3123,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "cancel_kwargs": {"pk": mouse.pk},
         "strain_template_loci_map": _strain_template_loci_map(),
         "mouse_strain_line_map": _mouse_to_strain_line_map(),
+        "apply_strain_default_project": False,
         "existing_genotype_map": {
             (c.locus_name or "").strip(): (c.zygosity or "")
             for c in mouse.genotype_components.all()

@@ -722,6 +722,16 @@ body.col-resize-active * {
     margin: 0;
 }
 
+.inline-link-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.inline-link-list li + li {
+    margin-top: 6px;
+}
+
 .search-form {
     display: flex;
     gap: 10px;
@@ -921,6 +931,22 @@ body.col-resize-active * {
 
 .import-overwrite-actions {
     margin-top: 0;
+}
+
+.mini-list__date {
+    display: inline-block;
+    min-width: 5.5rem;
+    color: #64748b;
+    font-size: 0.88rem;
+    margin-right: 6px;
+}
+
+.strain-count-cell {
+    white-space: nowrap;
+}
+
+.data-table tbody tr.row-highlight > td {
+    background-color: #eff6ff;
 }
 
 .print-toolbar {

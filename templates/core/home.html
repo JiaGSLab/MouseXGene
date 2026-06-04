@@ -109,6 +109,7 @@
         <ul class="mini-list">
             {% for mouse in recent_mice %}
                 <li>
+                    <span class="mini-list__date">{{ mouse.created_at|date:"Y-m-d" }}</span>
                     <a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a>
                     {% if mouse.current_cage %}
                         -
@@ -127,6 +128,7 @@
         <ul class="mini-list">
             {% for cage in recent_cages %}
                 <li>
+                    <span class="mini-list__date">{{ cage.created_at|date:"Y-m-d" }}</span>
                     <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
                     {% if cage.room %} - {{ cage.room }}{% endif %}
                 </li>

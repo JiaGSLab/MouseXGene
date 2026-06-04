@@ -9,7 +9,7 @@ from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
 
-from core.models import format_project_owner_label
+from core.models import Project, format_project_owner_label
 
 from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
@@ -247,6 +247,7 @@ class StrainLineForm(forms.ModelForm):
         fields = [
             "name",
             "owner",
+            "default_project",
             "species",
             "source",
             "expected_loci_template",
@@ -255,6 +256,7 @@ class StrainLineForm(forms.ModelForm):
         ]
         widgets = {
             "owner": forms.Select(attrs={"class": "filter-control"}),
+            "default_project": forms.Select(attrs={"class": "filter-control"}),
             "species": forms.Select(attrs={"class": "filter-control"}),
             "source": forms.TextInput(attrs={"class": "filter-control"}),
             "expected_loci_template": forms.Textarea(attrs={"rows": 3}),
@@ -263,6 +265,10 @@ class StrainLineForm(forms.ModelForm):
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
             "owner": "Lab contact (shown on Strain Lines list). Defaults to the creating user; you can change it here.",
+            "default_project": (
+                "Optional. When set, New Mouse pre-selects this project when this strain line is chosen. "
+                "You can still change project per mouse."
+            ),
             "species": "Species for this strain line record.",
             "source": "Optional source or vendor reference.",
             "expected_loci_template": (
@@ -274,6 +280,7 @@ class StrainLineForm(forms.ModelForm):
         labels = {
             "name": "Strain line name",
             "owner": "Owner",
+            "default_project": "Default project (optional)",
             "expected_loci_template": "Included loci",
         }
 
@@ -317,6 +324,9 @@ class StrainLineForm(forms.ModelForm):
         self.fields["owner"].label_from_instance = (
             lambda u: (format_project_owner_label(u) or u.get_username() or "").strip() or str(u.pk)
         )
+        self.fields["default_project"].queryset = Project.objects.filter(is_active=True).order_by("name")
+        self.fields["default_project"].required = False
+        self.fields["default_project"].empty_label = "— None (choose per mouse) —"
         entries: list[dict[str, str]] = []
         if self.instance and self.instance.pk:
             entries = self.instance.expected_loci_entries()

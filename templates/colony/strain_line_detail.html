@@ -6,10 +6,11 @@
 <section class="page-header page-header-row">
     <div>
         <h1>{{ line.name|default:line.line_name }}</h1>
-        <p class="muted">Strain line definition, PDF introductions, and usage counts.</p>
+        <p class="muted">Strain line definition, PDF introductions, and related colony records (active and inactive).</p>
     </div>
     <div class="action-links">
         <a class="link-primary" href="{% url 'colony:strain_line_list' %}">Back to list</a>
+        <a class="button button-secondary" href="{% url 'mice:mouse_create' %}?strain_line_id={{ line.pk }}">New mouse</a>
         <a class="button" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a>
     </div>
 </section>
@@ -19,6 +20,16 @@
         <h2>Definition</h2>
         <dl class="detail-grid">
             <dt>Owner</dt><dd>{{ line.owner_display }}</dd>
+            <dt>Projects</dt>
+            <dd>
+                {% if related_projects %}
+                    {% for project in related_projects %}
+                        <a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <span class="muted">—</span>
+                {% endif %}
+            </dd>
             <dt>Included loci</dt>
             <dd>
                 {% with loci=line.expected_loci_list %}
@@ -36,17 +47,108 @@
 
     <article class="card">
         <h2>Related records</h2>
+        <p class="muted small-print">Format: <strong>active / total</strong>. Total counts include inactive mice, cages, and closed records.</p>
         <dl class="detail-grid">
-            <dt>Active mice</dt>
-            <dd><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></dd>
-            <dt>Active cages (via mice)</dt>
-            <dd><a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ line.active_cages_count }}</a></dd>
-            <dt>Active breedings</dt>
-            <dd><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></dd>
-            <dt>Active litters</dt>
-            <dd><a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></dd>
+            <dt>Mice</dt>
+            <dd class="strain-count-cell">
+                <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }} active</a>
+                /
+                <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">{{ line.total_mice_count }} total</a>
+            </dd>
+            <dt>Cages (via mice)</dt>
+            <dd class="strain-count-cell">
+                <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ line.active_cages_count }} active</a>
+                /
+                <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes">{{ line.total_cages_count }} total</a>
+            </dd>
+            <dt>Breedings</dt>
+            <dd class="strain-count-cell">
+                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }} active</a>
+                /
+                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes">{{ line.total_breedings_count }} total</a>
+            </dd>
+            <dt>Litters</dt>
+            <dd class="strain-count-cell">
+                <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }} active</a>
+                /
+                <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes">{{ line.total_litters_count }} total</a>
+            </dd>
         </dl>
     </article>
+</section>
+
+<section class="card">
+    <div class="page-header-row">
+        <h2>Mice on this strain ({{ related_mice|length }})</h2>
+        <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">Open full list</a>
+    </div>
+    {% if related_mice %}
+        <div class="table-wrap">
+            <table class="data-table data-table--compact data-table--striped">
+                <thead>
+                    <tr>
+                        <th>Mouse</th>
+                        <th>Sex</th>
+                        <th>Status</th>
+                        <th>Cage</th>
+                        <th>Project</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for mouse in related_mice %}
+                        <tr class="{% if mouse.status != 'active' %}row-inactive{% endif %}">
+                            <td><a class="link-primary" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
+                            <td>{{ mouse.get_sex_display }}</td>
+                            <td><span class="status-pill">{{ mouse.get_status_display }}</span></td>
+                            <td>
+                                {% if mouse.current_cage %}
+                                    <a class="link-primary" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                                {% else %}
+                                    <span class="muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ mouse.project.name|default:"—" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">No mice recorded for this strain line yet.</p>
+    {% endif %}
+</section>
+
+<section class="card">
+    <div class="page-header-row">
+        <h2>Cages with this strain ({{ related_cages|length }})</h2>
+        <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes">Open full list</a>
+    </div>
+    {% if related_cages %}
+        <div class="table-wrap">
+            <table class="data-table data-table--compact data-table--striped">
+                <thead>
+                    <tr>
+                        <th>Cage</th>
+                        <th>Cage status</th>
+                        <th>Room</th>
+                        <th>Strain mice in cage</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cage in related_cages %}
+                        <tr class="{% if cage.status != 'active' %}row-inactive{% endif %}">
+                            <td><a class="link-primary" href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a></td>
+                            <td><span class="status-pill">{{ cage.get_status_display }}</span></td>
+                            <td>{{ cage.room|default:"—" }}</td>
+                            <td>{{ cage.strain_active_mouse_count }} active / {{ cage.strain_total_mouse_count }} total</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="muted">No cages currently housing mice of this strain.</p>
+    {% endif %}
 </section>
 
 {% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining only %}

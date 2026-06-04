@@ -83,10 +83,18 @@
             <li class="dashboard-alert-empty">All clear</li>
         {% endfor %}
     </ul>
-{% elif alert.kind == "empty_cages_long" %}
+        {% elif alert.kind == "empty_cages_long" %}
     <ul class="mini-list">
         {% for cage in alert.items %}
-            <li><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a> - updated {{ cage.updated_at|date:"Y-m-d" }}</li>
+            <li>
+                <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
+                -
+                {% if cage.last_mouse_left %}
+                    empty since {{ cage.last_mouse_left|date:"Y-m-d" }}
+                {% else %}
+                    empty since {{ cage.created_at|date:"Y-m-d" }}
+                {% endif %}
+            </li>
         {% empty %}
             <li class="dashboard-alert-empty">All clear</li>
         {% endfor %}

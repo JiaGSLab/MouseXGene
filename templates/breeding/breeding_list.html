@@ -14,6 +14,8 @@
     .breeding-alert-badge--warning { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
     .breeding-alert-badge--overdue { background: #ffedd5; color: #9a3412; border: 1px solid #ea580c; }
     .breeding-alert-badge--review { background: #fee2e2; color: #991b1b; border: 1px solid #dc2626; }
+    .data-table--breedings tbody tr.breeding-row-pending > td { background-color: #f8fafc; }
+    .data-table--breedings tbody tr.breeding-row-pending > td.breeding-alert-cell { border-left: 4px solid #64748b; }
 </style>
 {% endblock %}
 
@@ -111,6 +113,43 @@
             </tr>
         </thead>
         <tbody>
+            {% for pending_cage in pending_breeding_cages %}
+            <tr class="breeding-row-pending">
+                <td class="breeding-setup-by-cell">—</td>
+                <td class="breeding-alert-cell">
+                    <span class="breeding-alert-badge breeding-alert-badge--warning">Pending setup</span>
+                    <div class="breeding-alert-days">{{ pending_cage.pending_hint }}</div>
+                </td>
+                <td>
+                    <a href="{% url 'colony:cage_detail' pending_cage.pk %}">{{ pending_cage.cage_id }}</a>
+                    <div class="muted small-print">Breeding cage</div>
+                </td>
+                <td><a href="{% url 'colony:cage_detail' pending_cage.pk %}">{{ pending_cage.cage_id }}</a></td>
+                <td>—</td>
+                <td>
+                    {% if pending_cage.pending_males %}
+                        {% for mouse in pending_cage.pending_males %}
+                            <div><a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></div>
+                        {% endfor %}
+                    {% else %}
+                        <span class="muted">Need sire</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if pending_cage.pending_females %}
+                        {% for mouse in pending_cage.pending_females %}
+                            <div><a href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></div>
+                        {% endfor %}
+                    {% else %}
+                        <span class="muted">Need dam</span>
+                    {% endif %}
+                </td>
+                <td>—</td>
+                <td>—</td>
+                <td>—</td>
+                <td><span class="status-pill">{{ pending_cage.pending_status_label }}</span></td>
+            </tr>
+            {% endfor %}
             {% for breeding in breedings %}
             <tr
                 class="{% if not breeding.active or breeding.status == 'closed' %}row-inactive{% endif %}{% if breeding.list_alert_level %} breeding-row-alert breeding-row-alert--{{ breeding.list_alert_level }}{% endif %}"

@@ -56,6 +56,21 @@
         </div>
 
         <div class="form-row">
+            <label for="{{ form.default_project.id_for_label }}">{{ form.default_project.label }}</label>
+            {{ form.default_project }}
+            {% if form.default_project.help_text %}
+                <small class="muted">{{ form.default_project.help_text }}</small>
+            {% endif %}
+            {% if form.default_project.errors %}
+                <div class="field-error">
+                    {% for error in form.default_project.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
             <label for="{{ form.notes.id_for_label }}">{{ form.notes.label }}</label>
             {{ form.notes }}
             {% if form.notes.help_text %}

@@ -34,7 +34,7 @@ def home(request: HttpRequest) -> HttpResponse:
     wean_due_end = today + timedelta(days=3)
 
     mice_queryset = Mouse.objects.all()
-    cages_queryset = Cage.objects.all()
+    cages_queryset = Cage.objects.all() if request.user.is_authenticated else Cage.objects.none()
     breedings_queryset = Breeding.objects.all()
     litters_queryset = Litter.objects.all()
 
@@ -46,9 +46,6 @@ def home(request: HttpRequest) -> HttpResponse:
             .distinct()
         )
         mice_queryset = mice_queryset.filter(project_id__in=allowed_project_ids)
-        cages_queryset = cages_queryset.filter(
-            current_mice__project_id__in=allowed_project_ids
-        ).distinct()
         breedings_queryset = breedings_queryset.filter(
             Q(male__project_id__in=allowed_project_ids)
             | Q(female_1__project_id__in=allowed_project_ids)
@@ -94,13 +91,19 @@ def home(request: HttpRequest) -> HttpResponse:
         LitterPup.objects.select_related("litter", "mouse")
         .filter(tail_tag_date__isnull=False, mouse__isnull=False)
         .filter(mouse__genotypes__isnull=True)
+        .filter(litter__in=litters_queryset)
         .order_by("-tail_tag_date")
         .distinct()
     )
+    empty_cutoff = timezone.now() - timedelta(days=14)
     empty_active_cages_long_qs = (
         cages_queryset.filter(status=Cage.Status.ACTIVE, current_mice__isnull=True)
-        .filter(updated_at__lt=timezone.now() - timedelta(days=14))
-        .order_by("updated_at")
+        .annotate(last_mouse_left=Max("memberships__end_date"))
+        .filter(
+            Q(last_mouse_left__lt=empty_cutoff.date())
+            | Q(last_mouse_left__isnull=True, created_at__lt=empty_cutoff)
+        )
+        .order_by("last_mouse_left", "created_at")
         .distinct()
     )
 

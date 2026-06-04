@@ -2,7 +2,7 @@ import json
 import re
 
 from django.db import models
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
 from django.utils.text import get_valid_filename
@@ -71,6 +71,14 @@ class StrainLine(ActorStampedModel):
         blank=True,
         on_delete=models.PROTECT,
         related_name="owned_strain_lines",
+    )
+    default_project = models.ForeignKey(
+        "core.Project",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="default_for_strain_lines",
+        help_text="Optional default project when creating mice on this strain line.",
     )
 
     class Meta:
@@ -623,3 +631,23 @@ def _sync_mouse_genotype_summary_on_save(sender, instance: MouseGenotypeComponen
 @receiver(post_delete, sender=MouseGenotypeComponent)
 def _sync_mouse_genotype_summary_on_delete(sender, instance: MouseGenotypeComponent, **kwargs) -> None:
     instance.mouse.rebuild_genotype_summary(save=True)
+
+
+@receiver(pre_save, sender=Mouse)
+def _remember_mouse_previous_cage(sender, instance: Mouse, **kwargs) -> None:
+    if instance.pk:
+        instance._mxg_previous_cage_id = (
+            Mouse.objects.filter(pk=instance.pk).values_list("current_cage_id", flat=True).first()
+        )
+    else:
+        instance._mxg_previous_cage_id = None
+
+
+@receiver(post_save, sender=Mouse)
+def _sync_cages_after_mouse_save(sender, instance: Mouse, **kwargs) -> None:
+    from colony.cage_lifecycle import sync_cages_after_mouse_change
+
+    sync_cages_after_mouse_change(
+        current_cage_id=instance.current_cage_id,
+        previous_cage_id=getattr(instance, "_mxg_previous_cage_id", None),
+    )

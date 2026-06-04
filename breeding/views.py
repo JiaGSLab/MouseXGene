@@ -15,7 +15,8 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
 
-from colony.models import CageMembership, Mouse
+from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset
+from colony.models import Cage, CageMembership, Mouse
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
 from .forms import BreedingForm, LitterForm, LitterPupFormSet, WeanLitterForm, get_pup_formset
@@ -507,8 +508,20 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     breedings_page_items = list(pagination["items"])
     _enrich_breedings_for_list(breedings_page_items, today=today)
 
+    pending_breeding_cages: list[Cage] = []
+    if include_inactive != "yes" and not export:
+        pending_qs = pending_breeding_cages_queryset()
+        if cage:
+            pending_qs = pending_qs.filter(pk=cage)
+        if q:
+            pending_qs = pending_qs.filter(cage_id__icontains=q)
+        pending_breeding_cages = list(pending_qs)
+        for pending_cage in pending_breeding_cages:
+            enrich_pending_breeding_cage(pending_cage)
+
     context = {
         "breedings": breedings_page_items,
+        "pending_breeding_cages": pending_breeding_cages,
         "q": q,
         "status": status,
         "breeding_type": breeding_type,
@@ -553,6 +566,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                     ],
                 )
                 breeding = form.save()
+                mark_cage_as_breeding(breeding.cage)
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
                 log_audit_event(
@@ -602,6 +616,7 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     ],
                 )
                 breeding = form.save()
+                mark_cage_as_breeding(breeding.cage)
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
                 log_audit_event(

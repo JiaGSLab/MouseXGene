@@ -31,6 +31,8 @@
     </form>
 </section>
 
+<p class="muted small-print">Counts show <strong>active / total</strong>. Total links include inactive mice, cages, and closed records.</p>
+
 <section class="table-wrap table-wrap--data">
     <table class="data-table data-table--compact data-table--striped">
         <thead>
@@ -39,10 +41,10 @@
                 {% sort_th "owner" "Owner" %}
                 {% sort_th "loci" "Included loci" %}
                 {% sort_th "pdf_count" "PDFs" extra_class="col-num-right" %}
-                {% sort_th "active_mice" "Active Mice" extra_class="col-num-right" %}
-                {% sort_th "active_cages" "Active Cages" extra_class="col-num-right" %}
-                {% sort_th "active_breedings" "Active Breedings" extra_class="col-num-right" %}
-                {% sort_th "active_litters" "Active Litters" extra_class="col-num-right" %}
+                {% sort_th "active_mice" "Mice" extra_class="col-num-right" %}
+                {% sort_th "active_cages" "Cages" extra_class="col-num-right" %}
+                {% sort_th "active_breedings" "Breedings" extra_class="col-num-right" %}
+                {% sort_th "active_litters" "Litters" extra_class="col-num-right" %}
                 {% sort_th "active" "Status" %}
                 <th scope="col"></th>
             </tr>
@@ -66,10 +68,26 @@
                         {% endwith %}
                     </td>
                     <td class="col-num-right">{% if line.pdf_count %}{{ line.pdf_count }}{% else %}<span class="cell-empty">—</span>{% endif %}</td>
-                    <td class="col-num-right"><a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}">{{ line.active_mice_count }}</a></td>
-                    <td class="col-num-right"><a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ line.active_cages_count }}</a></td>
-                    <td class="col-num-right"><a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_breedings_count }}</a></td>
-                    <td class="col-num-right"><a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ line.active_litters_count }}</a></td>
+                    <td class="col-num-right strain-count-cell">
+                        <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}" title="Active mice">{{ line.active_mice_count }}</a>
+                        <span class="muted">/</span>
+                        <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All mice including inactive">{{ line.total_mice_count }}</a>
+                    </td>
+                    <td class="col-num-right strain-count-cell">
+                        <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}" title="Cages with active mice of this strain">{{ line.active_cages_count }}</a>
+                        <span class="muted">/</span>
+                        <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes" title="All cages including inactive mice/cages">{{ line.total_cages_count }}</a>
+                    </td>
+                    <td class="col-num-right strain-count-cell">
+                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}" title="Active breedings">{{ line.active_breedings_count }}</a>
+                        <span class="muted">/</span>
+                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes" title="All breedings including inactive">{{ line.total_breedings_count }}</a>
+                    </td>
+                    <td class="col-num-right strain-count-cell">
+                        <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}" title="Active litters">{{ line.active_litters_count }}</a>
+                        <span class="muted">/</span>
+                        <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes" title="All litters including ended/archived">{{ line.total_litters_count }}</a>
+                    </td>
                     <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
                     <td><a class="link-primary" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
                 </tr>
