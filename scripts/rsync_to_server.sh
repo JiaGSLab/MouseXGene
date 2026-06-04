@@ -19,7 +19,9 @@ rsync -avz --delete \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '.env' \
+  --exclude '.env.deploy' \
   --exclude '.env.prod' \
+  --exclude 'backups/' \
   --exclude 'media' \
   --exclude 'staticfiles' \
   --exclude 'postgres_data' \
