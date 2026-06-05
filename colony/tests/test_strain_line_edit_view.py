@@ -99,6 +99,128 @@ class StrainLineEditViewTests(TestCase):
         self.assertIn("LocusA", loci)
         self.assertIn("LocusB", loci)
 
+    def test_edit_view_shows_observed_loci_from_mice(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-OBSERVED-LOCUS",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.line,
+            project=self.project,
+        )
+        MouseGenotypeComponent.objects.create(
+            mouse=mouse,
+            strain_line=self.line,
+            locus_name="ImportedExtra",
+            zygosity="+/-",
+            allele_display_1="+",
+            allele_display_2="-",
+        )
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ImportedExtra")
+        self.assertContains(response, "LocusA")
+
+    def test_edit_view_allows_clearing_all_loci(self):
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        response = self.client.post(
+            url,
+            self._post_data(
+                name="EditMe",
+                expected_loci_config=[],
+                expected_loci_template="",
+            ),
+        )
+        self.assertRedirects(response, reverse("colony:strain_line_detail", args=[self.line.pk]))
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.expected_loci_list(), [])
+
+    def test_edit_view_clearing_all_loci_removes_mouse_genotype_rows(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-CLEAR-LOCUS",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.line,
+            project=self.project,
+        )
+        mouse.ensure_template_genotype_components(include_strain_template=True)
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        self.client.post(
+            url,
+            self._post_data(
+                name="EditMe",
+                expected_loci_config=[],
+                expected_loci_template="",
+            ),
+        )
+        self.assertFalse(MouseGenotypeComponent.objects.filter(mouse=mouse).exists())
+
+    def test_edit_view_removing_observed_locus_propagates_to_mice(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-REMOVE-OBSERVED",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.line,
+            project=self.project,
+        )
+        mouse.ensure_template_genotype_components(include_strain_template=True)
+        MouseGenotypeComponent.objects.create(
+            mouse=mouse,
+            strain_line=self.line,
+            locus_name="ImportedExtra",
+            zygosity="+/-",
+            allele_display_1="+",
+            allele_display_2="-",
+        )
+        config = [
+            {"locus_name": "LocusA", "locus_type": "custom", "chromosome_type": "autosomal"},
+        ]
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        self.client.post(
+            url,
+            self._post_data(
+                name="EditMe",
+                expected_loci_config=config,
+                expected_loci_template="LocusA",
+            ),
+        )
+        loci = set(
+            MouseGenotypeComponent.objects.filter(mouse=mouse).values_list("locus_name", flat=True)
+        )
+        self.assertEqual(loci, {"LocusA"})
+
+    def test_edit_view_notes_only_save_keeps_observed_locus_on_mice(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-KEEP-OBSERVED",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.line,
+            project=self.project,
+        )
+        mouse.ensure_template_genotype_components(include_strain_template=True)
+        MouseGenotypeComponent.objects.create(
+            mouse=mouse,
+            strain_line=self.line,
+            locus_name="ImportedExtra",
+            zygosity="+/-",
+            allele_display_1="+",
+            allele_display_2="-",
+        )
+        config = [
+            {"locus_name": "LocusA", "locus_type": "custom", "chromosome_type": "autosomal"},
+            {"locus_name": "ImportedExtra", "locus_type": "custom", "chromosome_type": "autosomal"},
+        ]
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        self.client.post(
+            url,
+            self._post_data(
+                name="EditMe",
+                notes="only notes changed",
+                expected_loci_config=config,
+                expected_loci_template="LocusA\nImportedExtra",
+            ),
+        )
+        loci = set(
+            MouseGenotypeComponent.objects.filter(mouse=mouse).values_list("locus_name", flat=True)
+        )
+        self.assertIn("ImportedExtra", loci)
+
     def test_edit_view_keeps_exact_locus_name_on_mouse_after_template_edit(self):
         self.line.expected_loci_config = [
             {

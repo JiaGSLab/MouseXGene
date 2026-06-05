@@ -45,7 +45,7 @@ from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
-from core.models import AuditLog, ImportLog, Project, ProjectMembership
+from core.models import AuditLog, ImportLog, Project, ProjectMembership, format_project_owner_label
 from users.forms import UserImportPrefixForm
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
@@ -412,6 +412,19 @@ def paginate_queryset_for_list(
     }
 
 
+def cage_owner_filter_options():
+    """Users who own a project with at least one mouse currently in a cage."""
+    from django.contrib.auth import get_user_model
+
+    owner_ids = (
+        Mouse.objects.filter(current_cage__isnull=False)
+        .exclude(project__owner_id__isnull=True)
+        .values_list("project__owner_id", flat=True)
+        .distinct()
+    )
+    return get_user_model().objects.filter(pk__in=owner_ids).order_by("username")
+
+
 def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
     """Distinct projects (with owner label and mouse count) for mice currently in a cage."""
     from collections import OrderedDict
@@ -442,12 +455,17 @@ def _filtered_cages_queryset(request: HttpRequest):
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    owner = (request.GET.get("owner") or request.GET.get("owner_id") or "").strip()
 
     cages = _scoped_cage_queryset(request.user)
     if include_inactive != "yes":
         cages = cages.filter(status=Cage.Status.ACTIVE)
     if strain_line:
         cages = cages.filter(current_mice__strain_line_id=strain_line)
+        if include_inactive != "yes":
+            cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
+    if owner:
+        cages = cages.filter(current_mice__project__owner_id=owner)
         if include_inactive != "yes":
             cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
     if q:
@@ -1721,6 +1739,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    owner = (request.GET.get("owner") or request.GET.get("owner_id") or "").strip()
     export = (request.GET.get("export") or "").strip().lower()
 
     cages = _filtered_cages_queryset(request)
@@ -1753,6 +1772,14 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "include_inactive": include_inactive,
         "strain_line": strain_line,
         "strain_line_filter_label": strain_line_filter_label,
+        "owner": owner,
+        "owner_options": [
+            {
+                "pk": user.pk,
+                "label": (format_project_owner_label(user) or user.get_username() or "").strip() or str(user.pk),
+            }
+            for user in cage_owner_filter_options()
+        ],
         "room_options": Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
         "rack_options": Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
         "cage_type_options": Cage.CageType.choices,
@@ -2018,15 +2045,18 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
         if form.is_valid():
             if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
                 raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
-            before_entries = line.expected_loci_entries()
-            before_template = json.dumps(before_entries, sort_keys=True)
+            before_editable = line.editable_loci_entries()
+            before_loci_names = [entry["locus_name"] for entry in before_editable]
             before_name = (line.name or line.line_name or "").strip()
+            submitted_loci_names = [
+                entry["locus_name"]
+                for entry in (form.cleaned_data.get("_expected_loci_config_list") or [])
+            ]
             line = form.save()
             line.refresh_from_db()
             msg = summarize_modelform_changes(form)
-            after_entries = line.expected_loci_entries()
-            after_template = json.dumps(after_entries, sort_keys=True)
             after_name = (line.name or line.line_name or "").strip()
+            loci_changed = submitted_loci_names != before_loci_names
             log_audit_event(
                 user=request.user,
                 action=AuditLog.Action.UPDATE,
@@ -2034,10 +2064,10 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 message=msg[:4000],
             )
             messages.success(request, "Strain line updated.")
-            if before_template != after_template or before_name != after_name:
+            if loci_changed or before_name != after_name:
                 mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
                     line,
-                    before_entries=before_entries if before_template != after_template else None,
+                    before_entries=before_editable if loci_changed else None,
                 )
                 if mice_updated:
                     detail_parts = [f"synced {mice_updated} mouse(s)"]

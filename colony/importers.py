@@ -221,6 +221,18 @@ def _import_locus_name(raw_name: str) -> str:
     return _to_text(raw_name).strip()
 
 
+def _build_import_strain_loci_lookup() -> dict[str, set[str]]:
+    """Map strain line names/aliases to that line's template locus names."""
+    lookup: dict[str, set[str]] = {}
+    for line in StrainLine.objects.all():
+        loci = set(line.expected_loci_list())
+        for key in (line.line_name, line.key_name, line.display_name, line.name, line.short_name):
+            text = _to_text(key)
+            if text:
+                lookup[text] = loci
+    return lookup
+
+
 def _empty_import_genotype_component(locus_name: str, *, slot: int = 0, chromosome_type: str = "unknown") -> dict:
     return {
         "slot": slot,
@@ -381,6 +393,7 @@ def parse_mouse_import(
     slot_columns = {col for slot in detected_slots for col in _genotype_slot_columns(slot)}
     base_known_columns = set(MOUSE_BASE_COLUMNS) | slot_columns
     locus_columns = [col for col in dataframe.columns if col and col not in base_known_columns]
+    strain_loci_lookup = _build_import_strain_loci_lookup()
 
     existing_mice: set[str] = set()
     existing_cages: set[str] = set()
@@ -495,6 +508,7 @@ def parse_mouse_import(
                 errors=errors,
             )
 
+        strain_template_loci = strain_loci_lookup.get(strain_line_name, set()) if strain_line_name else set()
         for locus_col in locus_columns:
             locus_name = _import_locus_name(locus_col)
             if not locus_name:
@@ -519,8 +533,10 @@ def parse_mouse_import(
                     "assay_date": None,
                     "notes": "",
                 }
-            else:
+            elif locus_name in strain_template_loci:
                 comp = _empty_import_genotype_component(locus_name)
+            else:
+                continue
             _append_import_genotype_component(
                 component_by_locus,
                 genotype_components,

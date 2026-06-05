@@ -20,24 +20,94 @@
             </div>
         {% endif %}
 
-        {% for field in form %}
+        <div class="form-row">
+            <label for="{{ form.cage_id.id_for_label }}">
+                {{ form.cage_id.label }}{% if form.cage_id.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.cage_id }}
+            {% if form.cage_id.errors %}
+                <div class="field-error">{% for error in form.cage_id.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.created_date.id_for_label }}">{{ form.created_date.label }}</label>
+            {{ form.created_date }}
+            {% if form.created_date.errors %}
+                <div class="field-error">{% for error in form.created_date.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row form-row--inline-fields">
             <div class="form-row">
-                <label for="{{ field.id_for_label }}">
-                    {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
-                </label>
-                {{ field }}
-                {% if field.help_text %}
-                    <small class="muted">{{ field.help_text }}</small>
-                {% endif %}
-                {% if field.errors %}
-                    <div class="field-error">
-                        {% for error in field.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
+                <label for="{{ form.room.id_for_label }}">{{ form.room.label }}</label>
+                {{ form.room }}
+                {% if form.room.errors %}
+                    <div class="field-error">{% for error in form.room.errors %}<div>{{ error }}</div>{% endfor %}</div>
                 {% endif %}
             </div>
-        {% endfor %}
+            <div class="form-row strain-custom-row" id="room-custom-row" hidden>
+                <label for="{{ form.room_custom.id_for_label }}">{{ form.room_custom.label }}</label>
+                {{ form.room_custom }}
+                {% if form.room_custom.errors %}
+                    <div class="field-error">{% for error in form.room_custom.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.rack.id_for_label }}">{{ form.rack.label }}</label>
+            {{ form.rack }}
+            {% if form.rack.errors %}
+                <div class="field-error">{% for error in form.rack.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.position.id_for_label }}">{{ form.position.label }}</label>
+            {{ form.position }}
+            {% if form.position.errors %}
+                <div class="field-error">{% for error in form.position.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.cage_type.id_for_label }}">
+                {{ form.cage_type.label }}{% if form.cage_type.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.cage_type }}
+            {% if form.cage_type.errors %}
+                <div class="field-error">{% for error in form.cage_type.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.purpose.id_for_label }}">
+                {{ form.purpose.label }}{% if form.purpose.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.purpose }}
+            {% if form.purpose.errors %}
+                <div class="field-error">{% for error in form.purpose.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.status.id_for_label }}">
+                {{ form.status.label }}{% if form.status.field.required %}<span class="required-mark">*</span>{% endif %}
+            </label>
+            {{ form.status }}
+            {% if form.status.errors %}
+                <div class="field-error">{% for error in form.status.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.notes.id_for_label }}">{{ form.notes.label }}</label>
+            {{ form.notes }}
+            {% if form.notes.errors %}
+                <div class="field-error">{% for error in form.notes.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
 
         <div class="form-actions">
             <button type="submit" class="button">{{ submit_label }}</button>
@@ -49,4 +119,18 @@
         </div>
     </form>
 </section>
+
+<script>
+(() => {
+    const CUSTOM = "__custom__";
+    const select = document.getElementById("id_room");
+    const row = document.getElementById("room-custom-row");
+    if (!select || !row) return;
+    const sync = () => {
+        row.hidden = select.value !== CUSTOM;
+    };
+    select.addEventListener("change", sync);
+    sync();
+})();
+</script>
 {% endblock %}

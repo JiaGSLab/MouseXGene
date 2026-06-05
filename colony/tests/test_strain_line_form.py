@@ -91,6 +91,36 @@ class StrainLineFormLociTests(TestCase):
         self.assertEqual(saved.display_name, "New-Line-Name")
         self.assertEqual(saved.key_name, "New-Line-Name")
 
+    def test_save_allows_empty_loci(self):
+        line = StrainLine.objects.create(
+            line_name="Empty-Loci",
+            name="Empty-Loci",
+            expected_loci_template="LocusA",
+            expected_loci_config=[
+                {
+                    "locus_name": "LocusA",
+                    "locus_type": "custom",
+                    "chromosome_type": "autosomal",
+                }
+            ],
+        )
+        data = {
+            "name": "Empty-Loci",
+            "species": "mouse",
+            "source": "",
+            "category": StrainLine.Category.COMPOUND_STRAIN,
+            "background": StrainLine.BackgroundPreset.C57BL_6J,
+            "expected_loci_template": "",
+            "expected_loci_config": "[]",
+            "is_active": "on",
+            "notes": "",
+        }
+        form = StrainLineForm(data, instance=line)
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertEqual(saved.expected_loci_list(), [])
+        self.assertEqual(saved.expected_loci_config, [])
+
     def test_partial_save_with_name_updates_line_name(self):
         line = StrainLine.objects.create(
             line_name="Sync-Me",

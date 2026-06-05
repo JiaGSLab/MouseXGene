@@ -207,6 +207,42 @@ class StrainLine(ActorStampedModel):
     def expected_loci_list(self) -> list[str]:
         return [entry["locus_name"] for entry in self.expected_loci_entries()]
 
+    def observed_loci_entries(self) -> list[dict[str, str]]:
+        """Loci present on mice of this strain but not already in the template."""
+        template_names = {entry["locus_name"] for entry in self.expected_loci_entries()}
+        seen = set(template_names)
+        out: list[dict[str, str]] = []
+        locus_names = (
+            MouseGenotypeComponent.objects.filter(mouse__strain_line=self)
+            .exclude(locus_name="")
+            .values_list("locus_name", flat=True)
+            .distinct()
+            .order_by("locus_name")
+        )
+        for name in locus_names:
+            locus = str(name).strip()
+            if not locus or locus in seen:
+                continue
+            seen.add(locus)
+            out.append(
+                {
+                    "locus_name": locus,
+                    "locus_type": self.LocusType.CUSTOM,
+                    "chromosome_type": self.ChromosomeType.AUTOSOMAL,
+                }
+            )
+        return out
+
+    def editable_loci_entries(self) -> list[dict[str, str]]:
+        """Template loci plus any extra loci observed on mice (for edit form)."""
+        entries = list(self.expected_loci_entries())
+        seen = {entry["locus_name"] for entry in entries}
+        for row in self.observed_loci_entries():
+            if row["locus_name"] not in seen:
+                entries.append(row)
+                seen.add(row["locus_name"])
+        return entries
+
     @property
     def category_display_label(self) -> str:
         value = (self.category or "").strip()

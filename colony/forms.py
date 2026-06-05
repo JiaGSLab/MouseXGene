@@ -21,12 +21,29 @@ from .strain_line_choices import (
 
 
 class CageForm(forms.ModelForm):
+    room = forms.ChoiceField(
+        required=False,
+        choices=[],
+        widget=forms.Select(attrs={"class": "filter-control", "id": "id_room"}),
+        label="Room",
+    )
+    room_custom = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "filter-control strain-custom-field",
+                "id": "id_room_custom",
+                "placeholder": "Custom room",
+            }
+        ),
+        label="Custom room",
+    )
+
     class Meta:
         model = Cage
         fields = [
             "cage_id",
             "created_date",
-            "room",
             "rack",
             "position",
             "cage_type",
@@ -38,6 +55,45 @@ class CageForm(forms.ModelForm):
             "created_date": forms.DateInput(attrs={"type": "date"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
+
+    def _room_choices(self) -> list[tuple[str, str]]:
+        rooms = list(Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"))
+        return [("", "— Select room —")] + [(room, room) for room in rooms] + [
+            (CUSTOM_SELECT_VALUE, "Custom (type below)")
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["room"].choices = self._room_choices()
+        known_rooms = {value for value, _label in self.fields["room"].choices if value and value != CUSTOM_SELECT_VALUE}
+        stored = (self.instance.room or "").strip() if self.instance and self.instance.pk else ""
+        if stored and stored not in known_rooms:
+            self.initial.setdefault("room", CUSTOM_SELECT_VALUE)
+            self.initial.setdefault("room_custom", stored)
+        elif stored:
+            self.initial.setdefault("room", stored)
+
+    def clean(self):
+        cleaned = super().clean()
+        selected = (cleaned.get("room") or "").strip()
+        custom = (cleaned.get("room_custom") or "").strip()
+        if selected == CUSTOM_SELECT_VALUE:
+            if not custom:
+                self.add_error("room_custom", "Room is required when Custom is selected.")
+            else:
+                cleaned["room"] = custom
+        elif selected:
+            cleaned["room"] = selected
+        else:
+            cleaned["room"] = ""
+        return cleaned
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.room = (self.cleaned_data.get("room") or "").strip()
+        if commit:
+            obj.save()
+        return obj
 
 
 class MouseForm(forms.ModelForm):
@@ -274,8 +330,9 @@ class StrainLineForm(forms.ModelForm):
             "species": "Species for this strain line record.",
             "source": "Optional source or vendor reference.",
             "expected_loci_template": (
-                "Required. One locus per row (or comma/semicolon separated), e.g. Lyz2-Cre, Tet2, Gpr82. "
-                "This template is used to auto-populate loci on New Mouse / offspring workflows."
+                "Optional. One locus per row (or comma/semicolon separated), e.g. Lyz2-Cre, Tet2, Gpr82. "
+                "Leave empty if this strain line has no standard genotype loci. "
+                "When set, the template auto-populates loci on New Mouse / offspring workflows."
             ),
             "notes": "Optional husbandry/genetics notes or provenance.",
         }
@@ -329,9 +386,10 @@ class StrainLineForm(forms.ModelForm):
         self.fields["default_project"].queryset = Project.objects.filter(is_active=True).order_by("name")
         self.fields["default_project"].required = False
         self.fields["default_project"].empty_label = "— None (choose per mouse) —"
+        self.fields["expected_loci_template"].required = False
         entries: list[dict[str, str]] = []
         if self.instance and self.instance.pk:
-            entries = self.instance.expected_loci_entries()
+            entries = self.instance.editable_loci_entries()
         if entries and not self.initial.get("expected_loci_config"):
             self.initial["expected_loci_config"] = json.dumps(entries)
         if entries and not self.initial.get("expected_loci_template"):
@@ -420,10 +478,6 @@ class StrainLineForm(forms.ModelForm):
                         "chromosome_type": StrainLine.ChromosomeType.AUTOSOMAL,
                     }
                 )
-
-        if not parsed:
-            self.add_error("expected_loci_template", "Included loci is required.")
-            return cleaned
 
         cleaned["expected_loci_template"] = "\n".join(item["locus_name"] for item in parsed)
         cleaned["_expected_loci_config_list"] = parsed

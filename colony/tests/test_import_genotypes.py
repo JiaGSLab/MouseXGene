@@ -194,6 +194,68 @@ class MouseImportGenotypeTests(TestCase):
         imported_row = MouseGenotypeComponent.objects.get(mouse=mouse, locus_name="Foxp3 flox")
         self.assertEqual(imported_row.zygosity, "+/+")
 
+    def test_multi_strain_file_skips_unrelated_empty_locus_columns(self):
+        strain_b = StrainLine.objects.create(
+            line_name="OtherStrain",
+            name="OtherStrain",
+            expected_loci_template="OtherGene",
+            expected_loci_config=[
+                {"locus_name": "OtherGene", "locus_type": "custom", "chromosome_type": "autosomal"},
+            ],
+        )
+        self.assertIsNotNone(strain_b.pk)
+        row_a = {
+            "mouse_uid": "M-GT-A",
+            "sex": "F",
+            "birth_date": "2026-01-01",
+            "status": "active",
+            "strain_line": "ImportStrain",
+            "current_cage": "",
+            "project": "ImportProject",
+            "ear_tag": "",
+            "toe_tag": "",
+            "origin": "",
+            "coat_color": "",
+            "notes": "",
+            "breeding_cage": "",
+            "sire": "",
+            "dam": "",
+            "Foxp3": "Cre/+",
+            "CustomGene": "",
+            "OtherGene": "",
+        }
+        row_b = {
+            "mouse_uid": "M-GT-B",
+            "sex": "M",
+            "birth_date": "2026-01-02",
+            "status": "active",
+            "strain_line": "OtherStrain",
+            "current_cage": "",
+            "project": "ImportProject",
+            "ear_tag": "",
+            "toe_tag": "",
+            "origin": "",
+            "coat_color": "",
+            "notes": "",
+            "breeding_cage": "",
+            "sire": "",
+            "dam": "",
+            "Foxp3": "",
+            "CustomGene": "",
+            "OtherGene": "+/-",
+        }
+        buf = BytesIO()
+        pd.DataFrame([row_a, row_b]).to_excel(buf, index=False)
+        buf.seek(0)
+        buf.name = "mice.xlsx"
+        result = parse_mouse_import(buf, update_existing=True)
+        self.assertEqual(result.errors, [], result.errors)
+        by_mouse = {row["mouse_uid"]: row for row in result.rows}
+        loci_a = {c["locus_name"] for c in by_mouse["M-GT-A"]["genotype_components"]}
+        loci_b = {c["locus_name"] for c in by_mouse["M-GT-B"]["genotype_components"]}
+        self.assertEqual(loci_a, {"Foxp3", "CustomGene"})
+        self.assertEqual(loci_b, {"OtherGene"})
+
     def test_execute_import_updates_row_when_locus_name_matches_exactly(self):
         mouse = Mouse.objects.create(
             mouse_uid="M-GT-EXIST2",
