@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
 
@@ -63,7 +64,19 @@
         Total mice: {{ current_mouse_count }} |
         Genotype overview: {{ cage_genotype_overview }}
     </p>
-    <table class="data-table">
+    <div class="table-wrap table-wrap--data">
+    <table class="data-table data-table--compact data-table--mice data-table--col-resize" id="cage-mice-table" data-col-resize-key="cage-detail-mice">
+        <colgroup>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col class="col-w-genotype" data-min-width="72" data-resizable="1">
+        </colgroup>
         <thead>
             <tr>
                 <th>Mouse UID</th>
@@ -74,7 +87,7 @@
                 <th>Project</th>
                 <th>Owner</th>
                 <th>Birth Date</th>
-                <th>Genotype Summary</th>
+                <th class="col-genotype">Genotype Summary</th>
             </tr>
         </thead>
         <tbody>
@@ -108,7 +121,16 @@
                     {% endif %}
                 </td>
                 <td>{{ row.mouse.birth_date|default:"-" }}</td>
-                <td>{{ row.genotype_summary|default:"-" }}</td>
+                <td class="col-genotype">
+                    {% if row.genotype_summary %}
+                        <div class="col-genotype-cell">
+                            <span class="col-genotype-text" title="{{ row.genotype_summary }}">{{ row.genotype_summary }}</span>
+                            <span class="col-genotype-more" aria-hidden="true" title="More text — drag the column border to widen">›</span>
+                        </div>
+                    {% else %}
+                        <span class="cell-empty">—</span>
+                    {% endif %}
+                </td>
             </tr>
             {% empty %}
             <tr>
@@ -117,6 +139,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </section>
 
 <section class="card">
@@ -153,4 +176,8 @@
 </section>
 
 {% include "includes/record_timeline.html" with created_at=cage.created_at updated_at=cage.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by extra_date_label="Created date (cage card)" extra_date_value=cage.created_date only %}
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'js/table_col_resize.js' %}?v={{ APP_RELEASE }}"></script>
 {% endblock %}
