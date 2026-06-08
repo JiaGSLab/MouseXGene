@@ -121,6 +121,35 @@ class StrainLineFormLociTests(TestCase):
         self.assertEqual(saved.expected_loci_list(), [])
         self.assertEqual(saved.expected_loci_config, [])
 
+    def test_save_preserves_tg_pos_neg_locus_type(self):
+        line = StrainLine.objects.create(
+            line_name="TgStrain",
+            name="TgStrain",
+            expected_loci_template="MyTg",
+        )
+        config = [
+            {
+                "locus_name": "MyTg",
+                "locus_type": "tg_pos_neg",
+                "chromosome_type": "autosomal",
+            }
+        ]
+        data = {
+            "name": "TgStrain",
+            "species": "mouse",
+            "source": "",
+            "category": StrainLine.Category.COMPOUND_STRAIN,
+            "background": StrainLine.BackgroundPreset.C57BL_6J,
+            "expected_loci_template": "MyTg",
+            "expected_loci_config": json.dumps(config),
+            "is_active": "on",
+            "notes": "",
+        }
+        form = StrainLineForm(data, instance=line)
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertEqual(saved.expected_loci_entries()[0]["locus_type"], "tg_pos_neg")
+
     def test_partial_save_with_name_updates_line_name(self):
         line = StrainLine.objects.create(
             line_name="Sync-Me",

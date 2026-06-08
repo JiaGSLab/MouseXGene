@@ -18,6 +18,7 @@ class StrainLine(ActorStampedModel):
         FLOX = "flox", "Flox"
         CRE_TRANSGENE = "cre_transgene", "Cre transgene"
         REPORTER_KI = "reporter_ki", "Reporter KI"
+        TG_POS_NEG = "tg_pos_neg", "Tg (pos/neg)"
         CUSTOM = "custom", "Custom"
 
     class ChromosomeType(models.TextChoices):

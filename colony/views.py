@@ -1057,6 +1057,22 @@ def _apply_mouse_genotype_rows(mouse: Mouse, rows: list[dict[str, str]]) -> int:
             continue
         cleaned = display.replace(" ", "")
         if "/" not in cleaned:
+            obj, _ = MouseGenotypeComponent.objects.get_or_create(
+                mouse=mouse,
+                locus_name=locus,
+                defaults={
+                    "strain_line": mouse.strain_line,
+                    "sort_order": i + 1,
+                },
+            )
+            obj.strain_line = mouse.strain_line
+            obj.zygosity = display.strip()
+            obj.allele_display_1 = ""
+            obj.allele_display_2 = ""
+            obj.chromosome_type = MouseGenotypeComponent.ChromosomeType.UNKNOWN
+            obj.zygosity_class = MouseGenotypeComponent.ZygosityClass.UNKNOWN
+            obj.save()
+            updated += 1
             continue
         allele_1, allele_2 = [part.strip() for part in cleaned.split("/", 1)]
         if not (allele_1 and allele_2):

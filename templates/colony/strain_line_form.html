@@ -181,7 +181,7 @@
 </section>
 
 {% if line %}
-    {% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining only %}
+    {% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining request=request only %}
 {% else %}
     <section class="card">
         <p class="muted">Save this strain line first, then you can attach PDF introductions on the detail page.</p>
@@ -212,11 +212,12 @@
     if (!hidden || !hiddenConfig || !rows || !addBtn) return;
 
     const LOCUS_TYPES = [
-        ["standard_autosomal", "standard_autosomal"],
-        ["flox", "flox"],
-        ["cre_transgene", "cre_transgene"],
-        ["reporter_ki", "reporter_ki"],
-        ["custom", "custom"],
+        ["standard_autosomal", "Standard autosomal"],
+        ["flox", "Flox"],
+        ["cre_transgene", "Cre transgene"],
+        ["reporter_ki", "Reporter KI"],
+        ["tg_pos_neg", "Tg (pos/neg)"],
+        ["custom", "Custom"],
     ];
     const CHROMOSOME_TYPES = [
         ["autosomal", "autosomal"],

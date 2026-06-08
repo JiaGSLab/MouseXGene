@@ -318,6 +318,10 @@ def _parse_genotype_display(text: str, row_number: int, locus_name: str, errors:
         "-": ("-", "-"),
     }
     alias = normalized.casefold()
+    if alias in {"pos", "positive", "tg+", "tgpos"}:
+        return "", "", "pos"
+    if alias in {"neg", "negative", "tg-", "tgneg"}:
+        return "", "", "neg"
     if alias in alias_map:
         allele_1, allele_2 = alias_map[alias]
         return allele_1, allele_2, f"{allele_1}/{allele_2}"

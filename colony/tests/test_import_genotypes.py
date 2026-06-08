@@ -81,6 +81,13 @@ class MouseImportGenotypeTests(TestCase):
         self.assertEqual(comps[0]["locus_name"], "Reporter")
         self.assertEqual(comps[0]["zygosity_display"], "mT/mG")
 
+    def test_tg_pos_neg_import_aliases(self):
+        rows = self._parse_xlsx({"MyTg": "pos", "OtherTg": "negative"})
+        comps = {c["locus_name"]: c for c in rows[0]["genotype_components"]}
+        self.assertEqual(comps["MyTg"]["zygosity_display"], "pos")
+        self.assertEqual(comps["MyTg"]["allele_1"], "")
+        self.assertEqual(comps["OtherTg"]["zygosity_display"], "neg")
+
     def test_genotype_slot_columns_import(self):
         rows = self._parse_xlsx(
             {},
