@@ -16,7 +16,7 @@ class StrainLine(ActorStampedModel):
     class LocusType(models.TextChoices):
         STANDARD_AUTOSOMAL = "standard_autosomal", "Standard autosomal"
         FLOX = "flox", "Flox"
-        CRE_TRANSGENE = "cre_transgene", "Cre transgene"
+        CRE_TRANSGENE = "cre_transgene", "Cre/CreERT2 knock-in"
         REPORTER_KI = "reporter_ki", "Reporter KI"
         TG_POS_NEG = "tg_pos_neg", "Tg (pos/neg)"
         CUSTOM = "custom", "Custom"

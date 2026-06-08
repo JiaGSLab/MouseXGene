@@ -271,7 +271,17 @@ class WeanLitterForm(forms.Form):
         DAM = "dam"
         NEW = "new"
 
-    target_cage = forms.ModelChoiceField(queryset=Cage.objects.none(), label="Target Cage")
+    target_cage = forms.ModelChoiceField(
+        queryset=Cage.objects.none(),
+        label="Target Cage",
+        required=False,
+    )
+    target_cage_lookup = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Or enter cage ID",
+        help_text="Type a cage ID to match if it is not in the filtered list.",
+    )
     wean_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}), label="Wean Date")
     number_of_pups = forms.IntegerField(min_value=1, label="Number of Pups")
     project_assignment_mode = forms.ChoiceField(
@@ -307,6 +317,17 @@ class WeanLitterForm(forms.Form):
         new_project_name = (cleaned_data.get("new_project_name") or "").strip()
         if mode == self.ProjectAssignmentMode.NEW and not new_project_name:
             self.add_error("new_project_name", "Please enter a project name.")
+
+        target_cage = cleaned_data.get("target_cage")
+        lookup = (cleaned_data.get("target_cage_lookup") or "").strip()
+        if lookup and not target_cage:
+            cage = Cage.objects.filter(cage_id__iexact=lookup).first()
+            if cage is None:
+                self.add_error("target_cage_lookup", f'No cage found matching "{lookup}".')
+            else:
+                cleaned_data["target_cage"] = cage
+        if not cleaned_data.get("target_cage"):
+            self.add_error("target_cage", "Select a target cage or enter a cage ID.")
         return cleaned_data
 
 
@@ -319,4 +340,13 @@ class PupEntryForm(forms.Form):
 
 
 def get_pup_formset(form_count: int):
-    return formset_factory(PupEntryForm, extra=form_count, min_num=form_count, validate_min=True)
+    """Return a formset class that always renders exactly ``form_count`` pup rows."""
+    expected = max(1, int(form_count))
+    BaseFormSet = formset_factory(PupEntryForm, extra=0, min_num=expected, validate_min=True)
+
+    class FixedCountPupFormSet(BaseFormSet):
+        def total_form_count(self):
+            # Ignore stale management-form TOTAL_FORMS from older page renders.
+            return expected
+
+    return FixedCountPupFormSet

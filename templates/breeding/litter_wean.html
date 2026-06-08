@@ -57,7 +57,8 @@
 </section>
 
 <section class="card">
-    <form method="post" class="form-layout">
+    {{ target_cage_choices|json_script:"wean-target-cage-choices" }}
+    <form method="post" class="form-layout" id="wean-litter-form">
         {% csrf_token %}
 
         {% if wean_form.non_field_errors %}
@@ -69,29 +70,111 @@
         {% endif %}
 
         {% for field in wean_form %}
+            {% if field.name == "target_cage" or field.name == "target_cage_lookup" or field.name == "number_of_pups" %}
+                {# Rendered in dedicated blocks below #}
+            {% else %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% endfor %}
+
+        <div class="card card-nested">
+            <h2>Target Cage</h2>
+            <p class="muted small-print">Choose project and/or owner, click <strong>Apply cage filter</strong>, then pick a cage or type a cage ID.</p>
+            <div class="filter-grid">
+                <div class="form-row">
+                    <label for="id_wean_project_filter">Filter by project</label>
+                    <select name="wean_cage_project_filter" id="id_wean_project_filter" class="filter-control">
+                        <option value="">All projects</option>
+                        {% for project in wean_project_options %}
+                            <option value="{{ project.id }}"{% if cage_project_filter == project.id|stringformat:"s" %} selected{% endif %}>{{ project.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="id_wean_owner_filter">Filter by owner</label>
+                    <select name="wean_cage_owner_filter" id="id_wean_owner_filter" class="filter-control">
+                        <option value="">All owners</option>
+                        {% for owner in wean_owner_options %}
+                            <option value="{{ owner.id }}"{% if cage_owner_filter == owner.id|stringformat:"s" %} selected{% endif %}>{{ owner.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="button" id="wean-cage-filter-apply">Apply cage filter</button>
+                <span class="muted small-print" id="wean-cage-filter-status">Showing all active cages.</span>
+            </div>
             <div class="form-row">
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {% if field.help_text %}
-                    <small class="muted">{{ field.help_text }}</small>
-                {% endif %}
-                {% if field.errors %}
+                <label for="id_target_cage">{{ wean_form.target_cage.label }}</label>
+                <select name="target_cage" id="id_target_cage">
+                    <option value="">---------</option>
+                </select>
+                {% if wean_form.target_cage.errors %}
                     <div class="field-error">
-                        {% for error in field.errors %}
+                        {% for error in wean_form.target_cage.errors %}
                             <div>{{ error }}</div>
                         {% endfor %}
                     </div>
                 {% endif %}
             </div>
-        {% endfor %}
-
-        <div class="form-actions">
-            <button type="submit" name="refresh_forms" value="1" class="button">Update Pup Fields</button>
+            <div class="form-row">
+                <label for="id_target_cage_lookup">{{ wean_form.target_cage_lookup.label }}</label>
+                {{ wean_form.target_cage_lookup }}
+                {% if wean_form.target_cage_lookup.help_text %}
+                    <small class="muted">{{ wean_form.target_cage_lookup.help_text }}</small>
+                {% endif %}
+                {% if wean_form.target_cage_lookup.errors %}
+                    <div class="field-error">
+                        {% for error in wean_form.target_cage_lookup.errors %}
+                            <div>{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            <p class="muted small-print">
+                Need a new cage?
+                <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>,
+                then return, click <strong>Apply cage filter</strong>, and select it or type its ID.
+            </p>
         </div>
 
-        {{ pup_formset.management_form }}
-        <h2>Pup Entries</h2>
-        {% for pup_form in pup_formset.forms %}
+        <div class="form-row">
+            <label for="id_number_of_pups">{{ wean_form.number_of_pups.label }}</label>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="button button-light" id="pup-count-minus" aria-label="Decrease pup count">−</button>
+                {{ wean_form.number_of_pups }}
+                <button type="button" class="button button-light" id="pup-count-plus" aria-label="Increase pup count">+</button>
+                <button type="submit" name="refresh_forms" value="1" class="button">Update Pup Fields</button>
+            </div>
+            {% if litter.total_born %}
+                <small class="muted">Default from total born ({{ litter.total_born }}). Use +/− to adjust, then click <strong>Update Pup Fields</strong> to refresh pup entry rows.</small>
+            {% else %}
+                <small class="muted">Use +/− to adjust number of pups, then click <strong>Update Pup Fields</strong> to refresh pup entry rows.</small>
+            {% endif %}
+            {% if wean_form.number_of_pups.errors %}
+                <div class="field-error">
+                    {% for error in wean_form.number_of_pups.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+
+        <h2>Pup Entries <span class="muted">({{ pup_forms|length }})</span></h2>
+        {% for pup_form in pup_forms %}
             <div class="card pup-card">
                 <h3>Pup {{ forloop.counter }}</h3>
                 {% for field in pup_form %}
@@ -116,4 +199,71 @@
         </div>
     </form>
 </section>
+
+<script>
+(() => {
+    const cages = JSON.parse(document.getElementById("wean-target-cage-choices").textContent || "[]");
+    const projectFilter = document.getElementById("id_wean_project_filter");
+    const ownerFilter = document.getElementById("id_wean_owner_filter");
+    const cageSelect = document.getElementById("id_target_cage");
+    const applyFilterBtn = document.getElementById("wean-cage-filter-apply");
+    const filterStatus = document.getElementById("wean-cage-filter-status");
+    const selectedCageId = "{{ wean_form.target_cage.value|default:''|escapejs }}";
+    const aliveMax = {% if pup_max_count %}{{ pup_max_count }}{% else %}null{% endif %};
+    const pupCountInput = document.getElementById("id_number_of_pups");
+    const minusBtn = document.getElementById("pup-count-minus");
+    const plusBtn = document.getElementById("pup-count-plus");
+
+    function filteredCages() {
+        const project = projectFilter?.value || "";
+        const owner = ownerFilter?.value || "";
+        return cages.filter(c => {
+            if (c.is_empty) return true;
+            if (project && !c.project_ids.map(String).includes(project)) return false;
+            if (owner && !c.owner_ids.map(String).includes(owner)) return false;
+            return true;
+        });
+    }
+
+    function renderCageOptions() {
+        if (!cageSelect) return;
+        const current = cageSelect.value || selectedCageId;
+        const rows = filteredCages();
+        cageSelect.innerHTML = '<option value="">---------</option>';
+        for (const cage of rows) {
+            const opt = document.createElement("option");
+            opt.value = String(cage.id);
+            opt.textContent = cage.is_empty ? `${cage.cage_id} (empty)` : cage.cage_id;
+            if (String(cage.id) === String(current)) opt.selected = true;
+            cageSelect.appendChild(opt);
+        }
+        if (filterStatus) {
+            const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
+            const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
+            filterStatus.textContent = `Showing ${rows.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
+        }
+    }
+
+    applyFilterBtn?.addEventListener("click", renderCageOptions);
+    renderCageOptions();
+
+    function clampPupCount(value) {
+        let n = Number.parseInt(String(value || "1"), 10);
+        if (!Number.isFinite(n) || n < 1) n = 1;
+        if (aliveMax !== null && n > aliveMax) n = aliveMax;
+        return n;
+    }
+
+    function adjustPupCount(delta) {
+        if (!pupCountInput) return;
+        pupCountInput.value = String(clampPupCount(Number(pupCountInput.value) + delta));
+    }
+
+    minusBtn?.addEventListener("click", () => adjustPupCount(-1));
+    plusBtn?.addEventListener("click", () => adjustPupCount(1));
+    pupCountInput?.addEventListener("change", () => {
+        pupCountInput.value = String(clampPupCount(pupCountInput.value));
+    });
+})();
+</script>
 {% endblock %}

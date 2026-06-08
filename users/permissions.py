@@ -127,11 +127,11 @@ def is_project_manager(user, project: Project | None) -> bool:
 
 
 def can_import(user) -> bool:
-    return is_admin(user) or is_manager(user)
+    return is_admin(user)
 
 
 def can_manage_breeding(user) -> bool:
-    return can_import(user)
+    return is_admin(user) or is_manager(user)
 
 
 def can_view_audit(user) -> bool:
@@ -198,7 +198,7 @@ def ensure_cage_status_change(user, cage, previous: str, new: str) -> None:
     }
     has_mice = Mouse.objects.filter(current_cage=cage).exists()
     if not has_mice:
-        if not (is_admin(user) or can_import(user)):
+        if not (is_admin(user) or is_manager(user)):
             raise PermissionDenied("Only lab admins or managers can change status on cages without mice.")
         return
     project_ids = set(Mouse.objects.filter(current_cage=cage).values_list("project_id", flat=True).distinct())

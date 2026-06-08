@@ -92,7 +92,7 @@
     const AUTOSOMAL_OPTIONS = {
         standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
         flox: ["+/+", "fl/+", "fl/fl", "+/-", "-/-", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "Custom"],
+        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
         reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
         tg_pos_neg: ["pos", "neg", "Custom"],
         custom: ["Custom"],
@@ -100,7 +100,7 @@
     const X_LINKED_FEMALE_OPTIONS = {
         standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
         flox: ["+/+", "fl/+", "fl/fl", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "Custom"],
+        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
         reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
         tg_pos_neg: ["pos", "neg", "Custom"],
         custom: ["+/+", "Cre/+", "Cre/Cre", "fl/+", "fl/fl", "KI/+", "KI/KI", "Custom"],
@@ -108,7 +108,7 @@
     const X_LINKED_MALE_OPTIONS = {
         standard_autosomal: ["+/Y", "-/Y", "Custom"],
         flox: ["+/Y", "fl/Y", "-/Y", "Custom"],
-        cre_transgene: ["+/Y", "Cre/Y", "-/Y", "Custom"],
+        cre_transgene: ["+/Y", "Cre/Y", "CreERT2/Y", "-/Y", "Custom"],
         reporter_ki: ["+/Y", "KI/Y", "-/Y", "Custom"],
         tg_pos_neg: ["pos", "neg", "Custom"],
         custom: ["+/Y", "Cre/Y", "-/Y", "fl/Y", "KI/Y", "Custom"],
@@ -296,6 +296,19 @@
     }
     applyDefaultProjectFromStrain();
     renderRows();
+
+    const formEl = document.querySelector("form.form-layout");
+    const statusSelect = document.getElementById("id_status");
+    const initialStatus = statusSelect?.dataset.initialStatus || "";
+    formEl?.addEventListener("submit", (event) => {
+        if (!statusSelect || initialStatus !== "active") return;
+        if (statusSelect.value === "active") return;
+        const label = statusSelect.options[statusSelect.selectedIndex]?.text || statusSelect.value;
+        const message = `Change mouse status from Active to "${label}"? This affects colony counts and workflows.`;
+        if (!window.confirm(message)) {
+            event.preventDefault();
+        }
+    });
 })();
 </script>
 {% endblock %}

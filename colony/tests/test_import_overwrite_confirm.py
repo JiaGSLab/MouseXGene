@@ -12,7 +12,7 @@ class ImportOverwriteConfirmTests(TestCase):
     def setUp(self):
         self.client = Client()
         self.user = get_user_model().objects.create_user(username="importmgr", password="x")
-        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
+        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.ADMIN)
         self.client.login(username="importmgr", password="x")
         self.strain = StrainLine.objects.create(line_name="TestStrain", name="TestStrain")
         self.project = Project.objects.create(name="P1", owner=self.user)

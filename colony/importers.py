@@ -6,6 +6,7 @@ import pandas as pd
 
 from users.import_prefix import apply_import_prefix_to_id
 
+from .id_uniqueness import find_conflicting_cage, find_conflicting_mouse
 from .models import Cage, Mouse, StrainLine
 
 
@@ -129,10 +130,11 @@ def parse_cage_import(
         if not cage_id:
             errors.append(f"Row {row_number}: cage_id is required.")
             continue
-        if cage_id in seen_cage_ids:
+        cage_key = cage_id.casefold()
+        if cage_key in seen_cage_ids:
             errors.append(f"Row {row_number}: duplicate cage_id '{cage_id}' in uploaded file.")
             continue
-        seen_cage_ids.add(cage_id)
+        seen_cage_ids.add(cage_key)
         cage_id_to_row_number[cage_id] = row_number
 
         if cage_type not in allowed_cage_types:
@@ -156,19 +158,15 @@ def parse_cage_import(
             }
         )
 
-    if seen_cage_ids:
-        existing_cage_ids = set(
-            Cage.objects.filter(cage_id__in=seen_cage_ids).values_list("cage_id", flat=True)
-        )
-        for row in rows:
-            row["_update"] = row["cage_id"] in existing_cage_ids
-        if not update_existing:
-            for cage_id in sorted(existing_cage_ids):
-                row_number = cage_id_to_row_number.get(cage_id, "?")
-                errors.append(f"Row {row_number}: cage_id '{cage_id}' already exists in database.")
-    else:
-        for row in rows:
-            row["_update"] = False
+    for row in rows:
+        conflict = find_conflicting_cage(row["cage_id"])
+        row["_update"] = conflict is not None
+        if not update_existing and conflict is not None:
+            row_number = cage_id_to_row_number.get(row["cage_id"], "?")
+            errors.append(
+                f"Row {row_number}: cage_id '{row['cage_id']}' is already used by cage #{conflict.pk} "
+                f"({conflict.get_status_display()}). IDs cannot be reused, including inactive cages."
+            )
 
     return CageImportResult(rows=rows, errors=errors)
 
@@ -436,10 +434,11 @@ def parse_mouse_import(
         if not mouse_uid:
             errors.append(f"Row {row_number}: mouse_uid is required.")
             continue
-        if mouse_uid in seen_mouse_uids:
+        uid_key = mouse_uid.casefold()
+        if uid_key in seen_mouse_uids:
             errors.append(f"Row {row_number}: duplicate mouse_uid '{mouse_uid}' in uploaded file.")
             continue
-        seen_mouse_uids.add(mouse_uid)
+        seen_mouse_uids.add(uid_key)
         uid_to_row_number[mouse_uid] = row_number
 
         if not sex:
@@ -572,16 +571,14 @@ def parse_mouse_import(
             }
         )
 
-    if seen_mouse_uids:
-        existing_uids = set(Mouse.objects.filter(mouse_uid__in=seen_mouse_uids).values_list("mouse_uid", flat=True))
-        for row in rows:
-            row["_update"] = row["mouse_uid"] in existing_uids
-        if not update_existing:
-            for mouse_uid in sorted(existing_uids):
-                row_number = uid_to_row_number.get(mouse_uid, "?")
-                errors.append(f"Row {row_number}: mouse_uid '{mouse_uid}' already exists in database.")
-    else:
-        for row in rows:
-            row["_update"] = False
+    for row in rows:
+        conflict = find_conflicting_mouse(row["mouse_uid"])
+        row["_update"] = conflict is not None
+        if not update_existing and conflict is not None:
+            row_number = uid_to_row_number.get(row["mouse_uid"], "?")
+            errors.append(
+                f"Row {row_number}: mouse_uid '{row['mouse_uid']}' is already used by mouse #{conflict.pk} "
+                f"({conflict.get_status_display()}). IDs cannot be reused, including inactive mice."
+            )
 
     return MouseImportResult(rows=rows, errors=errors)

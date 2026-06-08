@@ -39,7 +39,7 @@ class ImportUpsertParseTests(TestCase):
         )
         f = SimpleUploadedFile("c.csv", csv_content.encode("utf-8"), content_type="text/csv")
         result = parse_cage_import(f, update_existing=False)
-        self.assertTrue(any("already exists" in err for err in result.errors))
+        self.assertTrue(any("already used" in err for err in result.errors))
 
     def test_mouse_import_allows_existing_uid_when_update_enabled(self):
         csv_content = (
@@ -60,4 +60,4 @@ class ImportUpsertParseTests(TestCase):
         )
         f = SimpleUploadedFile("m.csv", csv_content.encode("utf-8"), content_type="text/csv")
         result = parse_mouse_import(f, update_existing=False)
-        self.assertTrue(any("already exists" in err for err in result.errors))
+        self.assertTrue(any("already used" in err for err in result.errors))

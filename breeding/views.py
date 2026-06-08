@@ -17,10 +17,11 @@ from openpyxl import Workbook
 
 from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
+from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
-from .forms import BreedingForm, LitterForm, LitterPupFormSet, WeanLitterForm, get_pup_formset
+from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm
 from .models import Breeding, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
@@ -354,6 +355,133 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
             }
         )
     return payload
+
+
+def _wean_target_cage_choices_payload() -> list[dict]:
+    cages = (
+        Cage.objects.filter(status=Cage.Status.ACTIVE)
+        .prefetch_related(
+            "current_mice__project",
+            "current_mice__project__owner",
+        )
+        .order_by("cage_id")
+    )
+    payload: list[dict] = []
+    for cage in cages:
+        mice = list(cage.current_mice.all())
+        project_ids = sorted({m.project_id for m in mice if m.project_id})
+        owner_ids = sorted(
+            {m.project.owner_id for m in mice if getattr(m, "project_id", None) and m.project.owner_id}
+        )
+        payload.append(
+            {
+                "id": cage.pk,
+                "cage_id": cage.cage_id,
+                "is_empty": not mice,
+                "project_ids": project_ids,
+                "owner_ids": owner_ids,
+            }
+        )
+    return payload
+
+
+def _wean_cage_filter_options() -> tuple[list[dict], list[dict]]:
+    projects = list(Project.objects.filter(is_active=True).order_by("name").values("id", "name"))
+    owner_ids = (
+        Mouse.objects.filter(current_cage__isnull=False)
+        .exclude(project__owner_id__isnull=True)
+        .values_list("project__owner_id", flat=True)
+        .distinct()
+    )
+    owners: list[dict] = []
+    User = get_user_model()
+    for user in User.objects.filter(pk__in=owner_ids).select_related("profile").order_by("username"):
+        owners.append(
+            {
+                "id": user.pk,
+                "name": (format_project_owner_label(user) or user.get_username() or str(user.pk)).strip(),
+            }
+        )
+    return projects, owners
+
+
+def _litter_wean_initial_pup_count(litter: Litter) -> int:
+    if litter.total_born:
+        return max(1, litter.total_born)
+    orphan_count = LitterPup.objects.filter(litter=litter, mouse_id__isnull=True).count()
+    if orphan_count:
+        return max(1, orphan_count)
+    return 1
+
+
+def _litter_wean_max_pup_count(litter: Litter) -> int | None:
+    if litter.total_born:
+        return max(1, litter.total_born)
+    return None
+
+
+def _parse_number_of_pups(post_data) -> int:
+    try:
+        return max(1, int(post_data.get("number_of_pups", "1")))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _pup_row_from_post(post_data, index: int) -> dict[str, str]:
+    return {
+        "mouse_uid": (post_data.get(f"pups-{index}-mouse_uid") or "").strip(),
+        "sex": post_data.get(f"pups-{index}-sex") or Mouse.Sex.UNKNOWN,
+        "ear_tag": (post_data.get(f"pups-{index}-ear_tag") or "").strip(),
+        "coat_color": (post_data.get(f"pups-{index}-coat_color") or "").strip(),
+        "notes": (post_data.get(f"pups-{index}-notes") or "").strip(),
+    }
+
+
+def _build_wean_pup_forms(number_of_pups: int, post_data=None, *, bind: bool = False):
+    """Build exactly ``number_of_pups`` pup forms (no formset; count always matches POST)."""
+    n = max(1, int(number_of_pups))
+    forms = []
+    for i in range(n):
+        prefix = f"pups-{i}"
+        if bind and post_data is not None:
+            forms.append(PupEntryForm(post_data, prefix=prefix))
+        elif post_data is not None:
+            forms.append(PupEntryForm(initial=_pup_row_from_post(post_data, i), prefix=prefix))
+        else:
+            forms.append(PupEntryForm(prefix=prefix))
+    return forms
+
+
+def _pup_forms_are_valid(pup_forms) -> bool:
+    return all(form.is_valid() for form in pup_forms)
+
+
+def _litter_wean_page_context(
+    *,
+    litter: Litter,
+    wean_form,
+    pup_forms,
+    offspring_template_loci,
+    breeding_sire=None,
+    breeding_dams=None,
+    cage_project_filter: str = "",
+    cage_owner_filter: str = "",
+) -> dict:
+    projects, owners = _wean_cage_filter_options()
+    return {
+        "litter": litter,
+        "wean_form": wean_form,
+        "pup_forms": pup_forms,
+        "pup_max_count": _litter_wean_max_pup_count(litter),
+        "offspring_template_loci": offspring_template_loci,
+        "breeding_sire": breeding_sire,
+        "breeding_dams": breeding_dams,
+        "target_cage_choices": _wean_target_cage_choices_payload(),
+        "wean_project_options": projects,
+        "wean_owner_options": owners,
+        "cage_project_filter": cage_project_filter,
+        "cage_owner_filter": cage_owner_filter,
+    }
 
 
 def user_can_edit_litter(user, litter: Litter) -> bool:
@@ -1268,37 +1396,43 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("litters:litter_detail", pk=litter.pk)
     if request.method == "POST":
         wean_form = WeanLitterForm(request.POST, sire_project=sire_project, dam_project=dam_project)
-        number_of_pups = 1
-        if wean_form.is_valid():
-            number_of_pups = wean_form.cleaned_data["number_of_pups"]
-        else:
-            try:
-                number_of_pups = max(1, int(request.POST.get("number_of_pups", "1")))
-            except ValueError:
-                number_of_pups = 1
+        number_of_pups = _parse_number_of_pups(request.POST)
+        cage_project_filter = (request.POST.get("wean_cage_project_filter") or "").strip()
+        cage_owner_filter = (request.POST.get("wean_cage_owner_filter") or "").strip()
+        refresh_forms = "refresh_forms" in request.POST
+        pup_forms = _build_wean_pup_forms(
+            number_of_pups,
+            request.POST,
+            bind=not refresh_forms,
+        )
 
-        PupFormSet = get_pup_formset(number_of_pups)
-        pup_formset = PupFormSet(request.POST, prefix="pups")
-
-        if "refresh_forms" in request.POST:
+        if refresh_forms:
             return render(
                 request,
                 "breeding/litter_wean.html",
-                {
-                    "litter": litter,
-                    "wean_form": wean_form,
-                    "pup_formset": pup_formset,
-                    "offspring_template_loci": offspring_template_loci,
-                },
+                _litter_wean_page_context(
+                    litter=litter,
+                    wean_form=wean_form,
+                    pup_forms=pup_forms,
+                    offspring_template_loci=offspring_template_loci,
+                    breeding_sire=breeding_sire or breeding.male,
+                    breeding_dams=breeding_dams,
+                    cage_project_filter=cage_project_filter,
+                    cage_owner_filter=cage_owner_filter,
+                ),
             )
 
         if wean_form.is_valid():
             wean_date = wean_form.cleaned_data["wean_date"]
-            if litter.alive_count is not None and number_of_pups > litter.alive_count:
-                wean_form.add_error("number_of_pups", "number_of_pups cannot exceed litter.alive_count.")
+            max_pups = _litter_wean_max_pup_count(litter)
+            if max_pups is not None and number_of_pups > max_pups:
+                wean_form.add_error(
+                    "number_of_pups",
+                    f"Number of pups cannot exceed total born ({max_pups}).",
+                )
 
-            if pup_formset.is_valid() and not wean_form.errors:
-                uid_list = [form.cleaned_data["mouse_uid"] for form in pup_formset.forms]
+            if _pup_forms_are_valid(pup_forms) and not wean_form.errors:
+                uid_list = [form.cleaned_data["mouse_uid"] for form in pup_forms]
                 duplicate_in_form = {uid for uid in uid_list if uid_list.count(uid) > 1}
                 if duplicate_in_form:
                     wean_form.add_error(
@@ -1306,11 +1440,19 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         f"Duplicate mouse_uid in form: {', '.join(sorted(duplicate_in_form))}.",
                     )
 
-                existing_uids = set(Mouse.objects.filter(mouse_uid__in=uid_list).values_list("mouse_uid", flat=True))
-                if existing_uids:
+                duplicate_conflicts: list[str] = []
+                for uid in uid_list:
+                    conflict = find_conflicting_mouse(uid)
+                    if conflict is not None:
+                        duplicate_conflicts.append(
+                            f"{uid} (used by #{conflict.pk}, {conflict.get_status_display()})"
+                        )
+                if duplicate_conflicts:
                     wean_form.add_error(
                         None,
-                        f"mouse_uid already exists in database: {', '.join(sorted(existing_uids))}.",
+                        "Mouse UID already exists and cannot be reused: "
+                        + ", ".join(sorted(duplicate_conflicts))
+                        + ".",
                     )
 
                 if not wean_form.errors:
@@ -1345,7 +1487,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     created_uids: list[str] = []
                     with transaction.atomic():
                         new_mice: list[Mouse] = []
-                        for form in pup_formset.forms:
+                        for form in pup_forms:
                             mouse = Mouse.objects.create(
                                 mouse_uid=form.cleaned_data["mouse_uid"],
                                 sex=form.cleaned_data["sex"],
@@ -1393,7 +1535,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         litter.wean_date = wean_date
                         if litter.litter_status == Litter.LitterStatus.ACTIVE:
                             litter.litter_status = Litter.LitterStatus.WEANED
-                        litter.save(update_fields=["wean_date", "litter_status", "updated_at"])
+                        litter.save(update_fields=["wean_date", "litter_status"])
 
                     messages.success(
                         request,
@@ -1411,21 +1553,20 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     )
                     return redirect("litters:litter_detail", pk=litter.pk)
     else:
-        initial_pups = 1
+        initial_pups = _litter_wean_initial_pup_count(litter)
         wean_form = WeanLitterForm(
             initial={"wean_date": litter.wean_date, "number_of_pups": initial_pups},
             sire_project=sire_project,
             dam_project=dam_project,
         )
-        PupFormSet = get_pup_formset(initial_pups)
-        pup_formset = PupFormSet(prefix="pups")
+        pup_forms = _build_wean_pup_forms(initial_pups)
 
-    context = {
-        "litter": litter,
-        "wean_form": wean_form,
-        "pup_formset": pup_formset,
-        "offspring_template_loci": offspring_template_loci,
-        "breeding_sire": breeding_sire or breeding.male,
-        "breeding_dams": breeding_dams,
-    }
+    context = _litter_wean_page_context(
+        litter=litter,
+        wean_form=wean_form,
+        pup_forms=pup_forms,
+        offspring_template_loci=offspring_template_loci,
+        breeding_sire=breeding_sire or breeding.male,
+        breeding_dams=breeding_dams,
+    )
     return render(request, "breeding/litter_wean.html", context)

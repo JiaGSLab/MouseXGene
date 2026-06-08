@@ -8,9 +8,11 @@ from django.utils import timezone
 from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
+from users.permissions import is_admin
 
 from core.models import Project, format_project_owner_label
 
+from .id_uniqueness import normalize_identifier, validate_cage_id_available, validate_mouse_uid_available
 from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
     CUSTOM_SELECT_VALUE,
@@ -72,6 +74,17 @@ class CageForm(forms.ModelForm):
             self.initial.setdefault("room_custom", stored)
         elif stored:
             self.initial.setdefault("room", stored)
+        self.fields["cage_id"].help_text = (
+            "Must be unique across the entire system. Retired or archived cage IDs cannot be reused."
+        )
+
+    def clean_cage_id(self):
+        cage_id = normalize_identifier(self.cleaned_data.get("cage_id"))
+        if not cage_id:
+            return cage_id
+        exclude_pk = self.instance.pk if self.instance and self.instance.pk else None
+        validate_cage_id_available(cage_id, exclude_pk=exclude_pk)
+        return cage_id
 
     def clean(self):
         cleaned = super().clean()
@@ -126,12 +139,15 @@ class MouseForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
-        kwargs.pop("user", None)
+        self.user = kwargs.pop("user", None)
         super().__init__(*args, **kwargs)
         active_strains = self.fields["strain_line"].queryset.filter(is_active=True)
         if self.instance and self.instance.pk and self.instance.strain_line_id:
             active_strains = (active_strains | StrainLine.objects.filter(pk=self.instance.strain_line_id)).distinct()
         self.fields["strain_line"].queryset = active_strains.order_by("line_name")
+        if self.instance.pk and self.instance.strain_line_id and not is_admin(self.user):
+            self.fields["strain_line"].disabled = True
+            self.fields["strain_line"].help_text = "Only lab admins can change strain line after it is set."
         self.fields["current_cage"].queryset = self.fields["current_cage"].queryset.order_by("cage_id")
         self.fields["sire"].queryset = self.fields["sire"].queryset.order_by("mouse_uid")
         self.fields["dam"].queryset = self.fields["dam"].queryset.order_by("mouse_uid")
@@ -139,6 +155,28 @@ class MouseForm(forms.ModelForm):
         self.fields["dam"].label = "Dam (Mother)"
         self.fields["project"].queryset = self.fields["project"].queryset.order_by("name")
         self.fields["project"].required = True
+        if self.instance.pk:
+            self.fields["status"].widget.attrs["data-initial-status"] = self.instance.status
+        self.fields["mouse_uid"].help_text = (
+            "Must be unique across the entire system. Dead, culled, or archived mouse UIDs cannot be reused."
+        )
+
+    def clean_mouse_uid(self):
+        mouse_uid = normalize_identifier(self.cleaned_data.get("mouse_uid"))
+        if not mouse_uid:
+            return mouse_uid
+        exclude_pk = self.instance.pk if self.instance and self.instance.pk else None
+        validate_mouse_uid_available(mouse_uid, exclude_pk=exclude_pk)
+        return mouse_uid
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.instance.pk and self.instance.strain_line_id and not is_admin(self.user):
+            new_strain = cleaned_data.get("strain_line")
+            if new_strain and new_strain.pk != self.instance.strain_line_id:
+                raise forms.ValidationError("Only lab admins can change strain line after it is set.")
+            cleaned_data["strain_line"] = self.instance.strain_line
+        return cleaned_data
 
 
 class MoveCageForm(forms.Form):
