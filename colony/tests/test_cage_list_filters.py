@@ -52,6 +52,14 @@ class CageListOwnerFilterTests(TestCase):
         self.assertContains(response, "OWN-CAGE-A")
         self.assertContains(response, "OWN-CAGE-B")
 
+    def test_cage_list_admin_defaults_to_all_owners(self):
+        admin = get_user_model().objects.create_user(username="cageadmin", password="x")
+        UserProfile.objects.filter(user=admin).update(role=UserProfile.Role.ADMIN)
+        self.client.login(username="cageadmin", password="x")
+        response = self.client.get(reverse("colony:cage_list"))
+        self.assertContains(response, "OWN-CAGE-A")
+        self.assertContains(response, "OWN-CAGE-B")
+
     def test_cage_list_owner_filter_options_include_project_owners(self):
         response = self.client.get(reverse("colony:cage_list"))
         self.assertContains(response, f'value="{self.user_a.pk}"')

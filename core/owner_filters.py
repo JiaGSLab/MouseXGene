@@ -7,6 +7,7 @@ from django.db.models import Q
 from django.http import HttpRequest
 
 from core.models import format_project_owner_label
+from users.permissions import is_admin
 
 OWNER_FILTER_ALL = "all"
 
@@ -21,6 +22,8 @@ def resolve_project_owner_filter(request: HttpRequest) -> str:
     if (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip():
         return ""
     if getattr(request.user, "is_authenticated", False):
+        if is_admin(request.user):
+            return ""
         return str(request.user.pk)
     return ""
 

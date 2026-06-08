@@ -39,6 +39,14 @@ class MouseListOwnerFilterTests(TestCase):
         self.assertContains(response, "M-OWNER-A")
         self.assertContains(response, "M-OWNER-B")
 
+    def test_admin_defaults_to_all_owners(self):
+        admin = get_user_model().objects.create_user(username="mouseadmin", password="x")
+        UserProfile.objects.filter(user=admin).update(role=UserProfile.Role.ADMIN)
+        self.client.login(username="mouseadmin", password="x")
+        response = self.client.get(self.url)
+        self.assertContains(response, "M-OWNER-A")
+        self.assertContains(response, "M-OWNER-B")
+
 
 class HomeOwnerScopeTests(TestCase):
     def setUp(self):
