@@ -57,6 +57,7 @@
                     <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
                 {% endfor %}
             </select>
+            {% include "includes/_owner_filter_select.html" %}
             <div class="filter-actions">
                 <button type="submit" class="button">Apply</button>
                 <a href="{% url 'mice:mouse_list' %}" class="button button-reset">Reset</a>

@@ -37,6 +37,7 @@
                     <option value="{{ item.pk }}" {% if breeding == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.breeding_code }}</option>
                 {% endfor %}
             </select>
+            {% include "includes/_owner_filter_select.html" %}
             <input type="date" name="birth_date_from" value="{{ birth_date_from }}" title="Birth from" class="filter-control">
             <input type="date" name="birth_date_to" value="{{ birth_date_to }}" title="Birth to" class="filter-control">
             <div class="filter-actions">

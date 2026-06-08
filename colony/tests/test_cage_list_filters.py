@@ -35,11 +35,22 @@ class CageListOwnerFilterTests(TestCase):
             current_cage=self.cage_b,
         )
 
-    def test_cage_list_filters_by_owner(self):
+    def test_cage_list_defaults_to_current_owner(self):
         url = reverse("colony:cage_list")
-        response = self.client.get(url, {"owner": str(self.user_a.pk)})
+        response = self.client.get(url)
         self.assertContains(response, "OWN-CAGE-A")
         self.assertNotContains(response, "OWN-CAGE-B")
+
+    def test_cage_list_filters_by_owner(self):
+        url = reverse("colony:cage_list")
+        response = self.client.get(url, {"owner": str(self.user_b.pk)})
+        self.assertNotContains(response, "OWN-CAGE-A")
+        self.assertContains(response, "OWN-CAGE-B")
+
+    def test_cage_list_all_owners_shows_every_cage(self):
+        response = self.client.get(reverse("colony:cage_list"), {"owner": "all"})
+        self.assertContains(response, "OWN-CAGE-A")
+        self.assertContains(response, "OWN-CAGE-B")
 
     def test_cage_list_owner_filter_options_include_project_owners(self):
         response = self.client.get(reverse("colony:cage_list"))

@@ -48,6 +48,10 @@ from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from core.models import AuditLog, ImportLog, Project, ProjectMembership, format_project_owner_label
+from core.owner_filters import (
+    project_owner_filter_options,
+    resolve_project_owner_filter,
+)
 from users.forms import UserImportPrefixForm
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
@@ -422,17 +426,6 @@ def paginate_queryset_for_list(
     }
 
 
-def cage_owner_filter_options():
-    """Users who own a project with at least one mouse currently in a cage."""
-    from django.contrib.auth import get_user_model
-
-    owner_ids = (
-        Mouse.objects.filter(current_cage__isnull=False)
-        .exclude(project__owner_id__isnull=True)
-        .values_list("project__owner_id", flat=True)
-        .distinct()
-    )
-    return get_user_model().objects.filter(pk__in=owner_ids).order_by("username")
 
 
 def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
@@ -465,7 +458,7 @@ def _filtered_cages_queryset(request: HttpRequest):
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
-    owner = (request.GET.get("owner") or request.GET.get("owner_id") or "").strip()
+    owner = resolve_project_owner_filter(request)
 
     cages = _scoped_cage_queryset(request.user)
     if include_inactive != "yes":
@@ -613,6 +606,7 @@ def _filtered_mice_queryset(request: HttpRequest):
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    owner = resolve_project_owner_filter(request)
 
     mice = _scoped_mouse_queryset(request.user)
     if include_inactive != "yes":
@@ -636,6 +630,8 @@ def _filtered_mice_queryset(request: HttpRequest):
         mice = mice.filter(current_cage_id=current_cage)
     if project:
         mice = mice.filter(project_id=project)
+    if owner:
+        mice = mice.filter(project__owner_id=owner)
 
     return mice
 
@@ -1779,7 +1775,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
-    owner = (request.GET.get("owner") or request.GET.get("owner_id") or "").strip()
+    owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
     cages = _filtered_cages_queryset(request)
@@ -1813,13 +1809,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "strain_line": strain_line,
         "strain_line_filter_label": strain_line_filter_label,
         "owner": owner,
-        "owner_options": [
-            {
-                "pk": user.pk,
-                "label": (format_project_owner_label(user) or user.get_username() or "").strip() or str(user.pk),
-            }
-            for user in cage_owner_filter_options()
-        ],
+        "owner_options": project_owner_filter_options(),
         "room_options": Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
         "rack_options": Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
         "cage_type_options": Cage.CageType.choices,
@@ -1928,10 +1918,6 @@ def _strain_line_usage_annotations() -> dict:
 @authenticated_required
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
-    if "active" in request.GET:
-        active = (request.GET.get("active") or "").strip()
-    else:
-        active = "yes"
     lines = StrainLine.objects.select_related("owner", "owner__profile", "created_by", "created_by__profile").annotate(
         pdf_count=Count("documents")
     )
@@ -1948,20 +1934,18 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
             | Q(owner__last_name__icontains=q)
             | Q(owner__profile__display_name__icontains=q)
         )
-    if active == "yes":
-        lines = lines.filter(is_active=True)
-    elif active == "no":
-        lines = lines.filter(is_active=False)
     lines = lines.annotate(**_strain_line_usage_annotations())
     lines = apply_list_sort(lines, request, STRAIN_LINE_LIST_SORT)
     lines = list(lines)
     for line in lines:
         for key, value in compute_strain_line_usage_counts(line.pk).items():
             setattr(line, key, value)
+    active_lines = [line for line in lines if line.is_active]
+    inactive_lines = [line for line in lines if not line.is_active]
     context = {
-        "lines": lines,
+        "active_lines": active_lines,
+        "inactive_lines": inactive_lines,
         "q": q,
-        "active": active,
         **build_list_sort_context(request, "colony:strain_line_list", STRAIN_LINE_LIST_SORT),
     }
     return render(request, "colony/strain_line_list.html", context)
@@ -2681,6 +2665,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
     age_sort = (request.GET.get("age_sort") or "").strip()
     if age_sort in ("old", "young") and not (request.GET.get("sort") or "").strip():
@@ -2723,6 +2708,8 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "current_cage": current_cage,
         "project": project,
         "include_inactive": include_inactive,
+        "owner": owner,
+        "owner_options": project_owner_filter_options(),
         "sex_options": Mouse.Sex.choices,
         **build_list_sort_context(request, "mice:mouse_list", MICE_LIST_SORT),
         "status_options": Mouse.Status.choices,

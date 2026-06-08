@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load list_sort_tags %}
 
 {% block title %}Strain Lines | MouseXGene{% endblock %}
 
@@ -18,11 +17,6 @@
     <form method="get" class="filter-form" id="strain-line-list-filters">
         <div class="filter-row filter-row--primary">
             <input id="id_q" class="search-input filter-control" type="text" name="q" value="{{ q }}" placeholder="Search strain line name or included loci" aria-label="Search strain lines">
-            <select id="id_active" name="active" class="filter-control" aria-label="Strain line status">
-                <option value="">All status</option>
-                <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
-                <option value="no" {% if active == "no" %}selected{% endif %}>Inactive</option>
-            </select>
             <div class="filter-actions">
                 <button type="submit" class="button">Apply</button>
                 <a href="{% url 'colony:strain_line_list' %}" class="button button-reset">Reset</a>
@@ -33,70 +27,16 @@
 
 <p class="muted small-print">Counts show <strong>active / total</strong>. Total links include inactive mice, cages, and closed records.</p>
 
-<section class="table-wrap table-wrap--data">
-    <table class="data-table data-table--compact data-table--striped">
-        <thead>
-            <tr>
-                {% sort_th "name" "Name" %}
-                {% sort_th "owner" "Owner" %}
-                {% sort_th "loci" "Included loci" %}
-                {% sort_th "pdf_count" "PDFs" extra_class="col-num-right" %}
-                {% sort_th "active_mice" "Mice" extra_class="col-num-right" %}
-                {% sort_th "active_cages" "Cages" extra_class="col-num-right" %}
-                {% sort_th "active_breedings" "Breedings" extra_class="col-num-right" %}
-                {% sort_th "active_litters" "Litters" extra_class="col-num-right" %}
-                {% sort_th "active" "Status" %}
-                <th scope="col"></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for line in lines %}
-                <tr class="{% if not line.is_active %}row-inactive{% endif %}">
-                    <td>
-                        <a class="link-primary" href="{% url 'colony:strain_line_detail' line.pk %}">
-                            {{ line.name|default:line.line_name }}
-                        </a>
-                    </td>
-                    <td>{{ line.owner_display }}</td>
-                    <td>
-                        {% with loci=line.expected_loci_list %}
-                            {% if loci %}
-                                {{ loci|join:", " }}
-                            {% else %}
-                                <span class="cell-empty">—</span>
-                            {% endif %}
-                        {% endwith %}
-                    </td>
-                    <td class="col-num-right">{% if line.pdf_count %}{{ line.pdf_count }}{% else %}<span class="cell-empty">—</span>{% endif %}</td>
-                    <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}" title="Active mice">{{ line.active_mice_count }}</a>
-                        <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All mice including inactive">{{ line.total_mice_count }}</a>
-                    </td>
-                    <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}" title="Cages with active mice of this strain">{{ line.active_cages_count }}</a>
-                        <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes" title="All cages including inactive mice/cages">{{ line.total_cages_count }}</a>
-                    </td>
-                    <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}" title="Active breedings">{{ line.active_breedings_count }}</a>
-                        <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All breedings including inactive">{{ line.total_breedings_count }}</a>
-                    </td>
-                    <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}" title="Active litters">{{ line.active_litters_count }}</a>
-                        <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All litters including ended/archived">{{ line.total_litters_count }}</a>
-                    </td>
-                    <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
-                    <td><a class="link-primary" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td class="empty-row" colspan="10">No strain lines yet. Create one before mouse data entry/import.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<section class="card">
+    <h2 class="form-section-title">Active strain lines</h2>
+    {% include "colony/_strain_line_list_table.html" with lines=active_lines empty_message="No active strain lines yet. Create one before mouse data entry/import." %}
 </section>
+
+{% if inactive_lines %}
+<section class="card">
+    <h2 class="form-section-title">Archived strain lines</h2>
+    <p class="muted small-print">Archived strain lines are listed separately; mice and history remain linked.</p>
+    {% include "colony/_strain_line_list_table.html" with lines=inactive_lines empty_message="No archived strain lines matching your search." %}
+</section>
+{% endif %}
 {% endblock %}

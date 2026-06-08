@@ -46,8 +46,8 @@
                 <option value="yes" {% if is_empty == "yes" %}selected{% endif %}>Empty Cages Only</option>
                 <option value="no" {% if is_empty == "no" %}selected{% endif %}>Non-Empty Cages Only</option>
             </select>
-            <select name="owner" class="filter-control">
-                <option value="">All Owners</option>
+            <select name="owner" class="filter-control" aria-label="Project owner">
+                <option value="all" {% if not owner %}selected{% endif %}>All Owners</option>
                 {% for item in owner_options %}
                     <option value="{{ item.pk }}" {% if owner == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.label }}</option>
                 {% endfor %}

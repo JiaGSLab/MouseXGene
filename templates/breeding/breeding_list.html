@@ -42,6 +42,7 @@
                     <option value="{{ option.pk }}" {% if setup_by == option.pk|stringformat:"s" %}selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
+            {% include "includes/_owner_filter_select.html" %}
             <select name="status" class="filter-control">
                 <option value="">All Status</option>
                 {% for value, label in status_options %}

@@ -28,6 +28,12 @@ from core.audit import log_audit_event
 from core.list_sort import BREEDING_LIST_SORT, LITTER_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels
 from core.models import AuditLog, Project, ProjectMembership, format_project_owner_label
+from core.owner_filters import (
+    breeding_project_owner_filter_q,
+    litter_project_owner_filter_q,
+    project_owner_filter_options,
+    resolve_project_owner_filter,
+)
 from users.permissions import (
     authenticated_required,
     ensure_can_edit_mice_projects,
@@ -555,11 +561,14 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     cage = (request.GET.get("cage") or "").strip()
     setup_by = (request.GET.get("setup_by") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
     breedings = _scoped_breedings(request.user)
     if include_inactive != "yes":
         breedings = breedings.filter(active=True)
+    if owner:
+        breedings = breedings.filter(breeding_project_owner_filter_q(owner))
     if setup_by:
         audit_pks: list[int] = []
         for oid in AuditLog.objects.filter(
@@ -659,6 +668,8 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
             pending_qs = pending_qs.filter(pk=cage)
         if q:
             pending_qs = pending_qs.filter(cage_id__icontains=q)
+        if owner:
+            pending_qs = pending_qs.filter(current_mice__project__owner_id=owner).distinct()
         pending_breeding_cages = list(pending_qs)
         for pending_cage in pending_breeding_cages:
             enrich_pending_breeding_cage(pending_cage)
@@ -672,6 +683,8 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "breeding_type": breeding_type,
         "cage": cage,
         "setup_by": setup_by,
+        "owner": owner,
+        "owner_options": project_owner_filter_options(),
         "setup_by_options": [
             {
                 "pk": user.pk,
@@ -913,6 +926,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     birth_date_to = (request.GET.get("birth_date_to") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     litter_status = (request.GET.get("litter_status") or "").strip()
+    owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
     litters = (
@@ -938,6 +952,8 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.exclude(
             litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
         )
+    if owner:
+        litters = litters.filter(litter_project_owner_filter_q(owner))
     if strain_line_id:
         try:
             litters = litters.filter(strain_line_member_litter_filter(int(strain_line_id)))
@@ -1158,6 +1174,8 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         "birth_date_to": birth_date_to,
         "include_inactive": include_inactive,
         "litter_status": litter_status,
+        "owner": owner,
+        "owner_options": project_owner_filter_options(),
         "litter_status_options": Litter.LitterStatus.choices,
         "breeding_options": _scoped_breedings(request.user).order_by("breeding_code"),
         "selected_breeding": selected_breeding,
