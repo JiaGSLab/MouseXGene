@@ -29,6 +29,7 @@ from .forms import (
 from .importers import (
     EXPECTED_COLUMNS,
     GENOTYPE_SLOT_COUNT,
+    GENOTYPE_EXPECTED_COLUMNS,
     MOUSE_EXPECTED_COLUMNS,
     MOUSE_IMPORT_TEMPLATE_COLUMNS,
     MouseImportOptions,
@@ -637,13 +638,17 @@ def _filtered_mice_queryset(request: HttpRequest):
 
 
 def get_mice_export_rows(request: HttpRequest) -> list[list]:
-    mice = apply_list_sort(
-        _filtered_mice_queryset(request)
-        .select_related("project", "project__owner", "project__owner__profile", "sire", "dam", "source_breeding", "source_breeding__cage")
-        .prefetch_related("genotypes__gene"),
-        request,
-        MICE_LIST_SORT,
+    mice = list(
+        apply_list_sort(
+            _filtered_mice_queryset(request)
+            .select_related("project", "project__owner", "project__owner__profile", "sire", "dam", "source_breeding", "source_breeding__cage")
+            .prefetch_related("genotypes__gene"),
+            request,
+            MICE_LIST_SORT,
+        )
     )
+    today = timezone.localdate()
+    breeding_badges_map = _active_breeding_badges_for_mouse_ids([m.pk for m in mice])
     rows: list[list] = []
     for mouse in mice:
         row_map: dict[str, str] = {col: "" for col in MOUSE_EXPECTED_COLUMNS}
@@ -680,17 +685,24 @@ def get_mice_export_rows(request: HttpRequest) -> list[list]:
             row_map[f"genotype_{idx}_assay_date"] = str(gt.assay_date) if gt.assay_date else ""
             row_map[f"genotype_{idx}_notes"] = gt.notes or ""
 
-        base_cols = [row_map[col] for col in MOUSE_EXPECTED_COLUMNS]
-        extras = [
-            mouse.project.owner_display if mouse.project else "",
-            build_short_genotype_summary(mouse),
-            str(mouse.death_date) if mouse.death_date else "",
-            str(mouse.euthanasia_date) if mouse.euthanasia_date else "",
-            mouse.death_reason or "",
-            mouse.created_at.isoformat(timespec="seconds"),
-            mouse.updated_at.isoformat(timespec="seconds"),
-        ]
-        rows.append(base_cols + extras)
+        export_row = dict(row_map)
+        export_row.update(
+            {
+                "genotype_summary": build_short_genotype_summary(mouse),
+                "age": _mouse_age_display(mouse.birth_date, today),
+                "breeding": _format_breeding_badges(breeding_badges_map.get(mouse.pk, [])),
+                "owner": mouse.project.owner_display if mouse.project else "",
+                "death_date": str(mouse.death_date) if mouse.death_date else "",
+                "euthanasia_date": str(mouse.euthanasia_date) if mouse.euthanasia_date else "",
+                "death_reason": mouse.death_reason or "",
+                "created_at": mouse.created_at.isoformat(timespec="seconds"),
+                "updated_at": mouse.updated_at.isoformat(timespec="seconds"),
+            }
+        )
+        rows.append(
+            [export_row[col] for col in MICE_EXPORT_PRIMARY_COLUMNS]
+            + [export_row[col] for col in MICE_EXPORT_DETAIL_COLUMNS]
+        )
     return rows
 
 
@@ -787,6 +799,23 @@ def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, lis
             if row.mouse_id in out:
                 out[row.mouse_id].append({"role": "Dam", "code": breeding.breeding_code})
     return out
+
+
+def _mouse_age_display(birth_date, today=None) -> str:
+    if not birth_date:
+        return ""
+    today = today or timezone.localdate()
+    age_days = (today - birth_date).days
+    if age_days < 0:
+        return ""
+    age_weeks, remaining_days = divmod(age_days, 7)
+    return f"{age_weeks}w {remaining_days}d"
+
+
+def _format_breeding_badges(badges: list[dict[str, str]]) -> str:
+    if not badges:
+        return ""
+    return "; ".join(f"{b['role']} · {b['code']}" for b in badges)
 
 
 def _normalize_name(value: str | None) -> str:
@@ -2619,9 +2648,27 @@ def cage_inventory_export_xlsx(request: HttpRequest, pk: int) -> HttpResponse:
     return build_xlsx_response(f"cage_{cage.cage_id}_inventory.xlsx", "CageInventory", headers, rows)
 
 
-MICE_EXPORT_EXTRA_COLUMNS = [
-    "owner",
+MICE_EXPORT_PRIMARY_COLUMNS = [
+    "mouse_uid",
+    "current_cage",
     "genotype_summary",
+    "sex",
+    "birth_date",
+    "age",
+    "strain_line",
+    "status",
+    "breeding",
+    "project",
+    "owner",
+]
+
+_MICE_EXPORT_PRIMARY_SOURCE_COLS = frozenset(
+    {"mouse_uid", "current_cage", "sex", "birth_date", "strain_line", "status", "project"}
+)
+
+MICE_EXPORT_DETAIL_COLUMNS = [
+    col for col in MOUSE_EXPECTED_COLUMNS if col not in _MICE_EXPORT_PRIMARY_SOURCE_COLS
+] + [
     "death_date",
     "euthanasia_date",
     "death_reason",
@@ -2631,7 +2678,7 @@ MICE_EXPORT_EXTRA_COLUMNS = [
 
 
 def _mice_export_headers() -> list[str]:
-    return MOUSE_EXPECTED_COLUMNS + MICE_EXPORT_EXTRA_COLUMNS
+    return MICE_EXPORT_PRIMARY_COLUMNS + MICE_EXPORT_DETAIL_COLUMNS
 
 
 def _mice_export_http_response(request: HttpRequest, export_fmt: str) -> HttpResponse:
@@ -3070,6 +3117,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     parent = (request.GET.get("parent") or "").strip()
+    owner = resolve_project_owner_filter(request)
 
     mice = (
         _scoped_mouse_queryset(request.user)
@@ -3096,6 +3144,8 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         mice = mice.filter(strain_line_id=strain_line)
     if project:
         mice = mice.filter(project_id=project)
+    if owner and not strain_line:
+        mice = mice.filter(project__owner_id=owner)
     if parent == "breeding":
         mice = mice.filter(source_breeding__isnull=False)
     elif parent == "sire":
@@ -3132,6 +3182,8 @@ def family_tree(request: HttpRequest) -> HttpResponse:
             "project": project,
             "include_inactive": include_inactive,
             "parent": parent,
+            "owner": owner,
+            "owner_options": project_owner_filter_options(),
             "sex_options": Mouse.Sex.choices,
             "strain_line_options": strain_line_model.objects.order_by("line_name"),
             "project_options": Project.objects.order_by("name"),

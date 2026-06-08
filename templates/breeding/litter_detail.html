@@ -61,7 +61,7 @@
                     <th>Role</th>
                     <th>Mouse</th>
                     <th>Cage</th>
-                    <th>Age (days)</th>
+                    <th>Age</th>
                     <th>Strain line</th>
                     <th>Genotype</th>
                     <th>Status</th>
@@ -79,7 +79,7 @@
                                 —
                             {% endif %}
                         </td>
-                        <td>{{ row.age_days|default:"-" }}</td>
+                        <td>{{ row.age_display|default:"-" }}</td>
                         <td>{{ row.mouse.strain_line|default:"-" }}</td>
                         <td>{{ row.genotype_summary|default:"-" }}</td>
                         <td>{{ row.status }}</td>

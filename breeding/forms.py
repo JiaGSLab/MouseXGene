@@ -9,8 +9,39 @@ from django.utils import timezone
 from colony.models import Cage, Mouse
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
 
+CAGE_LOOKUP_MATCH_LIMIT = 20
+
+
+def resolve_cage_from_lookup(lookup: str) -> tuple[Cage | None, str | None]:
+    """Resolve a cage from manual entry. Supports exact and partial (icontains) match."""
+    query = (lookup or "").strip()
+    if not query:
+        return None, None
+    exact = Cage.objects.filter(cage_id__iexact=query).first()
+    if exact is not None:
+        return exact, None
+    matches = list(Cage.objects.filter(cage_id__icontains=query).order_by("cage_id")[: CAGE_LOOKUP_MATCH_LIMIT + 1])
+    if not matches:
+        return None, f'No cage found matching "{query}". Create the cage first, then return to this form.'
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > CAGE_LOOKUP_MATCH_LIMIT:
+        return None, (
+            f'Too many cages match "{query}" (more than {CAGE_LOOKUP_MATCH_LIMIT}). '
+            "Enter a more specific cage ID."
+        )
+    codes = ", ".join(cage.cage_id for cage in matches[:5])
+    suffix = "…" if len(matches) > 5 else ""
+    return None, f'Multiple cages match "{query}": {codes}{suffix}. Enter a more specific cage ID.'
+
 
 class BreedingForm(forms.ModelForm):
+    cage_lookup = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Or enter cage ID",
+        help_text="Partial cage ID is supported. Must match an existing active cage.",
+    )
     male = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
     female_1 = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
     female_2 = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
@@ -60,7 +91,8 @@ class BreedingForm(forms.ModelForm):
         self.fields["breeding_code"].widget.attrs.update(
             {"placeholder": "Optional; auto-generated if left blank."}
         )
-        self.fields["cage"].queryset = self.fields["cage"].queryset.order_by("cage_id")
+        self.fields["cage"].queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        self.fields["cage"].required = False
         male_qs = Mouse.objects.filter(sex=Mouse.Sex.MALE).order_by("mouse_uid")
         self.fields["male"].queryset = male_qs
         self.fields["male"].required = False
@@ -192,6 +224,21 @@ class BreedingForm(forms.ModelForm):
                 }
             )
         self.warning_messages = warning_messages
+
+        cage = cleaned_data.get("cage")
+        lookup = (cleaned_data.get("cage_lookup") or "").strip()
+        if lookup:
+            resolved, err = resolve_cage_from_lookup(lookup)
+            if err:
+                self.add_error("cage_lookup", err)
+            elif resolved is not None:
+                if resolved.status != Cage.Status.ACTIVE:
+                    self.add_error("cage_lookup", f"Cage {resolved.cage_id} is not active.")
+                else:
+                    cleaned_data["cage"] = resolved
+        if not self.errors.get("cage_lookup") and not cleaned_data.get("cage"):
+            self.add_error("cage", "Select a cage or enter a cage ID.")
+
         return cleaned_data
 
     def save(self, commit=True):
@@ -271,19 +318,36 @@ class WeanLitterForm(forms.Form):
         DAM = "dam"
         NEW = "new"
 
-    target_cage = forms.ModelChoiceField(
+    class StrainAssignmentMode:
+        SIRE = "sire"
+        DAM = "dam"
+        NEW = "new"
+
+    male_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
-        label="Target Cage",
+        label="Male pups cage",
         required=False,
     )
-    target_cage_lookup = forms.CharField(
+    male_cage_lookup = forms.CharField(
         max_length=64,
         required=False,
-        label="Or enter cage ID",
-        help_text="Type a cage ID to match if it is not in the filtered list.",
+        label="Or enter male cage ID",
+        help_text="Partial cage ID supported. Required when weaning male pups.",
+    )
+    female_cage = forms.ModelChoiceField(
+        queryset=Cage.objects.none(),
+        label="Female pups cage",
+        required=False,
+    )
+    female_cage_lookup = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Or enter female cage ID",
+        help_text="Partial cage ID supported. Required when weaning female pups.",
     )
     wean_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}), label="Wean Date")
-    number_of_pups = forms.IntegerField(min_value=1, label="Number of Pups")
+    male_pup_count = forms.IntegerField(min_value=0, label="Male pups", initial=0)
+    female_pup_count = forms.IntegerField(min_value=0, label="Female pups", initial=0)
     project_assignment_mode = forms.ChoiceField(
         label="Pups Project",
         choices=(
@@ -299,16 +363,52 @@ class WeanLitterForm(forms.Form):
         label="New Project Name",
         help_text="Required when 'Create a new project' is selected.",
     )
+    strain_assignment_mode = forms.ChoiceField(
+        label="Pups Strain Line",
+        choices=(
+            (StrainAssignmentMode.SIRE, "Follow sire strain line"),
+            (StrainAssignmentMode.DAM, "Follow dam strain line"),
+            (StrainAssignmentMode.NEW, "Create a new strain line"),
+        ),
+        initial=StrainAssignmentMode.DAM,
+    )
+    new_strain_line_name = forms.CharField(
+        max_length=128,
+        required=False,
+        label="New Strain Line Name",
+        help_text="Required when 'Create a new strain line' is selected. Must be unique.",
+    )
 
-    def __init__(self, *args, sire_project=None, dam_project=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        sire_project=None,
+        dam_project=None,
+        sire_strain=None,
+        dam_strain=None,
+        pup_male_count=0,
+        pup_female_count=0,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
-        self.fields["target_cage"].queryset = Cage.objects.order_by("cage_id")
+        self.pup_male_count = int(pup_male_count or 0)
+        self.pup_female_count = int(pup_female_count or 0)
+        active_cages = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        self.fields["male_cage"].queryset = active_cages
+        self.fields["female_cage"].queryset = active_cages
         sire_label = sire_project.name if sire_project else "Sire project"
         dam_label = dam_project.name if dam_project else "Dam project"
         self.fields["project_assignment_mode"].choices = (
             (self.ProjectAssignmentMode.SIRE, f"Use sire project ({sire_label})"),
             (self.ProjectAssignmentMode.DAM, f"Use dam project ({dam_label})"),
             (self.ProjectAssignmentMode.NEW, "Create a new project"),
+        )
+        sire_strain_label = sire_strain.line_name if sire_strain else "No strain line"
+        dam_strain_label = dam_strain.line_name if dam_strain else "No strain line"
+        self.fields["strain_assignment_mode"].choices = (
+            (self.StrainAssignmentMode.SIRE, f"Follow sire strain line ({sire_strain_label})"),
+            (self.StrainAssignmentMode.DAM, f"Follow dam strain line ({dam_strain_label})"),
+            (self.StrainAssignmentMode.NEW, "Create a new strain line"),
         )
 
     def clean(self):
@@ -318,17 +418,61 @@ class WeanLitterForm(forms.Form):
         if mode == self.ProjectAssignmentMode.NEW and not new_project_name:
             self.add_error("new_project_name", "Please enter a project name.")
 
-        target_cage = cleaned_data.get("target_cage")
-        lookup = (cleaned_data.get("target_cage_lookup") or "").strip()
-        if lookup and not target_cage:
-            cage = Cage.objects.filter(cage_id__iexact=lookup).first()
-            if cage is None:
-                self.add_error("target_cage_lookup", f'No cage found matching "{lookup}".')
-            else:
-                cleaned_data["target_cage"] = cage
-        if not cleaned_data.get("target_cage"):
-            self.add_error("target_cage", "Select a target cage or enter a cage ID.")
+        strain_mode = cleaned_data.get("strain_assignment_mode")
+        new_strain_line_name = (cleaned_data.get("new_strain_line_name") or "").strip()
+        if strain_mode == self.StrainAssignmentMode.NEW and not new_strain_line_name:
+            self.add_error("new_strain_line_name", "Please enter a strain line name.")
+
+        male_pups = int(cleaned_data.get("male_pup_count") or 0)
+        female_pups = int(cleaned_data.get("female_pup_count") or 0)
+        if male_pups + female_pups < 1:
+            self.add_error("male_pup_count", "Enter at least one male or female pup to wean.")
+
+        male_cage = _resolve_wean_cage_assignment(
+            self,
+            cleaned_data,
+            cage_field="male_cage",
+            lookup_field="male_cage_lookup",
+        )
+        female_cage = _resolve_wean_cage_assignment(
+            self,
+            cleaned_data,
+            cage_field="female_cage",
+            lookup_field="female_cage_lookup",
+        )
+        if self.pup_male_count > 0 and male_cage is None and not self.errors.get("male_cage_lookup"):
+            self.add_error("male_cage", "Select a cage for male pups or enter a male cage ID.")
+        if self.pup_female_count > 0 and female_cage is None and not self.errors.get("female_cage_lookup"):
+            self.add_error("female_cage", "Select a cage for female pups or enter a female cage ID.")
+        if (
+            self.pup_male_count > 0
+            and self.pup_female_count > 0
+            and male_cage is not None
+            and female_cage is not None
+            and male_cage.pk == female_cage.pk
+        ):
+            self.add_error("female_cage", "Male and female pups must be placed in different cages.")
+        cleaned_data["male_cage"] = male_cage
+        cleaned_data["female_cage"] = female_cage
         return cleaned_data
+
+
+def _resolve_wean_cage_assignment(form, cleaned_data, *, cage_field: str, lookup_field: str) -> Cage | None:
+    cage = cleaned_data.get(cage_field)
+    lookup = (cleaned_data.get(lookup_field) or "").strip()
+    if lookup and not cage:
+        resolved, err = resolve_cage_from_lookup(lookup)
+        if err:
+            form.add_error(lookup_field, err)
+            return None
+        if resolved is not None and resolved.status != Cage.Status.ACTIVE:
+            form.add_error(lookup_field, f"Cage {resolved.cage_id} is not active.")
+            return None
+        return resolved
+    if cage is not None and cage.status != Cage.Status.ACTIVE:
+        form.add_error(cage_field, f"Cage {cage.cage_id} is not active.")
+        return None
+    return cage
 
 
 class PupEntryForm(forms.Form):
@@ -337,6 +481,22 @@ class PupEntryForm(forms.Form):
     ear_tag = forms.CharField(max_length=64, required=False, label="Ear Tag")
     coat_color = forms.CharField(max_length=64, required=False, label="Coat Color")
     notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Notes")
+
+
+class WeanPupEntryForm(PupEntryForm):
+    sex = forms.ChoiceField(
+        choices=(
+            (Mouse.Sex.MALE, "Male"),
+            (Mouse.Sex.FEMALE, "Female"),
+        ),
+        label="Sex",
+    )
+
+    def clean_sex(self):
+        sex = self.cleaned_data.get("sex")
+        if sex not in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}:
+            raise forms.ValidationError("Select Male or Female before weaning.")
+        return sex
 
 
 def get_pup_formset(form_count: int):

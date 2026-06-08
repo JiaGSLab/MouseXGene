@@ -48,3 +48,16 @@ class BreedingFormUserFilterTests(TestCase):
         self.assertIn("Filter by user", html)
         self.assertIn("Alice Lab", html)
         self.assertIn("Bob Lab", html)
+        self.assertIn('id="id_breeding_cage_project_filter"', html)
+        self.assertIn('id="id_breeding_cage_owner_filter"', html)
+        self.assertIn('id="id_cage_lookup"', html)
+
+    def test_create_page_includes_project_owner_without_mice(self):
+        owner_only = get_user_model().objects.create_user(username="breedowneronly", password="x")
+        UserProfile.objects.filter(user=owner_only).update(display_name="Owner Without Mice")
+        Project.objects.create(name="Breeding Owner Project", owner=owner_only)
+        client = Client()
+        client.login(username="breedusera", password="x")
+        response = client.get(reverse("breeding:breeding_create"))
+        self.assertContains(response, "Owner Without Mice")
+        self.assertContains(response, f'value="{owner_only.pk}"')

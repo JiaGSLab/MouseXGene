@@ -252,6 +252,15 @@ BREEDING_LIST_SORT = ListSortRegistry(
 
 LITTER_LIST_SORT = ListSortRegistry(
     columns={
+        "owner": SortColumn(
+            "owner",
+            SortKind.TEXT,
+            ("_sort_owner",),
+            tie_breaker=("litter_code",),
+            prepare=lambda qs: qs.select_related("breeding__male__project__owner__profile").annotate(
+                _sort_owner=_owner_label("breeding__male__project__owner")
+            ),
+        ),
         "litter_code": SortColumn("litter_code", SortKind.TEXT, ("litter_code",), tie_breaker=("pk",)),
         "breeding": SortColumn("breeding", SortKind.TEXT, ("breeding__breeding_code",), tie_breaker=("litter_code",)),
         "birth_date": SortColumn("birth_date", SortKind.DATE, ("birth_date",), tie_breaker=("litter_code",)),

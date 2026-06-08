@@ -104,28 +104,28 @@
     <table class="data-table data-table--compact data-table--mice data-table--col-resize" id="mice-list-table" data-col-resize-key="mice-list">
         <colgroup>
             <col class="col-w-uid">
+            <col class="col-w-cage">
             <col class="col-w-genotype" data-min-width="72" data-resizable="1">
             <col class="col-w-sex">
             <col class="col-w-birth">
             <col class="col-w-age">
+            <col class="col-w-strain">
             <col class="col-w-status">
             <col class="col-w-breeding">
-            <col class="col-w-strain">
-            <col class="col-w-cage">
             <col class="col-w-project">
             <col class="col-w-owner">
         </colgroup>
         <thead>
             <tr>
                 {% sort_th "mouse_uid" "Mouse UID" extra_class="col-uid" %}
+                {% sort_th "cage" "Current Cage" %}
                 {% sort_th "genotype" "Genotype Summary" extra_class="col-genotype" %}
                 {% sort_th "sex" "Sex" %}
                 {% sort_th "birth_date" "Birth Date" %}
                 {% sort_th "age" "Age" extra_class="th-sort-age" %}
+                {% sort_th "strain_line" "Strain Line" %}
                 {% sort_th "status" "Status" %}
                 {% sort_th "breeding" "Breeding" %}
-                {% sort_th "strain_line" "Strain Line" %}
-                {% sort_th "cage" "Current Cage" %}
                 {% sort_th "project" "Project" %}
                 {% sort_th "owner" "Owner" %}
             </tr>
@@ -134,6 +134,13 @@
             {% for mouse in mice %}
             <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.list_age_band %}mouse-row-age mouse-row-age--{{ mouse.list_age_band }}{% endif %}">
                 <td class="col-uid"><a class="table-link col-uid-link" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
+                <td>
+                    {% if mouse.current_cage %}
+                        <a class="table-link" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage }}</a>
+                    {% else %}
+                        <span class="cell-empty">—</span>
+                    {% endif %}
+                </td>
                 <td class="col-genotype">
                     {% if mouse.genotype_summary %}
                         <div class="col-genotype-cell">
@@ -158,16 +165,6 @@
                         {% endif %}
                     </span>
                 </td>
-                <td><span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span></td>
-                <td>
-                    {% if mouse.active_breeding_badges %}
-                        {% for b in mouse.active_breeding_badges %}
-                            <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
-                        {% endfor %}
-                    {% else %}
-                        <span class="cell-empty">—</span>
-                    {% endif %}
-                </td>
                 <td>
                     {% if mouse.strain_line %}
                         <a class="table-link" href="{% url 'mice:mouse_list' %}?strain_line_id={{ mouse.strain_line_id }}">{{ mouse.strain_line }}</a>
@@ -175,9 +172,12 @@
                         <span class="cell-empty">—</span>
                     {% endif %}
                 </td>
+                <td><span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span></td>
                 <td>
-                    {% if mouse.current_cage %}
-                        <a class="table-link" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage }}</a>
+                    {% if mouse.active_breeding_badges %}
+                        {% for b in mouse.active_breeding_badges %}
+                            <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                        {% endfor %}
                     {% else %}
                         <span class="cell-empty">—</span>
                     {% endif %}

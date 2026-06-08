@@ -21,7 +21,7 @@ from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
-from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm
+from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
 from .models import Breeding, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
@@ -32,6 +32,7 @@ from core.owner_filters import (
     breeding_project_owner_filter_q,
     litter_project_owner_filter_q,
     project_owner_filter_options,
+    project_owner_wean_options,
     resolve_project_owner_filter,
 )
 from users.permissions import (
@@ -52,6 +53,17 @@ def _mouse_age_days(mouse: Mouse | None, *, today=None) -> int | None:
         return None
     local_today = today or timezone.localdate()
     return max((local_today - mouse.birth_date).days, 0)
+
+
+def _age_days_display(age_days: int | None) -> str:
+    if age_days is None:
+        return ""
+    age_weeks, remaining_days = divmod(age_days, 7)
+    return f"{age_weeks}w {remaining_days}d"
+
+
+def _mouse_age_weeks_display(mouse: Mouse | None, *, today=None) -> str:
+    return _age_days_display(_mouse_age_days(mouse, today=today))
 
 
 def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
@@ -273,7 +285,12 @@ def _breeding_sire_and_dams(breeding: Breeding) -> tuple[Mouse | None, list[Mous
     dams: list[Mouse] = []
     try:
         members = list(
-            breeding.breeding_members.select_related("mouse").all().order_by("role", "sort_order", "mouse__mouse_uid")
+            breeding.breeding_members.select_related(
+                "mouse",
+                "mouse__project",
+                "mouse__project__owner",
+                "mouse__project__owner__profile",
+            ).all().order_by("role", "sort_order", "mouse__mouse_uid")
         )
     except (ProgrammingError, OperationalError):
         members = []
@@ -289,10 +306,40 @@ def _breeding_sire_and_dams(breeding: Breeding) -> tuple[Mouse | None, list[Mous
         dams.append(breeding.female_1)
     if breeding.female_2:
         dams.append(breeding.female_2)
-    for row in breeding.extra_female_links.select_related("mouse").all().order_by("mouse__mouse_uid"):
+    for row in breeding.extra_female_links.select_related(
+        "mouse",
+        "mouse__project",
+        "mouse__project__owner",
+        "mouse__project__owner__profile",
+    ).all().order_by("mouse__mouse_uid"):
         if row.mouse not in dams:
             dams.append(row.mouse)
     return sire, dams
+
+
+def _litter_owner_rows(breeding: Breeding, sire_mouse: Mouse | None, dam_mices: list[Mouse]) -> list[dict]:
+    seen: set[int] = set()
+    rows: list[dict] = []
+    candidates: list[Mouse] = []
+    if sire_mouse:
+        candidates.append(sire_mouse)
+    candidates.extend(dam_mices)
+    if not candidates:
+        candidates = _breeding_member_mice(breeding)
+    for mouse in candidates:
+        if not mouse.project_id or not mouse.project.owner_id:
+            continue
+        if mouse.project.owner_id in seen:
+            continue
+        seen.add(mouse.project.owner_id)
+        owner = mouse.project.owner
+        rows.append(
+            {
+                "owner_id": owner.pk,
+                "owner_display": (format_project_owner_label(owner) or owner.get_username() or str(owner.pk)).strip(),
+            }
+        )
+    return rows
 
 
 def _active_breeding_codes_for_mouse_ids(mouse_ids: list[int], *, exclude_breeding_id: int | None = None) -> dict[int, list[str]]:
@@ -393,31 +440,109 @@ def _wean_target_cage_choices_payload() -> list[dict]:
 
 def _wean_cage_filter_options() -> tuple[list[dict], list[dict]]:
     projects = list(Project.objects.filter(is_active=True).order_by("name").values("id", "name"))
-    owner_ids = (
-        Mouse.objects.filter(current_cage__isnull=False)
-        .exclude(project__owner_id__isnull=True)
-        .values_list("project__owner_id", flat=True)
-        .distinct()
-    )
-    owners: list[dict] = []
-    User = get_user_model()
-    for user in User.objects.filter(pk__in=owner_ids).select_related("profile").order_by("username"):
-        owners.append(
-            {
-                "id": user.pk,
-                "name": (format_project_owner_label(user) or user.get_username() or str(user.pk)).strip(),
-            }
-        )
+    owners = project_owner_wean_options()
     return projects, owners
 
 
+def _breeding_form_cage_context() -> dict:
+    projects, owners = _wean_cage_filter_options()
+    return {
+        "breeding_cage_choices": _wean_target_cage_choices_payload(),
+        "cage_project_options": projects,
+        "cage_owner_options": owners,
+        "mouse_owner_options": owners,
+    }
+
+
+def _litter_wean_orphan_pups(litter: Litter) -> list[LitterPup]:
+    return list(litter.pups.filter(mouse_id__isnull=True).order_by("sort_order", "id"))
+
+
+def _litter_wean_initial_sex_counts(litter: Litter) -> tuple[int, int, str]:
+    """Return (male, female, source) where source is pups, litter, or manual."""
+    orphan_pups = _litter_wean_orphan_pups(litter)
+    if orphan_pups:
+        male_count = 0
+        female_count = 0
+        for pup in orphan_pups:
+            if pup.sex == Mouse.Sex.MALE:
+                male_count += 1
+            elif pup.sex == Mouse.Sex.FEMALE:
+                female_count += 1
+            else:
+                male_count += 1
+        return male_count, female_count, "pups"
+    if litter.male_count is not None and litter.female_count is not None:
+        male_count = max(litter.male_count, 0)
+        female_count = max(litter.female_count, 0)
+        if male_count + female_count > 0:
+            return male_count, female_count, "litter"
+    return 0, 0, "manual"
+
+
 def _litter_wean_initial_pup_count(litter: Litter) -> int:
+    male_count, female_count, _source = _litter_wean_initial_sex_counts(litter)
+    total = male_count + female_count
+    if total > 0:
+        return total
     if litter.total_born:
         return max(1, litter.total_born)
-    orphan_count = LitterPup.objects.filter(litter=litter, mouse_id__isnull=True).count()
-    if orphan_count:
-        return max(1, orphan_count)
-    return 1
+    return 0
+
+
+def _litter_wean_pup_initial_rows(litter: Litter) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for pup in _litter_wean_orphan_pups(litter):
+        sex = pup.sex if pup.sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE} else Mouse.Sex.MALE
+        rows.append(
+            {
+                "mouse_uid": "",
+                "sex": sex,
+                "ear_tag": pup.ear_tag or "",
+                "coat_color": pup.coat_color or "",
+                "notes": pup.notes or "",
+            }
+        )
+    return rows
+
+
+def _litter_wean_rows_from_sex_counts(litter: Litter) -> list[dict[str, str]]:
+    if litter.male_count is None or litter.female_count is None:
+        return []
+    rows: list[dict[str, str]] = []
+    blank = {"mouse_uid": "", "ear_tag": "", "coat_color": "", "notes": ""}
+    for _ in range(max(litter.male_count, 0)):
+        rows.append({**blank, "sex": Mouse.Sex.MALE})
+    for _ in range(max(litter.female_count, 0)):
+        rows.append({**blank, "sex": Mouse.Sex.FEMALE})
+    return rows
+
+
+def _litter_wean_prefill_rows(litter: Litter) -> list[dict[str, str]] | None:
+    orphan_rows = _litter_wean_pup_initial_rows(litter)
+    if orphan_rows:
+        return orphan_rows
+    count_rows = _litter_wean_rows_from_sex_counts(litter)
+    return count_rows or None
+
+
+def _litter_age_display(litter: Litter) -> str:
+    if not litter.birth_date:
+        return ""
+    days = max((timezone.localdate() - litter.birth_date).days, 0)
+    return _age_days_display(days)
+
+
+def _count_pup_sexes_from_post(post_data, number_of_pups: int) -> tuple[int, int]:
+    male_count = 0
+    female_count = 0
+    for index in range(number_of_pups):
+        sex = (post_data.get(f"pups-{index}-sex") or "").strip()
+        if sex == Mouse.Sex.MALE:
+            male_count += 1
+        elif sex == Mouse.Sex.FEMALE:
+            female_count += 1
+    return male_count, female_count
 
 
 def _litter_wean_max_pup_count(litter: Litter) -> int | None:
@@ -426,11 +551,20 @@ def _litter_wean_max_pup_count(litter: Litter) -> int | None:
     return None
 
 
-def _parse_number_of_pups(post_data) -> int:
+def _parse_wean_pup_counts(post_data) -> tuple[int, int]:
     try:
-        return max(1, int(post_data.get("number_of_pups", "1")))
+        male_count = max(0, int(post_data.get("male_pup_count", "0")))
     except (TypeError, ValueError):
-        return 1
+        male_count = 0
+    try:
+        female_count = max(0, int(post_data.get("female_pup_count", "0")))
+    except (TypeError, ValueError):
+        female_count = 0
+    return male_count, female_count
+
+
+def _expected_wean_pup_sex(index: int, male_count: int) -> str:
+    return Mouse.Sex.MALE if index < male_count else Mouse.Sex.FEMALE
 
 
 def _pup_row_from_post(post_data, index: int) -> dict[str, str]:
@@ -443,18 +577,27 @@ def _pup_row_from_post(post_data, index: int) -> dict[str, str]:
     }
 
 
-def _build_wean_pup_forms(number_of_pups: int, post_data=None, *, bind: bool = False):
-    """Build exactly ``number_of_pups`` pup forms (no formset; count always matches POST)."""
-    n = max(1, int(number_of_pups))
+def _build_wean_pup_forms(male_count, female_count, post_data=None, *, bind: bool = False, initial_rows=None):
+    """Build pup forms from male/female counts (male rows first, then female)."""
+    male_count = max(0, int(male_count or 0))
+    female_count = max(0, int(female_count or 0))
+    total = male_count + female_count
     forms = []
-    for i in range(n):
+    for i in range(total):
         prefix = f"pups-{i}"
+        expected_sex = _expected_wean_pup_sex(i, male_count)
         if bind and post_data is not None:
-            forms.append(PupEntryForm(post_data, prefix=prefix))
+            forms.append(WeanPupEntryForm(post_data, prefix=prefix))
         elif post_data is not None:
-            forms.append(PupEntryForm(initial=_pup_row_from_post(post_data, i), prefix=prefix))
+            row = _pup_row_from_post(post_data, i)
+            row["sex"] = expected_sex
+            forms.append(WeanPupEntryForm(initial=row, prefix=prefix))
+        elif initial_rows and i < len(initial_rows):
+            row = dict(initial_rows[i])
+            row["sex"] = expected_sex
+            forms.append(WeanPupEntryForm(initial=row, prefix=prefix))
         else:
-            forms.append(PupEntryForm(prefix=prefix))
+            forms.append(WeanPupEntryForm(initial={"sex": expected_sex}, prefix=prefix))
     return forms
 
 
@@ -470,10 +613,15 @@ def _litter_wean_page_context(
     offspring_template_loci,
     breeding_sire=None,
     breeding_dams=None,
+    wean_primary_dam=None,
+    breeding_has_trio_dam: bool = False,
+    wean_counts_source: str = "manual",
     cage_project_filter: str = "",
     cage_owner_filter: str = "",
 ) -> dict:
     projects, owners = _wean_cage_filter_options()
+    sire_strain = breeding_sire.strain_line if breeding_sire and breeding_sire.strain_line_id else None
+    dam_strain = wean_primary_dam.strain_line if wean_primary_dam and wean_primary_dam.strain_line_id else None
     return {
         "litter": litter,
         "wean_form": wean_form,
@@ -482,11 +630,19 @@ def _litter_wean_page_context(
         "offspring_template_loci": offspring_template_loci,
         "breeding_sire": breeding_sire,
         "breeding_dams": breeding_dams,
+        "wean_primary_dam": wean_primary_dam,
+        "breeding_has_trio_dam": breeding_has_trio_dam,
+        "wean_counts_source": wean_counts_source,
+        "sire_strain_line": sire_strain,
+        "dam_strain_line": dam_strain,
+        "litter_age_display": _litter_age_display(litter),
         "target_cage_choices": _wean_target_cage_choices_payload(),
         "wean_project_options": projects,
         "wean_owner_options": owners,
         "cage_project_filter": cage_project_filter,
         "cage_owner_filter": cage_owner_filter,
+        "litter_recorded_male_count": litter.male_count,
+        "litter_recorded_female_count": litter.female_count,
     }
 
 
@@ -532,6 +688,40 @@ def _union_loci_from_strain_lines(*strain_lines) -> list[str]:
             seen.add(key)
             out.append(text)
     return out
+
+
+def resolve_wean_strain_line(
+    *,
+    mode: str,
+    new_line_name: str,
+    sire: Mouse | None,
+    dam: Mouse | None,
+    user,
+    litter_display: str,
+    breeding_code: str,
+    default_project=None,
+) -> tuple[StrainLine | None, str | None]:
+    if mode == WeanLitterForm.StrainAssignmentMode.SIRE:
+        if not sire or not sire.strain_line_id:
+            return None, "Sire has no strain line assigned."
+        return sire.strain_line, None
+    if mode == WeanLitterForm.StrainAssignmentMode.DAM:
+        if not dam or not dam.strain_line_id:
+            return None, "Dam has no strain line assigned."
+        return dam.strain_line, None
+    name = (new_line_name or "").strip()
+    if not name:
+        return None, "Please enter a strain line name."
+    if StrainLine.objects.filter(line_name__iexact=name).exists():
+        return None, f'Strain line "{name}" already exists. Choose another name or follow sire/dam.'
+    line = StrainLine.objects.create(
+        line_name=name,
+        name=name,
+        owner=user,
+        default_project=default_project,
+        notes=f"Created during litter wean for {litter_display} ({breeding_code}).",
+    )
+    return line, None
 
 
 def _build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
@@ -773,6 +963,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
         "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
         "breeding_age_hints": TIER_HINT,
         "breeder_mouse_choices": _breeder_mouse_choices_payload(),
+        **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
 
@@ -828,6 +1019,7 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
         "breeding_age_hints": TIER_HINT,
         "breeder_mouse_choices": _breeder_mouse_choices_payload(editing_breeding_id=breeding.pk),
+        **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
 
@@ -952,10 +1144,20 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         .select_related(
             "breeding",
             "breeding__male",
+            "breeding__male__project",
+            "breeding__male__project__owner",
+            "breeding__male__project__owner__profile",
             "breeding__male__strain_line",
             "breeding__female_1",
+            "breeding__female_1__project",
+            "breeding__female_1__project__owner",
+            "breeding__female_1__project__owner__profile",
             "breeding__female_1__strain_line",
             "breeding__female_1__current_cage",
+            "breeding__female_2",
+            "breeding__female_2__project",
+            "breeding__female_2__project__owner",
+            "breeding__female_2__project__owner__profile",
             "breeding__cage",
         )
         .annotate(
@@ -1004,13 +1206,14 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         sire_mouse, dam_mice = _breeding_sire_and_dams(litter.breeding)
         litter.sire_mouse = sire_mouse
         litter.dam_mice = dam_mice
+        litter.owner_rows = _litter_owner_rows(litter.breeding, sire_mouse, dam_mice)
         litter.breeder_member_rows = []
         if sire_mouse:
             litter.breeder_member_rows.append(
                 {
                     "role": "Sire",
                     "mouse": sire_mouse,
-                    "age_days": _mouse_age_days(sire_mouse, today=today),
+                    "age_display": _mouse_age_weeks_display(sire_mouse, today=today),
                     "genotype_summary": _mouse_genotype_summary(sire_mouse),
                     "cage": sire_mouse.current_cage,
                 }
@@ -1020,7 +1223,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
                 {
                     "role": "Dam",
                     "mouse": dam,
-                    "age_days": _mouse_age_days(dam, today=today),
+                    "age_display": _mouse_age_weeks_display(dam, today=today),
                     "genotype_summary": _mouse_genotype_summary(dam),
                     "cage": dam.current_cage,
                 }
@@ -1055,6 +1258,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
 
         if litter.birth_date:
             litter.age_days = max((today - litter.birth_date).days, 0)
+            litter.age_display = _age_days_display(litter.age_days)
             litter.wean_due_date = litter.birth_date + timedelta(days=21)
             litter.wean_overdue_days = (
                 (today - litter.wean_due_date).days if (not litter.wean_date and today > litter.wean_due_date) else 0
@@ -1068,6 +1272,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
                 litter.weaning_status = f"Due in {remaining}d"
         else:
             litter.age_days = None
+            litter.age_display = ""
             litter.wean_due_date = None
             litter.wean_overdue_days = 0
             litter.weaning_status = "Unknown birth date"
@@ -1168,6 +1373,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
             continue
         litter.sire_mouse = enriched.sire_mouse
         litter.dam_mice = enriched.dam_mice
+        litter.owner_rows = enriched.owner_rows
         litter.breeder_member_rows = enriched.breeder_member_rows
         litter.primary_dam = enriched.primary_dam
         litter.sire_genotype_summary = enriched.sire_genotype_summary
@@ -1180,6 +1386,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litter.pups_count_display = enriched.pups_count_display
         litter.created_mice_count = enriched.created_mice_count
         litter.age_days = enriched.age_days
+        litter.age_display = enriched.age_display
         litter.wean_due_date = enriched.wean_due_date
         litter.wean_overdue_days = enriched.wean_overdue_days
         litter.weaning_status = enriched.weaning_status
@@ -1303,7 +1510,7 @@ def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
             {
                 "role": "Sire",
                 "mouse": breeding_sire,
-                "age_days": _mouse_age_days(breeding_sire, today=today),
+                "age_display": _mouse_age_weeks_display(breeding_sire, today=today),
                 "genotype_summary": _mouse_genotype_summary(breeding_sire),
                 "cage": breeding_sire.current_cage,
                 "status": breeding_sire.get_status_display(),
@@ -1314,7 +1521,7 @@ def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
             {
                 "role": "Dam",
                 "mouse": dam,
-                "age_days": _mouse_age_days(dam, today=today),
+                "age_display": _mouse_age_weeks_display(dam, today=today),
                 "genotype_summary": _mouse_genotype_summary(dam),
                 "cage": dam.current_cage,
                 "status": dam.get_status_display(),
@@ -1421,31 +1628,49 @@ def litter_end(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(
-        Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1").filter(
-            breeding__in=_scoped_breedings(request.user)
-        ),
+        Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1")
+        .prefetch_related("pups")
+        .filter(breeding__in=_scoped_breedings(request.user)),
         pk=pk,
     )
     breeding = litter.breeding
     breeding_sire, breeding_dams = _breeding_sire_and_dams(breeding)
-    sire_project = breeding.male.project
-    dam_project = breeding.female_1.project
+    wean_sire = breeding_sire or breeding.male
+    # Offspring dam is female_1 for now; trio female_2 is not used for strain/genotype in v1.
+    primary_dam = breeding_dams[0] if breeding_dams else breeding.female_1
+    breeding_has_trio_dam = bool(breeding.female_2_id)
+    sire_project = wean_sire.project if wean_sire and wean_sire.project_id else breeding.male.project
+    dam_project = primary_dam.project if primary_dam and primary_dam.project_id else breeding.female_1.project
+    wean_form_kwargs = {
+        "sire_project": sire_project,
+        "dam_project": dam_project,
+        "sire_strain": wean_sire.strain_line if wean_sire and wean_sire.strain_line_id else None,
+        "dam_strain": primary_dam.strain_line if primary_dam and primary_dam.strain_line_id else None,
+    }
     offspring_template_loci = _union_loci_from_strain_lines(
-        breeding.male.strain_line,
-        breeding.female_1.strain_line,
+        wean_sire.strain_line if wean_sire else None,
+        primary_dam.strain_line if primary_dam else None,
     )
     ensure_can_edit_mice_projects(request.user, _breeding_member_mice(breeding))
+    wean_counts_source = "manual"
     if litter.litter_status in (Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED):
         messages.error(request, "This litter is closed; you cannot wean additional pups.")
         return redirect("litters:litter_detail", pk=litter.pk)
     if request.method == "POST":
-        wean_form = WeanLitterForm(request.POST, sire_project=sire_project, dam_project=dam_project)
-        number_of_pups = _parse_number_of_pups(request.POST)
+        male_pup_count, female_pup_count = _parse_wean_pup_counts(request.POST)
+        number_of_pups = male_pup_count + female_pup_count
+        wean_form = WeanLitterForm(
+            request.POST,
+            pup_male_count=male_pup_count,
+            pup_female_count=female_pup_count,
+            **wean_form_kwargs,
+        )
         cage_project_filter = (request.POST.get("wean_cage_project_filter") or "").strip()
         cage_owner_filter = (request.POST.get("wean_cage_owner_filter") or "").strip()
         refresh_forms = "refresh_forms" in request.POST
         pup_forms = _build_wean_pup_forms(
-            number_of_pups,
+            male_pup_count,
+            female_pup_count,
             request.POST,
             bind=not refresh_forms,
         )
@@ -1461,6 +1686,9 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     offspring_template_loci=offspring_template_loci,
                     breeding_sire=breeding_sire or breeding.male,
                     breeding_dams=breeding_dams,
+                    wean_primary_dam=primary_dam,
+                    breeding_has_trio_dam=breeding_has_trio_dam,
+                    wean_counts_source="manual",
                     cage_project_filter=cage_project_filter,
                     cage_owner_filter=cage_owner_filter,
                 ),
@@ -1471,8 +1699,8 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
             max_pups = _litter_wean_max_pup_count(litter)
             if max_pups is not None and number_of_pups > max_pups:
                 wean_form.add_error(
-                    "number_of_pups",
-                    f"Number of pups cannot exceed total born ({max_pups}).",
+                    "female_pup_count",
+                    f"Total pups cannot exceed total born ({max_pups}).",
                 )
 
             if _pup_forms_are_valid(pup_forms) and not wean_form.errors:
@@ -1500,7 +1728,8 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     )
 
                 if not wean_form.errors:
-                    target_cage = wean_form.cleaned_data["target_cage"]
+                    male_cage = wean_form.cleaned_data["male_cage"]
+                    female_cage = wean_form.cleaned_data["female_cage"]
                     assignment_mode = wean_form.cleaned_data["project_assignment_mode"]
                     inherited_project = None
                     if assignment_mode == WeanLitterForm.ProjectAssignmentMode.SIRE:
@@ -1528,42 +1757,62 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                             )
                 if not wean_form.errors:
                     ensure_can_edit_project_data(request.user, inherited_project)
+                    pup_strain_line, strain_err = resolve_wean_strain_line(
+                        mode=wean_form.cleaned_data["strain_assignment_mode"],
+                        new_line_name=wean_form.cleaned_data.get("new_strain_line_name", ""),
+                        sire=wean_sire,
+                        dam=primary_dam,
+                        user=request.user,
+                        litter_display=litter.litter_id_display,
+                        breeding_code=breeding.breeding_code,
+                        default_project=inherited_project,
+                    )
+                    if strain_err:
+                        wean_form.add_error("strain_assignment_mode", strain_err)
+                if not wean_form.errors:
                     created_uids: list[str] = []
                     with transaction.atomic():
-                        new_mice: list[Mouse] = []
+                        weaned_entries: list[tuple[Mouse, Cage]] = []
                         for form in pup_forms:
+                            pup_sex = form.cleaned_data["sex"]
+                            target_cage = male_cage if pup_sex == Mouse.Sex.MALE else female_cage
                             mouse = Mouse.objects.create(
                                 mouse_uid=form.cleaned_data["mouse_uid"],
                                 sex=form.cleaned_data["sex"],
                                 birth_date=litter.birth_date,
                                 status=Mouse.Status.ACTIVE,
-                                strain_line=breeding.female_1.strain_line,
+                                strain_line=pup_strain_line,
                                 current_cage=target_cage,
-                                sire=breeding.male,
-                                dam=breeding.female_1,
+                                sire=wean_sire,
+                                dam=primary_dam,
                                 project=inherited_project,
                                 ear_tag=form.cleaned_data["ear_tag"],
                                 coat_color=form.cleaned_data["coat_color"],
                                 notes=form.cleaned_data["notes"],
                             )
-                            mouse.ensure_template_genotype_components(extra_loci=offspring_template_loci)
-                            new_mice.append(mouse)
+                            # Genotype loci = sire ∪ dam only; pup strain line is separate from PCR template.
+                            mouse.ensure_template_genotype_components(
+                                extra_loci=offspring_template_loci,
+                                include_strain_template=False,
+                            )
+                            weaned_entries.append((mouse, target_cage))
                             created_uids.append(mouse.mouse_uid)
 
                         CageMembership.objects.bulk_create(
                             [
                                 CageMembership(
                                     mouse=mouse,
-                                    cage=target_cage,
+                                    cage=cage,
                                     start_date=wean_date,
                                     end_date=None,
                                     is_current=True,
                                     reason="Weaned from litter",
                                     notes="",
                                 )
-                                for mouse in new_mice
+                                for mouse, cage in weaned_entries
                             ]
                         )
+                        new_mice = [mouse for mouse, _cage in weaned_entries]
 
                         orphan_pups = list(
                             LitterPup.objects.filter(litter=litter, mouse_id__isnull=True).order_by(
@@ -1591,19 +1840,32 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         obj=litter,
                         message=(
                             f"Weaned {len(created_uids)} pups from litter {litter.litter_code or litter.pk} "
-                            f"into cage {target_cage.cage_id} under project {inherited_project.name}: "
+                            f"into cages "
+                            f"{male_cage.cage_id if male_cage else '—'}"
+                            f" (male) / "
+                            f"{female_cage.cage_id if female_cage else '—'}"
+                            f" (female) under project {inherited_project.name} "
+                            f"and strain line {pup_strain_line.line_name if pup_strain_line else '—'}: "
                             f"{', '.join(created_uids)}."
                         ),
                     )
                     return redirect("litters:litter_detail", pk=litter.pk)
     else:
-        initial_pups = _litter_wean_initial_pup_count(litter)
+        initial_male, initial_female, wean_counts_source = _litter_wean_initial_sex_counts(litter)
+        initial_rows = _litter_wean_prefill_rows(litter)
         wean_form = WeanLitterForm(
-            initial={"wean_date": litter.wean_date, "number_of_pups": initial_pups},
-            sire_project=sire_project,
-            dam_project=dam_project,
+            initial={
+                "wean_date": litter.wean_date,
+                "male_pup_count": initial_male,
+                "female_pup_count": initial_female,
+            },
+            **wean_form_kwargs,
         )
-        pup_forms = _build_wean_pup_forms(initial_pups)
+        pup_forms = _build_wean_pup_forms(
+            initial_male,
+            initial_female,
+            initial_rows=initial_rows,
+        )
 
     context = _litter_wean_page_context(
         litter=litter,
@@ -1612,5 +1874,8 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
         offspring_template_loci=offspring_template_loci,
         breeding_sire=breeding_sire or breeding.male,
         breeding_dams=breeding_dams,
+        wean_primary_dam=primary_dam,
+        breeding_has_trio_dam=breeding_has_trio_dam,
+        wean_counts_source=wean_counts_source,
     )
     return render(request, "breeding/litter_wean.html", context)

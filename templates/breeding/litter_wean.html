@@ -5,45 +5,72 @@
 {% block content %}
 <section class="page-header">
     <h1>Wean litter</h1>
-    <p class="muted">Creates individual <strong>Mouse</strong> records (promotes pups into colony tracking) and sets the litter wean date. If you added <strong>pup rows</strong> on the litter edit page, new mice are linked to those rows in <em>sort order</em> when counts match.</p>
+    <p class="muted">Creates individual <strong>Mouse</strong> records and sets the litter wean date. Pups are split by sex into separate cages (male cage and/or female cage). Pup rows from the litter edit page are pre-filled when available.</p>
 </section>
 
 <section class="card">
-    <h2>Litter information</h2>
+    <h2>Litter summary</h2>
     <dl class="detail-grid">
         <dt>Litter ID</dt><dd>{{ litter.litter_id_display }}</dd>
-        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
-        <dt>Birth Date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
-        <dt>Total Born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
-        <dt>Alive Count</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
-        <dt>Dead Count</dt><dd>{{ litter.dead_count|default:"-" }}</dd>
-        <dt>Current Wean Date</dt><dd>{{ litter.wean_date|default:"-" }}</dd>
+        <dt>DOB</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
+        <dt>Age</dt><dd>{% if litter_age_display %}{{ litter_age_display }}{% else %}—{% endif %}</dd>
         <dt>Sire</dt>
         <dd>
             {% if breeding_sire %}
                 <a href="{% url 'mice:mouse_detail' breeding_sire.pk %}">{{ breeding_sire.mouse_uid }}</a>
+                {% if sire_strain_line %}
+                    <span class="muted">({{ sire_strain_line.line_name }})</span>
+                {% else %}
+                    <span class="muted">(no strain line)</span>
+                {% endif %}
             {% else %}
                 —
             {% endif %}
         </dd>
-        <dt>Dams</dt>
+        <dt>Dam (female_1)</dt>
         <dd>
-            {% if breeding_dams %}
-                {% for dam in breeding_dams %}
-                    <a href="{% url 'mice:mouse_detail' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
-                {% endfor %}
+            {% if wean_primary_dam %}
+                <a href="{% url 'mice:mouse_detail' wean_primary_dam.pk %}">{{ wean_primary_dam.mouse_uid }}</a>
+                {% if dam_strain_line %}
+                    <span class="muted">({{ dam_strain_line.line_name }})</span>
+                {% else %}
+                    <span class="muted">(no strain line)</span>
+                {% endif %}
             {% else %}
                 —
             {% endif %}
         </dd>
+        {% if breeding_dams|length > 1 %}
+            <dt>Other dams</dt>
+            <dd>
+                {% for dam in breeding_dams %}
+                    {% if dam.pk != wean_primary_dam.pk %}
+                        <a href="{% url 'mice:mouse_detail' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
+                    {% endif %}
+                {% endfor %}
+            </dd>
+        {% endif %}
+        <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
+        <dt>Total born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
+        <dt>Alive</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
     </dl>
+    {% if litter_recorded_male_count is not None and litter_recorded_female_count is not None %}
+        <p class="muted">Litter record: {{ litter_recorded_male_count }} male, {{ litter_recorded_female_count }} female.</p>
+    {% endif %}
+    {% if breeding_has_trio_dam %}
+        <p class="muted small-print">
+            Trio mating: offspring are linked to {{ wean_primary_dam.mouse_uid }} (female_1) as dam.
+            female_2 is not used for strain line or genotype templates in this version.
+        </p>
+    {% endif %}
 </section>
 
 <section class="card">
     <h2>Expected Offspring Loci (Combined Template)</h2>
     <p class="muted">
-        These loci are auto-created as empty genotype rows for each weaned pup (union of sire + dam strain templates).
-        The system does not guess final genotype values; fill them later from real genotyping results.
+        PCR template for each weaned pup: union of sire and dam strain line expected loci (deduplicated).
+        Pup strain line (Follow sire / Follow dam / Create new) is separate from which loci to test.
+        The system does not guess genotype results; fill them later from real genotyping.
     </p>
     {% if offspring_template_loci %}
         <ul class="mini-list">
@@ -70,8 +97,23 @@
         {% endif %}
 
         {% for field in wean_form %}
-            {% if field.name == "target_cage" or field.name == "target_cage_lookup" or field.name == "number_of_pups" %}
+            {% if field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
                 {# Rendered in dedicated blocks below #}
+            {% elif field.name == "new_strain_line_name" %}
+                <div class="form-row" id="wean-new-strain-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
             {% else %}
                 <div class="form-row">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -90,9 +132,78 @@
             {% endif %}
         {% endfor %}
 
+        <h2 class="card-subheading">Pups to wean</h2>
+        <div class="form-row">
+            <label for="id_male_pup_count">{{ wean_form.male_pup_count.label }}</label>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="button button-light" id="male-pup-count-minus" aria-label="Decrease male pup count">−</button>
+                {{ wean_form.male_pup_count }}
+                <button type="button" class="button button-light" id="male-pup-count-plus" aria-label="Increase male pup count">+</button>
+            </div>
+            {% if wean_form.male_pup_count.errors %}
+                <div class="field-error">
+                    {% for error in wean_form.male_pup_count.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+        <div class="form-row">
+            <label for="id_female_pup_count">{{ wean_form.female_pup_count.label }}</label>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="button button-light" id="female-pup-count-minus" aria-label="Decrease female pup count">−</button>
+                {{ wean_form.female_pup_count }}
+                <button type="button" class="button button-light" id="female-pup-count-plus" aria-label="Increase female pup count">+</button>
+            </div>
+            {% if wean_form.female_pup_count.errors %}
+                <div class="field-error">
+                    {% for error in wean_form.female_pup_count.errors %}
+                        <div>{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+        <p class="muted" id="wean-pup-count-summary" aria-live="polite"></p>
+        <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
+            <button type="button" class="button" id="wean-update-pup-entries-btn">Update pup entries</button>
+            <span class="muted small-print" id="wean-pup-entries-sync-hint"></span>
+        </div>
+        {% if wean_counts_source == "pups" %}
+            <small class="muted">Pre-filled from litter pup rows. Change male/female counts, then click <strong>Update pup entries</strong> or use +/−.</small>
+        {% elif wean_counts_source == "litter" %}
+            <small class="muted">Pre-filled from litter record ({{ litter_recorded_male_count }} male / {{ litter_recorded_female_count }} female). Adjust counts and update entries if needed.</small>
+        {% else %}
+            <small class="muted">Enter male and female pup counts, then click <strong>Update pup entries</strong> or use +/−.</small>
+        {% endif %}
+
+        <h2>Pup Entries <span class="muted" id="wean-pup-entries-count">({{ pup_forms|length }})</span></h2>
+        <p class="muted small-print">Each pup must be Male or Female. Male rows come first, then female rows. Sex determines which cage the mouse is placed into.</p>
+        <div id="wean-pup-entries">
+        {% for pup_form in pup_forms %}
+            <div class="card pup-card">
+                <h3>Pup {{ forloop.counter }}</h3>
+                {% for field in pup_form %}
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endfor %}
+        </div>
+
+        <p class="muted" id="wean-sex-summary" aria-live="polite"></p>
+
         <div class="card card-nested">
-            <h2>Target Cage</h2>
-            <p class="muted small-print">Choose project and/or owner, click <strong>Apply cage filter</strong>, then pick a cage or type a cage ID.</p>
+            <h2>Cage Assignment</h2>
+            <p class="muted small-print">Male and female pups must go to different cages. Choose project and/or owner, click <strong>Apply cage filter</strong>, then pick cages or type cage IDs.</p>
             <div class="filter-grid">
                 <div class="form-row">
                     <label for="id_wean_project_filter">Filter by project</label>
@@ -117,33 +228,71 @@
                 <button type="button" class="button" id="wean-cage-filter-apply">Apply cage filter</button>
                 <span class="muted small-print" id="wean-cage-filter-status">Showing all active cages.</span>
             </div>
-            <div class="form-row">
-                <label for="id_target_cage">{{ wean_form.target_cage.label }}</label>
-                <select name="target_cage" id="id_target_cage">
-                    <option value="">---------</option>
-                </select>
-                {% if wean_form.target_cage.errors %}
-                    <div class="field-error">
-                        {% for error in wean_form.target_cage.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+
+            <div id="wean-male-cage-section" hidden>
+                <h3>Male pups cage <span class="muted" id="wean-male-count-label"></span></h3>
+                <div class="form-row">
+                    <label for="id_male_cage">{{ wean_form.male_cage.label }}</label>
+                    <select name="male_cage" id="id_male_cage">
+                        <option value="">---------</option>
+                    </select>
+                    {% if wean_form.male_cage.errors %}
+                        <div class="field-error">
+                            {% for error in wean_form.male_cage.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-row">
+                    <label for="id_male_cage_lookup">{{ wean_form.male_cage_lookup.label }}</label>
+                    {{ wean_form.male_cage_lookup }}
+                    {% if wean_form.male_cage_lookup.help_text %}
+                        <small class="muted">{{ wean_form.male_cage_lookup.help_text }}</small>
+                    {% endif %}
+                    <p class="muted small-print" id="wean-male-cage-lookup-status" aria-live="polite"></p>
+                    {% if wean_form.male_cage_lookup.errors %}
+                        <div class="field-error">
+                            {% for error in wean_form.male_cage_lookup.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
             </div>
-            <div class="form-row">
-                <label for="id_target_cage_lookup">{{ wean_form.target_cage_lookup.label }}</label>
-                {{ wean_form.target_cage_lookup }}
-                {% if wean_form.target_cage_lookup.help_text %}
-                    <small class="muted">{{ wean_form.target_cage_lookup.help_text }}</small>
-                {% endif %}
-                {% if wean_form.target_cage_lookup.errors %}
-                    <div class="field-error">
-                        {% for error in wean_form.target_cage_lookup.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
+
+            <div id="wean-female-cage-section" hidden>
+                <h3>Female pups cage <span class="muted" id="wean-female-count-label"></span></h3>
+                <div class="form-row">
+                    <label for="id_female_cage">{{ wean_form.female_cage.label }}</label>
+                    <select name="female_cage" id="id_female_cage">
+                        <option value="">---------</option>
+                    </select>
+                    {% if wean_form.female_cage.errors %}
+                        <div class="field-error">
+                            {% for error in wean_form.female_cage.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="form-row">
+                    <label for="id_female_cage_lookup">{{ wean_form.female_cage_lookup.label }}</label>
+                    {{ wean_form.female_cage_lookup }}
+                    {% if wean_form.female_cage_lookup.help_text %}
+                        <small class="muted">{{ wean_form.female_cage_lookup.help_text }}</small>
+                    {% endif %}
+                    <p class="muted small-print" id="wean-female-cage-lookup-status" aria-live="polite"></p>
+                    {% if wean_form.female_cage_lookup.errors %}
+                        <div class="field-error">
+                            {% for error in wean_form.female_cage_lookup.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
             </div>
+
             <p class="muted small-print">
                 Need a new cage?
                 <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>,
@@ -151,50 +300,8 @@
             </p>
         </div>
 
-        <div class="form-row">
-            <label for="id_number_of_pups">{{ wean_form.number_of_pups.label }}</label>
-            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-                <button type="button" class="button button-light" id="pup-count-minus" aria-label="Decrease pup count">−</button>
-                {{ wean_form.number_of_pups }}
-                <button type="button" class="button button-light" id="pup-count-plus" aria-label="Increase pup count">+</button>
-                <button type="submit" name="refresh_forms" value="1" class="button">Update Pup Fields</button>
-            </div>
-            {% if litter.total_born %}
-                <small class="muted">Default from total born ({{ litter.total_born }}). Use +/− to adjust, then click <strong>Update Pup Fields</strong> to refresh pup entry rows.</small>
-            {% else %}
-                <small class="muted">Use +/− to adjust number of pups, then click <strong>Update Pup Fields</strong> to refresh pup entry rows.</small>
-            {% endif %}
-            {% if wean_form.number_of_pups.errors %}
-                <div class="field-error">
-                    {% for error in wean_form.number_of_pups.errors %}
-                        <div>{{ error }}</div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        </div>
-
-        <h2>Pup Entries <span class="muted">({{ pup_forms|length }})</span></h2>
-        {% for pup_form in pup_forms %}
-            <div class="card pup-card">
-                <h3>Pup {{ forloop.counter }}</h3>
-                {% for field in pup_form %}
-                    <div class="form-row">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.errors %}
-                            <div class="field-error">
-                                {% for error in field.errors %}
-                                    <div>{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-        {% endfor %}
-
         <div class="form-actions">
-            <button type="submit" class="button">Create Weaned Pups</button>
+            <button type="submit" class="button" id="wean-submit-btn">Create Weaned Pups</button>
             <a href="{% url 'litters:litter_detail' litter.pk %}" class="button">Cancel</a>
         </div>
     </form>
@@ -205,19 +312,228 @@
     const cages = JSON.parse(document.getElementById("wean-target-cage-choices").textContent || "[]");
     const projectFilter = document.getElementById("id_wean_project_filter");
     const ownerFilter = document.getElementById("id_wean_owner_filter");
-    const cageSelect = document.getElementById("id_target_cage");
+    const maleCageSelect = document.getElementById("id_male_cage");
+    const femaleCageSelect = document.getElementById("id_female_cage");
+    const maleCageLookup = document.getElementById("id_male_cage_lookup");
+    const femaleCageLookup = document.getElementById("id_female_cage_lookup");
     const applyFilterBtn = document.getElementById("wean-cage-filter-apply");
     const filterStatus = document.getElementById("wean-cage-filter-status");
-    const selectedCageId = "{{ wean_form.target_cage.value|default:''|escapejs }}";
+    const selectedMaleCageId = "{{ wean_form.male_cage.value|default:''|escapejs }}";
+    const selectedFemaleCageId = "{{ wean_form.female_cage.value|default:''|escapejs }}";
+    const maleSection = document.getElementById("wean-male-cage-section");
+    const femaleSection = document.getElementById("wean-female-cage-section");
+    const sexSummary = document.getElementById("wean-sex-summary");
+    const maleCountLabel = document.getElementById("wean-male-count-label");
+    const femaleCountLabel = document.getElementById("wean-female-count-label");
+    const maleLookupStatus = document.getElementById("wean-male-cage-lookup-status");
+    const femaleLookupStatus = document.getElementById("wean-female-cage-lookup-status");
     const aliveMax = {% if pup_max_count %}{{ pup_max_count }}{% else %}null{% endif %};
-    const pupCountInput = document.getElementById("id_number_of_pups");
-    const minusBtn = document.getElementById("pup-count-minus");
-    const plusBtn = document.getElementById("pup-count-plus");
+    const malePupCountInput = document.getElementById("id_male_pup_count");
+    const femalePupCountInput = document.getElementById("id_female_pup_count");
+    const maleMinusBtn = document.getElementById("male-pup-count-minus");
+    const malePlusBtn = document.getElementById("male-pup-count-plus");
+    const femaleMinusBtn = document.getElementById("female-pup-count-minus");
+    const femalePlusBtn = document.getElementById("female-pup-count-plus");
+    const pupCountSummary = document.getElementById("wean-pup-count-summary");
+    const pupEntriesContainer = document.getElementById("wean-pup-entries");
+    const pupEntriesCount = document.getElementById("wean-pup-entries-count");
+    const pupEntriesSyncHint = document.getElementById("wean-pup-entries-sync-hint");
+    const updatePupEntriesBtn = document.getElementById("wean-update-pup-entries-btn");
+    const weanForm = document.getElementById("wean-litter-form");
+    const submitBtn = document.getElementById("wean-submit-btn");
+    let entriesSynced = true;
+
+    function readPupCounts() {
+        let male = Number.parseInt(String(malePupCountInput?.value || "0"), 10);
+        let female = Number.parseInt(String(femalePupCountInput?.value || "0"), 10);
+        if (!Number.isFinite(male) || male < 0) male = 0;
+        if (!Number.isFinite(female) || female < 0) female = 0;
+        return { male, female };
+    }
+
+    function clampSexCount(value, otherCount) {
+        let n = Number.parseInt(String(value ?? "0"), 10);
+        if (!Number.isFinite(n) || n < 0) n = 0;
+        if (aliveMax !== null && n + otherCount > aliveMax) {
+            n = Math.max(0, aliveMax - otherCount);
+        }
+        return n;
+    }
+
+    function writePupCounts(male, female) {
+        if (malePupCountInput) malePupCountInput.value = String(male);
+        if (femalePupCountInput) femalePupCountInput.value = String(female);
+    }
+
+    function collectPupEntryValues() {
+        const rows = [];
+        pupEntriesContainer?.querySelectorAll(".pup-card").forEach((card) => {
+            rows.push({
+                mouse_uid: card.querySelector('[name$="-mouse_uid"]')?.value || "",
+                sex: card.querySelector('[name$="-sex"]')?.value || "",
+                ear_tag: card.querySelector('[name$="-ear_tag"]')?.value || "",
+                coat_color: card.querySelector('[name$="-coat_color"]')?.value || "",
+                notes: card.querySelector('[name$="-notes"]')?.value || "",
+            });
+        });
+        return rows;
+    }
+
+    function appendTextField(card, index, field, label, value) {
+        const row = document.createElement("div");
+        row.className = "form-row";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.htmlFor = `id_pups-${index}-${field}`;
+        fieldLabel.textContent = label;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.name = `pups-${index}-${field}`;
+        input.id = `id_pups-${index}-${field}`;
+        input.value = value || "";
+        if (field === "mouse_uid" || field === "ear_tag" || field === "coat_color") {
+            input.maxLength = 64;
+        }
+        row.appendChild(fieldLabel);
+        row.appendChild(input);
+        card.appendChild(row);
+    }
+
+    function appendSexField(card, index, sex) {
+        const row = document.createElement("div");
+        row.className = "form-row";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.htmlFor = `id_pups-${index}-sex`;
+        fieldLabel.textContent = "Sex";
+        const select = document.createElement("select");
+        select.name = `pups-${index}-sex`;
+        select.id = `id_pups-${index}-sex`;
+        for (const [value, text] of [["M", "Male"], ["F", "Female"]]) {
+            const opt = document.createElement("option");
+            opt.value = value;
+            opt.textContent = text;
+            if (value === sex) opt.selected = true;
+            select.appendChild(opt);
+        }
+        row.appendChild(fieldLabel);
+        row.appendChild(select);
+        card.appendChild(row);
+    }
+
+    function appendNotesField(card, index, value) {
+        const row = document.createElement("div");
+        row.className = "form-row";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.htmlFor = `id_pups-${index}-notes`;
+        fieldLabel.textContent = "Notes";
+        const textarea = document.createElement("textarea");
+        textarea.name = `pups-${index}-notes`;
+        textarea.id = `id_pups-${index}-notes`;
+        textarea.rows = 2;
+        textarea.value = value || "";
+        row.appendChild(fieldLabel);
+        row.appendChild(textarea);
+        card.appendChild(row);
+    }
+
+    function createPupCard(index, sex, data) {
+        const card = document.createElement("div");
+        card.className = "card pup-card";
+        const heading = document.createElement("h3");
+        heading.textContent = `Pup ${index + 1}`;
+        card.appendChild(heading);
+        appendTextField(card, index, "mouse_uid", "Mouse UID", data.mouse_uid);
+        appendSexField(card, index, sex);
+        appendTextField(card, index, "ear_tag", "Ear Tag", data.ear_tag);
+        appendTextField(card, index, "coat_color", "Coat Color", data.coat_color);
+        appendNotesField(card, index, data.notes);
+        return card;
+    }
+
+    function rebuildPupEntriesClient() {
+        if (!pupEntriesContainer) return;
+        const { male, female } = readPupCounts();
+        const existing = collectPupEntryValues();
+        const total = male + female;
+        pupEntriesContainer.replaceChildren();
+        for (let i = 0; i < male; i += 1) {
+            pupEntriesContainer.appendChild(createPupCard(i, "M", existing[i] || {}));
+        }
+        for (let i = 0; i < female; i += 1) {
+            pupEntriesContainer.appendChild(createPupCard(male + i, "F", existing[male + i] || {}));
+        }
+        if (pupEntriesCount) {
+            pupEntriesCount.textContent = `(${total})`;
+        }
+        entriesSynced = true;
+        if (pupEntriesSyncHint) {
+            pupEntriesSyncHint.textContent = total
+                ? `${total} pup entr${total === 1 ? "y" : "ies"} (${male}♂ · ${female}♀).`
+                : "";
+            pupEntriesSyncHint.className = "muted small-print";
+        }
+        syncPupCountSummary();
+    }
+
+    function markPupEntriesStale() {
+        entriesSynced = false;
+        if (pupEntriesSyncHint) {
+            pupEntriesSyncHint.textContent = "Counts changed — click Update pup entries or use +/− to refresh rows.";
+            pupEntriesSyncHint.className = "field-error small-print";
+        }
+        syncSexLayout();
+    }
+
+    function syncPupCountSummary() {
+        const { male, female } = readPupCounts();
+        const total = male + female;
+        if (pupCountSummary) {
+            if (total === 0) {
+                pupCountSummary.textContent = "Total: 0 pups — enter male and/or female counts.";
+            } else {
+                pupCountSummary.textContent = `Total: ${total} pup${total === 1 ? "" : "s"} (${male}♂ · ${female}♀)`;
+            }
+        }
+        syncSexLayout();
+    }
+
+    function clearCageBlock(selectEl, lookupInput, statusEl) {
+        if (selectEl) selectEl.value = "";
+        if (lookupInput) lookupInput.value = "";
+        if (statusEl) {
+            statusEl.textContent = "";
+            statusEl.className = "muted small-print";
+        }
+    }
+
+    function adjustSexCount(which, delta) {
+        const { male, female } = readPupCounts();
+        if (which === "male") {
+            writePupCounts(clampSexCount(male + delta, female), female);
+        } else {
+            writePupCounts(male, clampSexCount(female + delta, male));
+        }
+        rebuildPupEntriesClient();
+    }
+
+    function normalizeSexCountInput(which) {
+        const { male, female } = readPupCounts();
+        if (which === "male") {
+            writePupCounts(clampSexCount(male, female), female);
+        } else {
+            writePupCounts(male, clampSexCount(female, male));
+        }
+        rebuildPupEntriesClient();
+    }
+
+    function onPupCountInput() {
+        syncPupCountSummary();
+        markPupEntriesStale();
+    }
 
     function filteredCages() {
         const project = projectFilter?.value || "";
         const owner = ownerFilter?.value || "";
-        return cages.filter(c => {
+        return cages.filter((c) => {
             if (c.is_empty) return true;
             if (project && !c.project_ids.map(String).includes(project)) return false;
             if (owner && !c.owner_ids.map(String).includes(owner)) return false;
@@ -225,45 +541,189 @@
         });
     }
 
-    function renderCageOptions() {
-        if (!cageSelect) return;
-        const current = cageSelect.value || selectedCageId;
-        const rows = filteredCages();
-        cageSelect.innerHTML = '<option value="">---------</option>';
+    function renderSelectOptions(selectEl, selectedId) {
+        if (!selectEl) return;
+        const current = selectEl.value || selectedId;
+        let rows = filteredCages();
+        if (current && !rows.some((c) => String(c.id) === String(current))) {
+            const selected = cages.find((c) => String(c.id) === String(current));
+            if (selected) rows = [selected, ...rows];
+        }
+        selectEl.innerHTML = '<option value="">---------</option>';
         for (const cage of rows) {
             const opt = document.createElement("option");
             opt.value = String(cage.id);
             opt.textContent = cage.is_empty ? `${cage.cage_id} (empty)` : cage.cage_id;
             if (String(cage.id) === String(current)) opt.selected = true;
-            cageSelect.appendChild(opt);
+            selectEl.appendChild(opt);
         }
+    }
+
+    function renderCageOptions() {
+        renderSelectOptions(maleCageSelect, selectedMaleCageId);
+        renderSelectOptions(femaleCageSelect, selectedFemaleCageId);
         if (filterStatus) {
             const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
             const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
-            filterStatus.textContent = `Showing ${rows.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
+            filterStatus.textContent = `Showing ${filteredCages().length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
         }
     }
 
+    function countPupSexes() {
+        let maleCount = 0;
+        let femaleCount = 0;
+        let unknownCount = 0;
+        weanForm?.querySelectorAll('select[name$="-sex"]').forEach((select) => {
+            if (select.value === "M") maleCount += 1;
+            else if (select.value === "F") femaleCount += 1;
+            else unknownCount += 1;
+        });
+        return { maleCount, femaleCount, unknownCount };
+    }
+
+    function syncSexLayout() {
+        const { male: maleCount, female: femaleCount } = readPupCounts();
+        const fromEntries = countPupSexes();
+        const unknownCount = fromEntries.unknownCount;
+        const entryTotal = fromEntries.maleCount + fromEntries.femaleCount + unknownCount;
+        const entriesMatchCounts = entriesSynced
+            && entryTotal === maleCount + femaleCount
+            && fromEntries.maleCount === maleCount
+            && fromEntries.femaleCount === femaleCount
+            && unknownCount === 0;
+
+        if (maleSection) maleSection.hidden = maleCount === 0;
+        if (femaleSection) femaleSection.hidden = femaleCount === 0;
+        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus);
+        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus);
+        if (maleCountLabel) maleCountLabel.textContent = maleCount ? `(${maleCount})` : "";
+        if (femaleCountLabel) femaleCountLabel.textContent = femaleCount ? `(${femaleCount})` : "";
+
+        const total = maleCount + femaleCount;
+        const canSubmit = total > 0 && entriesMatchCounts;
+        if (submitBtn) {
+            submitBtn.disabled = !canSubmit;
+            if (!canSubmit && !entriesSynced) {
+                submitBtn.title = "Click Update pup entries after changing male/female counts.";
+            } else if (!canSubmit && total === 0) {
+                submitBtn.title = "Enter at least one male or female pup count.";
+            } else if (!canSubmit) {
+                submitBtn.title = "Assign Male or Female to every pup before weaning.";
+            } else {
+                submitBtn.title = "";
+            }
+        }
+        if (sexSummary) {
+            if (total === 0) {
+                sexSummary.textContent = "Enter male and/or female pup counts to show cage assignment.";
+                sexSummary.className = "muted";
+            } else if (!entriesSynced) {
+                sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ → click Update pup entries to refresh rows and cages.`;
+                sexSummary.className = "field-error";
+            } else if (unknownCount > 0) {
+                sexSummary.textContent = "Unknown sex present. Please assign Male/Female before weaning.";
+                sexSummary.className = "field-error";
+            } else if (maleCount > 0 && femaleCount > 0) {
+                sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ → requires 2 cages: male cage + female cage`;
+                sexSummary.className = "muted";
+            } else if (maleCount > 0) {
+                sexSummary.textContent = `${maleCount}♂ → requires 1 cage: male cage`;
+                sexSummary.className = "muted";
+            } else if (femaleCount > 0) {
+                sexSummary.textContent = `${femaleCount}♀ → requires 1 cage: female cage`;
+                sexSummary.className = "muted";
+            }
+        }
+    }
+
+    function lookupMatches(query) {
+        const q = query.trim().toLowerCase();
+        if (!q) return [];
+        return cages.filter((c) => String(c.cage_id || "").toLowerCase().includes(q));
+    }
+
+    function syncLookupToSelect(lookupInput, selectEl, statusEl) {
+        if (!lookupInput || !statusEl) return;
+        const query = lookupInput.value.trim();
+        if (!query) {
+            statusEl.textContent = "";
+            statusEl.className = "muted small-print";
+            return;
+        }
+        const matches = lookupMatches(query);
+        if (!matches.length) {
+            statusEl.textContent = `No cage found matching "${query}". Create the cage first.`;
+            statusEl.className = "field-error";
+            return;
+        }
+        if (matches.length === 1) {
+            if (selectEl) selectEl.value = String(matches[0].id);
+            statusEl.textContent = `Matched: ${matches[0].cage_id}`;
+            statusEl.className = "muted small-print";
+            return;
+        }
+        const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
+        statusEl.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
+        statusEl.className = "field-error";
+    }
+
     applyFilterBtn?.addEventListener("click", renderCageOptions);
-    renderCageOptions();
-
-    function clampPupCount(value) {
-        let n = Number.parseInt(String(value || "1"), 10);
-        if (!Number.isFinite(n) || n < 1) n = 1;
-        if (aliveMax !== null && n > aliveMax) n = aliveMax;
-        return n;
-    }
-
-    function adjustPupCount(delta) {
-        if (!pupCountInput) return;
-        pupCountInput.value = String(clampPupCount(Number(pupCountInput.value) + delta));
-    }
-
-    minusBtn?.addEventListener("click", () => adjustPupCount(-1));
-    plusBtn?.addEventListener("click", () => adjustPupCount(1));
-    pupCountInput?.addEventListener("change", () => {
-        pupCountInput.value = String(clampPupCount(pupCountInput.value));
+    maleCageLookup?.addEventListener("input", () => syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus));
+    femaleCageLookup?.addEventListener("input", () => syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus));
+    maleCageSelect?.addEventListener("change", () => {
+        if (maleCageLookup && maleCageSelect.value) {
+            const cage = cages.find((c) => String(c.id) === String(maleCageSelect.value));
+            if (cage) {
+                maleCageLookup.value = cage.cage_id;
+                syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
+            }
+        }
     });
+    femaleCageSelect?.addEventListener("change", () => {
+        if (femaleCageLookup && femaleCageSelect.value) {
+            const cage = cages.find((c) => String(c.id) === String(femaleCageSelect.value));
+            if (cage) {
+                femaleCageLookup.value = cage.cage_id;
+                syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus);
+            }
+        }
+    });
+    weanForm?.addEventListener("change", (event) => {
+        if (event.target && event.target.name && event.target.name.endsWith("-sex")) {
+            syncSexLayout();
+        }
+    });
+
+    maleMinusBtn?.addEventListener("click", () => adjustSexCount("male", -1));
+    malePlusBtn?.addEventListener("click", () => adjustSexCount("male", 1));
+    femaleMinusBtn?.addEventListener("click", () => adjustSexCount("female", -1));
+    femalePlusBtn?.addEventListener("click", () => adjustSexCount("female", 1));
+    malePupCountInput?.addEventListener("input", onPupCountInput);
+    femalePupCountInput?.addEventListener("input", onPupCountInput);
+    malePupCountInput?.addEventListener("change", () => normalizeSexCountInput("male"));
+    femalePupCountInput?.addEventListener("change", () => normalizeSexCountInput("female"));
+    updatePupEntriesBtn?.addEventListener("click", () => rebuildPupEntriesClient());
+
+    const strainMode = document.getElementById("id_strain_assignment_mode");
+    const newStrainRow = document.getElementById("wean-new-strain-row");
+    function syncStrainFields() {
+        if (!strainMode || !newStrainRow) return;
+        newStrainRow.hidden = strainMode.value !== "new";
+    }
+    strainMode?.addEventListener("change", syncStrainFields);
+
+    renderCageOptions();
+    syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
+    syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus);
+    syncStrainFields();
+    syncPupCountSummary();
+    if (pupEntriesSyncHint && pupEntriesContainer) {
+        const { male, female } = readPupCounts();
+        const total = male + female;
+        if (total) {
+            pupEntriesSyncHint.textContent = `${total} pup entr${total === 1 ? "y" : "ies"} (${male}♂ · ${female}♀).`;
+        }
+    }
 })();
 </script>
 {% endblock %}

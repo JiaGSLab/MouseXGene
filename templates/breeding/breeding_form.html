@@ -10,6 +10,7 @@
 
 <section class="card">
     {{ breeder_mouse_choices|json_script:"breeder-mouse-choices" }}
+    {{ breeding_cage_choices|json_script:"breeding-cage-choices" }}
     <form method="post" class="form-layout" id="breeding-form">
         {% csrf_token %}
 
@@ -29,6 +30,9 @@
                     <label for="id_mouse_owner_filter">Filter by user</label>
                     <select id="id_mouse_owner_filter" class="filter-control">
                         <option value="">All users</option>
+                        {% for owner in mouse_owner_options %}
+                            <option value="{{ owner.id }}">{{ owner.name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="form-row">
@@ -81,17 +85,70 @@
             {% if field.name == 'male' or field.name == 'female_1' or field.name == 'female_2' or field.name == 'extra_females' %}
                 {# Hidden: legacy compatibility fields, replaced by dynamic breeder-member rows #}
                 {{ field.as_hidden }}
-            {% elif field.name == 'sire' or field.name == 'dams' %}
-                {# Rendered in breeder selection block #}
+            {% elif field.name == 'sire' or field.name == 'dams' or field.name == 'cage_lookup' %}
+                {# Rendered in dedicated blocks #}
+            {% elif field.name == 'cage' %}
+                <div class="card card-nested">
+                    <h2>Cage</h2>
+                    <p class="muted small-print">Filter by project and/or owner, click <strong>Apply cage filter</strong>, then pick a cage or type a cage ID (partial match supported).</p>
+                    <div class="filter-grid">
+                        <div class="form-row">
+                            <label for="id_breeding_cage_project_filter">Filter by project</label>
+                            <select id="id_breeding_cage_project_filter" class="filter-control">
+                                <option value="">All projects</option>
+                                {% for project in cage_project_options %}
+                                    <option value="{{ project.id }}">{{ project.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_breeding_cage_owner_filter">Filter by owner</label>
+                            <select id="id_breeding_cage_owner_filter" class="filter-control">
+                                <option value="">All owners</option>
+                                {% for owner in cage_owner_options %}
+                                    <option value="{{ owner.id }}">{{ owner.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="button" id="breeding-cage-filter-apply">Apply cage filter</button>
+                        <span class="muted small-print" id="breeding-cage-filter-status">Showing all active cages.</span>
+                    </div>
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <label for="{{ form.cage_lookup.id_for_label }}">{{ form.cage_lookup.label }}</label>
+                        {{ form.cage_lookup }}
+                        {% if form.cage_lookup.help_text %}
+                            <small class="muted">{{ form.cage_lookup.help_text }}</small>
+                        {% endif %}
+                        <p class="muted small-print" id="breeding-cage-lookup-status" aria-live="polite"></p>
+                        {% if form.cage_lookup.errors %}
+                            <div class="field-error">
+                                {% for error in form.cage_lookup.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <small class="muted">
+                        Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
+                    </small>
+                </div>
             {% else %}
                 <div class="form-row">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                     {{ field }}
-                    {% if field.name == 'cage' %}
-                        <small class="muted">
-                            Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
-                        </small>
-                    {% endif %}
                     {% if field.errors %}
                         <div class="field-error">
                             {% for error in field.errors %}
@@ -173,12 +230,6 @@
         return out;
     }
     function fillFilters() {
-        const owners = uniqueBy(
-            mice
-                .filter(m => m.project_owner_id)
-                .map(m => ({ id: String(m.project_owner_id), name: m.project_owner_name || `User ${m.project_owner_id}` })),
-            x => x.id
-        ).sort((a, b) => a.name.localeCompare(b.name));
         const projects = uniqueBy(
             mice.filter(m => m.project_id).map(m => ({ id: String(m.project_id), name: m.project_name })),
             x => x.id
@@ -187,18 +238,22 @@
             mice.filter(m => m.strain_line_id).map(m => ({ id: String(m.strain_line_id), name: m.strain_line_name })),
             x => x.id
         ).sort((a, b) => a.name.localeCompare(b.name));
-        owners.forEach((owner) => {
-            const opt = document.createElement("option");
-            opt.value = owner.id;
-            opt.textContent = owner.name;
-            ownerFilter.appendChild(opt);
-        });
+        projectFilter.replaceChildren();
+        const projectDefault = document.createElement("option");
+        projectDefault.value = "";
+        projectDefault.textContent = "All projects";
+        projectFilter.appendChild(projectDefault);
         projects.forEach((p) => {
             const opt = document.createElement("option");
             opt.value = p.id;
             opt.textContent = p.name;
             projectFilter.appendChild(opt);
         });
+        strainFilter.replaceChildren();
+        const strainDefault = document.createElement("option");
+        strainDefault.value = "";
+        strainDefault.textContent = "All strain lines";
+        strainFilter.appendChild(strainDefault);
         strains.forEach((s) => {
             const opt = document.createElement("option");
             opt.value = s.id;
@@ -282,6 +337,105 @@
     projectFilter.addEventListener("change", renderBreederTable);
     strainFilter.addEventListener("change", renderBreederTable);
     breedingForm.addEventListener("submit", syncHiddenSelects);
+})();
+
+(() => {
+    const dataEl = document.getElementById("breeding-cage-choices");
+    const projectFilter = document.getElementById("id_breeding_cage_project_filter");
+    const ownerFilter = document.getElementById("id_breeding_cage_owner_filter");
+    const cageSelect = document.getElementById("id_cage");
+    const cageLookupInput = document.getElementById("id_cage_lookup");
+    const applyFilterBtn = document.getElementById("breeding-cage-filter-apply");
+    const filterStatus = document.getElementById("breeding-cage-filter-status");
+    const lookupStatus = document.getElementById("breeding-cage-lookup-status");
+    if (!dataEl || !cageSelect) return;
+
+    const cages = JSON.parse(dataEl.textContent || "[]");
+    const selectedCageId = "{{ form.cage.value|default:''|escapejs }}";
+
+    function filteredCages() {
+        const project = projectFilter?.value || "";
+        const owner = ownerFilter?.value || "";
+        return cages.filter((c) => {
+            if (c.is_empty) return true;
+            if (project && !c.project_ids.map(String).includes(project)) return false;
+            if (owner && !c.owner_ids.map(String).includes(owner)) return false;
+            return true;
+        });
+    }
+
+    function ensureSelectedCageOption(rows) {
+        const current = cageSelect.value || selectedCageId;
+        if (!current) return rows;
+        if (rows.some((c) => String(c.id) === String(current))) return rows;
+        const selected = cages.find((c) => String(c.id) === String(current));
+        return selected ? [selected, ...rows] : rows;
+    }
+
+    function renderCageOptions() {
+        const current = cageSelect.value || selectedCageId;
+        let rows = filteredCages();
+        rows = ensureSelectedCageOption(rows);
+        cageSelect.innerHTML = '<option value="">---------</option>';
+        for (const cage of rows) {
+            const opt = document.createElement("option");
+            opt.value = String(cage.id);
+            opt.textContent = cage.is_empty ? `${cage.cage_id} (empty)` : cage.cage_id;
+            if (String(cage.id) === String(current)) opt.selected = true;
+            cageSelect.appendChild(opt);
+        }
+        if (filterStatus) {
+            const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
+            const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
+            filterStatus.textContent = `Showing ${rows.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
+        }
+    }
+
+    function lookupMatches(query) {
+        const q = query.trim().toLowerCase();
+        if (!q) return [];
+        return cages.filter((c) => String(c.cage_id || "").toLowerCase().includes(q));
+    }
+
+    function syncLookupToSelect() {
+        if (!cageLookupInput || !lookupStatus) return;
+        const query = cageLookupInput.value.trim();
+        if (!query) {
+            lookupStatus.textContent = "";
+            lookupStatus.className = "muted small-print";
+            return;
+        }
+        const matches = lookupMatches(query);
+        if (!matches.length) {
+            lookupStatus.textContent = `No cage found matching "${query}". Create the cage first.`;
+            lookupStatus.className = "field-error";
+            return;
+        }
+        if (matches.length === 1) {
+            cageSelect.value = String(matches[0].id);
+            lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
+            lookupStatus.className = "muted small-print";
+            return;
+        }
+        const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
+        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
+        lookupStatus.className = "field-error";
+    }
+
+    applyFilterBtn?.addEventListener("click", renderCageOptions);
+    cageLookupInput?.addEventListener("input", syncLookupToSelect);
+    cageLookupInput?.addEventListener("change", syncLookupToSelect);
+    cageSelect.addEventListener("change", () => {
+        if (cageLookupInput && cageSelect.value) {
+            const cage = cages.find((c) => String(c.id) === String(cageSelect.value));
+            if (cage) {
+                cageLookupInput.value = cage.cage_id;
+                syncLookupToSelect();
+            }
+        }
+    });
+    renderCageOptions();
+    syncLookupToSelect();
 })();
 </script>
 {% endblock %}

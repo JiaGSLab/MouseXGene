@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.http import HttpRequest
 
-from core.models import format_project_owner_label
+from core.models import Project, format_project_owner_label
 from users.permissions import is_admin
 
 OWNER_FILTER_ALL = "all"
@@ -28,21 +28,24 @@ def resolve_project_owner_filter(request: HttpRequest) -> str:
     return ""
 
 
-def project_owner_filter_options():
-    from colony.models import Mouse
+def project_owner_users_queryset():
+    """All users who own at least one project (not limited to projects with mice)."""
+    owner_ids = Project.objects.values_list("owner_id", flat=True).distinct()
+    return get_user_model().objects.filter(pk__in=owner_ids).select_related("profile").order_by("username")
 
-    owner_ids = (
-        Mouse.objects.exclude(project__owner_id__isnull=True)
-        .values_list("project__owner_id", flat=True)
-        .distinct()
-    )
+
+def project_owner_filter_options():
     return [
         {
             "pk": user.pk,
             "label": (format_project_owner_label(user) or user.get_username() or "").strip() or str(user.pk),
         }
-        for user in get_user_model().objects.filter(pk__in=owner_ids).order_by("username")
+        for user in project_owner_users_queryset()
     ]
+
+
+def project_owner_wean_options():
+    return [{"id": item["pk"], "name": item["label"]} for item in project_owner_filter_options()]
 
 
 def breeding_project_owner_filter_q(owner_id: str | int) -> Q:

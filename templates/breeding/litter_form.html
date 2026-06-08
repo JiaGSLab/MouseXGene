@@ -9,7 +9,7 @@
 </section>
 
 <section class="card">
-    <form method="post" class="form-layout">
+    <form method="post" class="form-layout" onsubmit="return confirm('Save this litter record? The breeding will be marked as littered.');">
         {% csrf_token %}
 
         {% if form.non_field_errors %}

@@ -17,7 +17,7 @@
 <section class="page-header page-header-row">
     <div>
         <h1>Family Tree</h1>
-        <p class="muted">Pedigree hub: search mice and filter by strain, project, or parent links (up to 80 rows).</p>
+        <p class="muted">Pedigree hub: search mice and filter by strain, project, owner, or parent links (up to 80 rows).</p>
     </div>
 </section>
 
@@ -43,6 +43,7 @@
                     <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
                 {% endfor %}
             </select>
+            {% include "includes/_owner_filter_select.html" %}
             <select name="parent" class="filter-control" aria-label="Parent records">
                 {% for value, label in parent_options %}
                     <option value="{{ value }}" {% if parent == value %}selected{% endif %}>{{ label }}</option>

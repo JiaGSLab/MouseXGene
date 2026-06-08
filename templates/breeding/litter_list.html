@@ -82,6 +82,8 @@
     <table class="data-table data-table-compact">
         <thead>
             <tr>
+                {% sort_th "owner" "Owner" %}
+                <th scope="col">Actions</th>
                 {% sort_th "litter_code" "Litter ID" %}
                 {% sort_th "breeding" "Breeding" %}
                 {% sort_th "birth_date" "Birth date" %}
@@ -95,12 +97,29 @@
                 <th scope="col">Breeder Members</th>
                 {% sort_th "status" "Status" %}
                 <th scope="col">Alerts</th>
-                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for litter in litters %}
             <tr class="{% if litter.litter_status == 'archived' or litter.litter_status == 'ended' %}row-inactive{% endif %}">
+                <td class="cage-owners-cell">
+                    {% for row in litter.owner_rows %}
+                        <div class="cage-projects-cell__row">
+                            <a class="link-primary owner-cell" href="{% url 'accounts:user_detail' row.owner_id %}">{{ row.owner_display }}</a>
+                        </div>
+                    {% empty %}
+                        <span class="cell-empty">—</span>
+                    {% endfor %}
+                </td>
+                <td class="nowrap">
+                    <a href="{% url 'litters:litter_detail' litter.pk %}">View</a>
+                    {% if litter.user_can_edit %}
+                        · <a href="{% url 'litters:litter_edit' litter.pk %}">Edit</a>
+                    {% endif %}
+                    {% if litter.user_can_edit and not litter.wean_date and litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
+                        · <a href="{% url 'litters:litter_wean' litter.pk %}">Wean</a>
+                    {% endif %}
+                </td>
                 <td><a href="{% url 'litters:litter_detail' litter.pk %}"><strong>{{ litter.litter_id_display }}</strong></a></td>
                 <td>
                     <div><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding.breeding_code }}</a></div>
@@ -114,7 +133,7 @@
                     </div>
                 </td>
                 <td>{{ litter.birth_date|default:"-" }}</td>
-                <td>{% if litter.age_days is not None %}{{ litter.age_days }}d{% else %}—{% endif %}</td>
+                <td>{{ litter.age_display|default:"—" }}</td>
                 <td>{{ litter.pups_count_display|default:"—" }}</td>
                 <td>{{ litter.wean_due_date|default:"—" }}</td>
                 <td>
@@ -163,7 +182,7 @@
                                                     -
                                                 {% endif %}
                                             </td>
-                                            <td>{{ row.age_days|default:"-" }}d</td>
+                                            <td>{{ row.age_display|default:"-" }}</td>
                                             <td>{{ row.genotype_summary|default:"-" }}</td>
                                         </tr>
                                     {% endfor %}
@@ -182,19 +201,10 @@
                         <span class="muted">No alerts</span>
                     {% endif %}
                 </td>
-                <td class="nowrap">
-                    <a href="{% url 'litters:litter_detail' litter.pk %}">View</a>
-                    {% if litter.user_can_edit %}
-                        · <a href="{% url 'litters:litter_edit' litter.pk %}">Edit</a>
-                    {% endif %}
-                    {% if litter.user_can_edit and not litter.wean_date and litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
-                        · <a href="{% url 'litters:litter_wean' litter.pk %}">Wean</a>
-                    {% endif %}
-                </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="14" class="empty-row">No litter records match your filters.</td>
+                <td colspan="15" class="empty-row">No litter records match your filters.</td>
             </tr>
             {% endfor %}
         </tbody>
