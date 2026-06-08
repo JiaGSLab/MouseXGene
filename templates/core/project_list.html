@@ -28,38 +28,74 @@
     </form>
 </section>
 
-<section class="table-wrap table-wrap--data">
-    <table class="data-table data-table--compact data-table--striped">
-        <thead>
-            <tr>
-                {% sort_th "name" "Name" %}
-                {% sort_th "owner" "Owner" %}
-                {% sort_th "active" "Active" %}
-                <th scope="col">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for project in projects %}
+<section class="card">
+    <h2 class="form-section-title">Active projects</h2>
+    <div class="table-wrap table-wrap--data">
+        <table class="data-table data-table--compact data-table--striped">
+            <thead>
                 <tr>
-                    <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
-                    <td>{{ project.owner_display }}</td>
-                    <td><span class="status-pill {% if project.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ project.is_active|yesno:"Active,Archived" }}</span></td>
-                    <td>
-                        {% if can_import or is_admin %}
-                            <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
-                            <span class="muted">|</span>
-                            <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
-                        {% else %}
-                            <span class="muted">View only</span>
-                        {% endif %}
-                    </td>
+                    {% sort_th "name" "Name" %}
+                    {% sort_th "owner" "Owner" %}
+                    <th scope="col">Actions</th>
                 </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="4" class="empty-row">No projects available.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                {% for project in active_projects %}
+                    <tr>
+                        <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
+                        <td>{{ project.owner_display }}</td>
+                        <td>
+                            {% if can_import or is_admin %}
+                                <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
+                                <span class="muted">|</span>
+                                <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
+                            {% else %}
+                                <span class="muted">View only</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="empty-row">No active projects{% if q %} matching your search{% endif %}.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </section>
+
+{% if inactive_projects %}
+<section class="card">
+    <h2 class="form-section-title">Archived projects</h2>
+    <p class="muted small-print">Inactive projects are listed separately; mice and history remain linked.</p>
+    <div class="table-wrap table-wrap--data">
+        <table class="data-table data-table--compact data-table--striped">
+            <thead>
+                <tr>
+                    {% sort_th "name" "Name" %}
+                    {% sort_th "owner" "Owner" %}
+                    <th scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for project in inactive_projects %}
+                    <tr class="row-inactive">
+                        <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
+                        <td>{{ project.owner_display }}</td>
+                        <td>
+                            {% if can_import or is_admin %}
+                                <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
+                                <span class="muted">|</span>
+                                <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
+                            {% else %}
+                                <span class="muted">View only</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
 {% endblock %}

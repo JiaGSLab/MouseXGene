@@ -295,8 +295,11 @@ def project_list(request: HttpRequest) -> HttpResponse:
             | Q(description__icontains=q)
         )
     projects = apply_list_sort(projects, request, PROJECT_LIST_SORT)
+    active_projects = projects.filter(is_active=True)
+    inactive_projects = projects.filter(is_active=False)
     context = {
-        "projects": projects,
+        "active_projects": active_projects,
+        "inactive_projects": inactive_projects,
         "q": q,
         **build_list_sort_context(request, "project_list", PROJECT_LIST_SORT),
     }
