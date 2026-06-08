@@ -15,7 +15,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
 
-from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset
+from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
 from colony.models import Cage, CageMembership, Mouse
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
@@ -567,6 +567,9 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                 )
                 breeding = form.save()
                 mark_cage_as_breeding(breeding.cage)
+                moved = sync_breeding_member_cages(breeding)
+                if moved:
+                    messages.info(request, f"Moved {moved} breeder(s) into cage {breeding.cage.cage_id}.")
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
                 log_audit_event(
@@ -617,6 +620,9 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 )
                 breeding = form.save()
                 mark_cage_as_breeding(breeding.cage)
+                moved = sync_breeding_member_cages(breeding)
+                if moved:
+                    messages.info(request, f"Moved {moved} breeder(s) into cage {breeding.cage.cage_id}.")
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
                 log_audit_event(

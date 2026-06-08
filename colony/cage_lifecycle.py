@@ -238,6 +238,20 @@ def sync_cage_breeding_workflow(cage: Cage | None) -> Breeding | None:
     return None
 
 
+def sync_breeding_member_cages(breeding: Breeding | None) -> int:
+    """Move all breeding members into the breeding cage so colony views stay consistent."""
+    if breeding is None or not breeding.cage_id:
+        return 0
+    moved = 0
+    for mouse in breeding.member_mice():
+        if mouse.current_cage_id == breeding.cage_id:
+            continue
+        mouse.current_cage_id = breeding.cage_id
+        mouse.save(update_fields=["current_cage", "updated_at"])
+        moved += 1
+    return moved
+
+
 def sync_cages_after_mouse_change(
     *,
     current_cage_id: int | None,

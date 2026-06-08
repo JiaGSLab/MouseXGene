@@ -64,6 +64,22 @@ class Breeding(ActorStampedModel):
     def __str__(self) -> str:
         return self.breeding_code
 
+    def member_mice(self) -> list[Mouse]:
+        """All sire/dam mice on this breeding, including extra females."""
+        try:
+            members = [row.mouse for row in self.breeding_members.select_related("mouse").all()]
+        except Exception:
+            members = []
+        if members:
+            return members
+        fallback = [
+            self.male,
+            self.female_1,
+            self.female_2,
+            *[row.mouse for row in self.extra_female_links.select_related("mouse").all()],
+        ]
+        return [mouse for mouse in fallback if mouse is not None]
+
     def sync_members_from_legacy_fields(self) -> None:
         """Keep flexible breeding members synced from legacy fixed fields."""
         entries: list[tuple[str, int, Mouse]] = []

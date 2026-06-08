@@ -25,8 +25,20 @@ class StrainLinePdfUploadTests(TestCase):
     def test_edit_page_pdf_form_includes_csrf_token(self):
         response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'name="csrfmiddlewaretoken"')
-        self.assertContains(response, reverse("colony:strain_line_upload_documents", args=[self.line.pk]))
+        html = response.content.decode()
+        upload_action = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
+        self.assertIn(upload_action, html)
+        form_start = html.index('class="strain-pdf-upload-form"')
+        form_chunk = html[form_start : form_start + 600]
+        self.assertIn('name="csrfmiddlewaretoken"', form_chunk)
+
+    def test_detail_page_pdf_form_includes_csrf_token(self):
+        response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        form_start = html.index('class="strain-pdf-upload-form"')
+        form_chunk = html[form_start : form_start + 600]
+        self.assertIn('name="csrfmiddlewaretoken"', form_chunk)
 
     def test_upload_pdf_with_csrf_succeeds(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])

@@ -11,7 +11,8 @@ from django.urls import reverse
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
 from django.db import transaction
-from django.db.models import Count, F, Max, Q
+from django.db.models import Count, F, Max, OuterRef, Q, Subquery, IntegerField, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from openpyxl import Workbook
 
@@ -1808,12 +1809,51 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_list.html", context)
 
 
-def _strain_line_usage_annotations() -> dict:
+def _strain_line_breeding_count_subquery(*, active_only: bool):
+    filters = (
+        Q(male__strain_line_id=OuterRef("pk"))
+        | Q(female_1__strain_line_id=OuterRef("pk"))
+        | Q(female_2__strain_line_id=OuterRef("pk"))
+        | Q(extra_female_links__mouse__strain_line_id=OuterRef("pk"))
+    )
+    qs = Breeding.objects.filter(filters)
+    if active_only:
+        qs = qs.filter(active=True)
+    return (
+        qs.order_by()
+        .annotate(_group=Value(1))
+        .values("_group")
+        .annotate(_cnt=Count("pk", distinct=True))
+        .values("_cnt")[:1]
+    )
+
+
+def _strain_line_litter_count_subquery(*, active_only: bool):
     active_litter_statuses = [
         Litter.LitterStatus.ACTIVE,
         Litter.LitterStatus.WEANED,
         Litter.LitterStatus.TAIL_TAGGED,
     ]
+    filters = (
+        Q(breeding__male__strain_line_id=OuterRef("pk"))
+        | Q(breeding__female_1__strain_line_id=OuterRef("pk"))
+        | Q(breeding__female_2__strain_line_id=OuterRef("pk"))
+        | Q(breeding__extra_female_links__mouse__strain_line_id=OuterRef("pk"))
+    )
+    qs = Litter.objects.filter(filters)
+    if active_only:
+        qs = qs.filter(litter_status__in=active_litter_statuses)
+    return (
+        qs.order_by()
+        .annotate(_group=Value(1))
+        .values("_group")
+        .annotate(_cnt=Count("pk", distinct=True))
+        .values("_cnt")[:1]
+    )
+
+
+def _strain_line_usage_annotations() -> dict:
+    zero = Value(0, output_field=IntegerField())
     return {
         "active_mice_count": Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
         "total_mice_count": Count("mice", distinct=True),
@@ -1827,24 +1867,34 @@ def _strain_line_usage_annotations() -> dict:
             filter=Q(mice__current_cage__isnull=False),
             distinct=True,
         ),
-        "active_breedings_count": Count(
-            "mice__maternal_breedings_primary",
-            filter=Q(mice__maternal_breedings_primary__active=True),
-            distinct=True,
-        )
-        + Count(
-            "mice__sired_breedings",
-            filter=Q(mice__sired_breedings__active=True),
-            distinct=True,
+        "active_breedings_count": Coalesce(
+            Subquery(
+                _strain_line_breeding_count_subquery(active_only=True),
+                output_field=IntegerField(),
+            ),
+            zero,
         ),
-        "total_breedings_count": Count("mice__maternal_breedings_primary", distinct=True)
-        + Count("mice__sired_breedings", distinct=True),
-        "active_litters_count": Count(
-            "mice__maternal_breedings_primary__litters",
-            filter=Q(mice__maternal_breedings_primary__litters__litter_status__in=active_litter_statuses),
-            distinct=True,
+        "total_breedings_count": Coalesce(
+            Subquery(
+                _strain_line_breeding_count_subquery(active_only=False),
+                output_field=IntegerField(),
+            ),
+            zero,
         ),
-        "total_litters_count": Count("mice__maternal_breedings_primary__litters", distinct=True),
+        "active_litters_count": Coalesce(
+            Subquery(
+                _strain_line_litter_count_subquery(active_only=True),
+                output_field=IntegerField(),
+            ),
+            zero,
+        ),
+        "total_litters_count": Coalesce(
+            Subquery(
+                _strain_line_litter_count_subquery(active_only=False),
+                output_field=IntegerField(),
+            ),
+            zero,
+        ),
     }
 
 
