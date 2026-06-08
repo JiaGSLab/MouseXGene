@@ -304,7 +304,7 @@ def _active_breeding_codes_for_mouse_ids(mouse_ids: list[int], *, exclude_breedi
 
 def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) -> list[dict]:
     mice = list(
-        Mouse.objects.select_related("project", "strain_line")
+        Mouse.objects.select_related("project", "project__owner", "project__owner__profile", "strain_line")
         .order_by("mouse_uid")
         .only(
             "id",
@@ -315,6 +315,11 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
             "genotype_summary",
             "project_id",
             "project__name",
+            "project__owner_id",
+            "project__owner__username",
+            "project__owner__first_name",
+            "project__owner__last_name",
+            "project__owner__profile__display_name",
             "strain_line_id",
             "strain_line__line_name",
         )
@@ -333,6 +338,10 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
                 "sex": m.sex,
                 "project_id": m.project_id,
                 "project_name": m.project.name if m.project_id else "",
+                "project_owner_id": m.project.owner_id if m.project_id else None,
+                "project_owner_name": (
+                    format_project_owner_label(m.project.owner) if m.project_id and m.project.owner_id else ""
+                ),
                 "strain_line_id": m.strain_line_id,
                 "strain_line_name": m.strain_line.line_name if m.strain_line_id else "",
                 "status": m.status,

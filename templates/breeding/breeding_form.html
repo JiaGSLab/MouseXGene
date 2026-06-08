@@ -23,8 +23,14 @@
 
         <div class="card card-nested">
             <h2>Breeder Selection</h2>
-            <p class="muted small-print">Choose sire and dams first. Use Project/Strain filters to narrow down mice.</p>
+            <p class="muted small-print">Choose sire and dams first. Use User / Project / Strain filters to narrow down mice.</p>
             <div class="filter-grid">
+                <div class="form-row">
+                    <label for="id_mouse_owner_filter">Filter by user</label>
+                    <select id="id_mouse_owner_filter" class="filter-control">
+                        <option value="">All users</option>
+                    </select>
+                </div>
                 <div class="form-row">
                     <label for="id_mouse_project_filter">Filter by project</label>
                     <select id="id_mouse_project_filter" class="filter-control">
@@ -140,12 +146,13 @@
 (() => {
     const dataEl = document.getElementById("breeder-mouse-choices");
     const projectFilter = document.getElementById("id_mouse_project_filter");
+    const ownerFilter = document.getElementById("id_mouse_owner_filter");
     const strainFilter = document.getElementById("id_mouse_strain_filter");
     const sireSelect = document.getElementById("id_sire");
     const damsSelect = document.getElementById("id_dams");
     const tableBody = document.getElementById("breeder-picker-body");
     const breedingForm = document.getElementById("breeding-form");
-    if (!dataEl || !projectFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm) return;
+    if (!dataEl || !projectFilter || !ownerFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm) return;
 
     const mice = JSON.parse(dataEl.textContent || "[]");
     let selectedSireId = sireSelect.value || "";
@@ -166,6 +173,12 @@
         return out;
     }
     function fillFilters() {
+        const owners = uniqueBy(
+            mice
+                .filter(m => m.project_owner_id)
+                .map(m => ({ id: String(m.project_owner_id), name: m.project_owner_name || `User ${m.project_owner_id}` })),
+            x => x.id
+        ).sort((a, b) => a.name.localeCompare(b.name));
         const projects = uniqueBy(
             mice.filter(m => m.project_id).map(m => ({ id: String(m.project_id), name: m.project_name })),
             x => x.id
@@ -174,6 +187,12 @@
             mice.filter(m => m.strain_line_id).map(m => ({ id: String(m.strain_line_id), name: m.strain_line_name })),
             x => x.id
         ).sort((a, b) => a.name.localeCompare(b.name));
+        owners.forEach((owner) => {
+            const opt = document.createElement("option");
+            opt.value = owner.id;
+            opt.textContent = owner.name;
+            ownerFilter.appendChild(opt);
+        });
         projects.forEach((p) => {
             const opt = document.createElement("option");
             opt.value = p.id;
@@ -188,9 +207,11 @@
         });
     }
     function filteredMice() {
+        const owner = ownerFilter.value;
         const p = projectFilter.value;
         const s = strainFilter.value;
         return mice.filter((m) => {
+            if (owner && String(m.project_owner_id || "") !== owner) return false;
             if (p && String(m.project_id || "") !== p) return false;
             if (s && String(m.strain_line_id || "") !== s) return false;
             return true;
@@ -257,6 +278,7 @@
     renderBreederTable();
     syncHiddenSelects();
     tableBody.addEventListener("change", onTableChange);
+    ownerFilter.addEventListener("change", renderBreederTable);
     projectFilter.addEventListener("change", renderBreederTable);
     strainFilter.addEventListener("change", renderBreederTable);
     breedingForm.addEventListener("submit", syncHiddenSelects);
