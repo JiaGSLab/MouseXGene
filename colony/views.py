@@ -481,7 +481,7 @@ def _filtered_cages_queryset(request: HttpRequest):
                 cages = cages.none()
             if include_inactive != "yes":
                 cages = cages.filter(status=Cage.Status.ACTIVE)
-    if owner:
+    if owner and not strain_line:
         cages = cages.filter(current_mice__project__owner_id=owner)
         if include_inactive != "yes":
             cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
@@ -630,7 +630,7 @@ def _filtered_mice_queryset(request: HttpRequest):
         mice = mice.filter(current_cage_id=current_cage)
     if project:
         mice = mice.filter(project_id=project)
-    if owner:
+    if owner and not strain_line:
         mice = mice.filter(project__owner_id=owner)
 
     return mice
@@ -1823,13 +1823,9 @@ def cage_list(request: HttpRequest) -> HttpResponse:
 
 
 def _strain_line_breeding_count_subquery(*, active_only: bool):
-    filters = (
-        Q(male__strain_line_id=OuterRef("pk"))
-        | Q(female_1__strain_line_id=OuterRef("pk"))
-        | Q(female_2__strain_line_id=OuterRef("pk"))
-        | Q(extra_female_links__mouse__strain_line_id=OuterRef("pk"))
-    )
-    qs = Breeding.objects.filter(filters)
+    from colony.strain_line_usage import strain_line_member_breeding_filter
+
+    qs = Breeding.objects.filter(strain_line_member_breeding_filter(OuterRef("pk")))
     if active_only:
         qs = qs.filter(active=True)
     return (
@@ -1842,18 +1838,14 @@ def _strain_line_breeding_count_subquery(*, active_only: bool):
 
 
 def _strain_line_litter_count_subquery(*, active_only: bool):
+    from colony.strain_line_usage import strain_line_member_litter_filter
+
     active_litter_statuses = [
         Litter.LitterStatus.ACTIVE,
         Litter.LitterStatus.WEANED,
         Litter.LitterStatus.TAIL_TAGGED,
     ]
-    filters = (
-        Q(breeding__male__strain_line_id=OuterRef("pk"))
-        | Q(breeding__female_1__strain_line_id=OuterRef("pk"))
-        | Q(breeding__female_2__strain_line_id=OuterRef("pk"))
-        | Q(breeding__extra_female_links__mouse__strain_line_id=OuterRef("pk"))
-    )
-    qs = Litter.objects.filter(filters)
+    qs = Litter.objects.filter(strain_line_member_litter_filter(OuterRef("pk")))
     if active_only:
         qs = qs.filter(litter_status__in=active_litter_statuses)
     return (

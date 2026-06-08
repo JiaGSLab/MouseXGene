@@ -25,6 +25,9 @@
 
 <section class="card card--filters">
     <form method="get" class="filter-form" id="mouse-list-filters" action="{% url 'mice:mouse_list' %}">
+        {% if strain_line %}
+            <input type="hidden" name="strain_line_id" value="{{ strain_line }}">
+        {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ query }}" placeholder="Search mouse_uid or ear_tag" class="search-input filter-control">
             <select name="sex" class="filter-control">

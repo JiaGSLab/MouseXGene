@@ -18,7 +18,7 @@ from openpyxl import Workbook
 from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.id_uniqueness import find_conflicting_mouse
-from colony.models import Cage, CageMembership, Mouse
+from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
 from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm
@@ -567,7 +567,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     breedings = _scoped_breedings(request.user)
     if include_inactive != "yes":
         breedings = breedings.filter(active=True)
-    if owner:
+    if owner and not strain_line_id:
         breedings = breedings.filter(breeding_project_owner_filter_q(owner))
     if setup_by:
         audit_pks: list[int] = []
@@ -661,6 +661,12 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     breedings_page_items = list(pagination["items"])
     _enrich_breedings_for_list(breedings_page_items, today=today)
 
+    strain_line_filter_label = ""
+    if strain_line_id:
+        strain_line_filter_label = (
+            StrainLine.objects.filter(pk=strain_line_id).values_list("line_name", flat=True).first() or ""
+        )
+
     pending_breeding_cages: list[Cage] = []
     if include_inactive != "yes" and not export:
         pending_qs = pending_breeding_cages_queryset()
@@ -668,7 +674,18 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
             pending_qs = pending_qs.filter(pk=cage)
         if q:
             pending_qs = pending_qs.filter(cage_id__icontains=q)
-        if owner:
+        if strain_line_id:
+            try:
+                from colony.strain_line_usage import strain_line_cage_ids
+
+                pending_cage_ids = strain_line_cage_ids(
+                    strain_line_id=int(strain_line_id),
+                    active_only=True,
+                )
+                pending_qs = pending_qs.filter(pk__in=pending_cage_ids) if pending_cage_ids else pending_qs.none()
+            except (TypeError, ValueError):
+                pending_qs = pending_qs.none()
+        elif owner:
             pending_qs = pending_qs.filter(current_mice__project__owner_id=owner).distinct()
         pending_breeding_cages = list(pending_qs)
         for pending_cage in pending_breeding_cages:
@@ -679,11 +696,12 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "pending_breeding_cages": pending_breeding_cages,
         "q": q,
         "strain_line_id": strain_line_id,
+        "strain_line_filter_label": strain_line_filter_label,
         "status": status,
         "breeding_type": breeding_type,
         "cage": cage,
         "setup_by": setup_by,
-        "owner": owner,
+        "owner": "" if strain_line_id else owner,
         "owner_options": project_owner_filter_options(),
         "setup_by_options": [
             {
@@ -952,7 +970,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.exclude(
             litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
         )
-    if owner:
+    if owner and not strain_line_id:
         litters = litters.filter(litter_project_owner_filter_q(owner))
     if strain_line_id:
         try:
@@ -1135,6 +1153,12 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         except (TypeError, ValueError):
             selected_breeding = None
 
+    strain_line_filter_label = ""
+    if strain_line_id:
+        strain_line_filter_label = (
+            StrainLine.objects.filter(pk=strain_line_id).values_list("line_name", flat=True).first() or ""
+        )
+
     pagination = _paginate_queryset_for_list(request, litters_qs, viewname="litters:litter_list")
     litters_page_items = list(pagination["items"])
     enriched_map = {l.pk: l for l in litters}
@@ -1174,7 +1198,9 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         "birth_date_to": birth_date_to,
         "include_inactive": include_inactive,
         "litter_status": litter_status,
-        "owner": owner,
+        "strain_line_id": strain_line_id,
+        "strain_line_filter_label": strain_line_filter_label,
+        "owner": "" if strain_line_id else owner,
         "owner_options": project_owner_filter_options(),
         "litter_status_options": Litter.LitterStatus.choices,
         "breeding_options": _scoped_breedings(request.user).order_by("breeding_code"),

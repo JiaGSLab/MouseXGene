@@ -119,6 +119,59 @@ class StrainLineUsageCountTests(TestCase):
         self.assertIn("BR-FILTER-ME", html)
         self.assertNotIn("BR-FILTER-NOT", html)
 
+    def test_breeding_list_keeps_strain_line_filter_after_apply(self):
+        Breeding.objects.create(
+            breeding_code="BR-KEEP-FILTER",
+            cage=self.breeding_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        other_owner = get_user_model().objects.create_user(username="otherowner2", password="x")
+        other_project = Project.objects.create(name="OtherOwnerProject", owner=other_owner)
+        other_strain = StrainLine.objects.create(line_name="OtherKeep", name="OtherKeep")
+        other_sire = Mouse.objects.create(
+            mouse_uid="M-KEEP-OTHER",
+            sex=Mouse.Sex.MALE,
+            strain_line=other_strain,
+            project=other_project,
+        )
+        other_dam = Mouse.objects.create(
+            mouse_uid="M-KEEP-OTHER-D",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=other_strain,
+            project=other_project,
+        )
+        Breeding.objects.create(
+            breeding_code="BR-KEEP-OTHER",
+            cage=self.other_cage,
+            male=other_sire,
+            female_1=other_dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        viewer = get_user_model().objects.create_user(username="breedkeep", password="x")
+        self.client.login(username="breedkeep", password="x")
+        response = self.client.get(
+            reverse("breeding:breeding_list"),
+            {
+                "strain_line_id": self.strain.pk,
+                "owner": str(viewer.pk),
+            },
+        )
+        self.assertContains(response, "BR-KEEP-FILTER")
+        self.assertNotContains(response, "BR-KEEP-OTHER")
+        response = self.client.get(
+            reverse("breeding:breeding_list"),
+            {
+                "strain_line_id": self.strain.pk,
+                "q": "BR-KEEP-FILTER",
+            },
+        )
+        self.assertContains(response, "BR-KEEP-FILTER")
+        self.assertNotContains(response, "BR-KEEP-OTHER")
+
     def test_cage_list_strain_line_includes_breeding_cage(self):
         Breeding.objects.create(
             breeding_code="BR-CAGE-LINK",

@@ -24,6 +24,9 @@
     <div>
         <h1>Breedings</h1>
         <p class="muted">Track active and historical breeding setups. Rows with a left bar have been active &gt;21 days without a new litter. Export buttons are in the filter section below.</p>
+        {% if strain_line_filter_label %}
+            <p class="muted small-print">Filtered to breedings for strain line <strong>{{ strain_line_filter_label }}</strong>.</p>
+        {% endif %}
     </div>
     <div class="action-links">
         {% if can_manage_breeding %}
@@ -34,6 +37,7 @@
 
 <section class="card card--filters">
     <form method="get" class="filter-form" id="breeding-list-filters" action="{% url 'breeding:breeding_list' %}">
+        {% include "includes/_strain_line_filter_hidden.html" %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search code, sire/dam UID, or set-up by" class="search-input filter-control" aria-label="Search breedings">
             <select name="setup_by" class="filter-control" aria-label="Set up by">

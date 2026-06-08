@@ -14,6 +14,7 @@ def strain_line_member_breeding_filter(strain_line_id: int) -> Q:
         | Q(female_1__strain_line_id=strain_line_id)
         | Q(female_2__strain_line_id=strain_line_id)
         | Q(extra_female_links__mouse__strain_line_id=strain_line_id)
+        | Q(breeding_members__mouse__strain_line_id=strain_line_id)
     )
 
 
@@ -23,6 +24,7 @@ def strain_line_member_litter_filter(strain_line_id: int) -> Q:
         | Q(breeding__female_1__strain_line_id=strain_line_id)
         | Q(breeding__female_2__strain_line_id=strain_line_id)
         | Q(breeding__extra_female_links__mouse__strain_line_id=strain_line_id)
+        | Q(breeding__breeding_members__mouse__strain_line_id=strain_line_id)
     )
 
 
