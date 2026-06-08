@@ -23,7 +23,7 @@ from core.owner_filters import (
 )
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
-from .models import Project, ProjectMembership
+from .models import Project, ProjectMembership, format_project_owner_label
 from users.permissions import (
     authenticated_required,
     can_import,
@@ -280,6 +280,24 @@ def audit_log_list(request: HttpRequest) -> HttpResponse:
     return render(request, "core/audit_list.html", context)
 
 
+def _enrich_projects_for_list(projects) -> None:
+    project_rows = list(projects)
+    if not project_rows:
+        return
+    memberships_by_project: dict[int, list[str]] = {}
+    for membership in (
+        ProjectMembership.objects.filter(project_id__in=[project.pk for project in project_rows])
+        .select_related("user", "user__profile")
+        .order_by("project_id", "user__username")
+    ):
+        label = (format_project_owner_label(membership.user) or membership.user.get_username() or "").strip()
+        memberships_by_project.setdefault(membership.project_id, []).append(label or membership.user.get_username())
+    for project in project_rows:
+        labels = memberships_by_project.get(project.pk, [])
+        project.member_labels = labels
+        project.members_display = ", ".join(labels) if labels else "—"
+
+
 @authenticated_required
 def project_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
@@ -295,8 +313,10 @@ def project_list(request: HttpRequest) -> HttpResponse:
             | Q(description__icontains=q)
         )
     projects = apply_list_sort(projects, request, PROJECT_LIST_SORT)
-    active_projects = projects.filter(is_active=True)
-    inactive_projects = projects.filter(is_active=False)
+    active_projects = list(projects.filter(is_active=True))
+    inactive_projects = list(projects.filter(is_active=False))
+    _enrich_projects_for_list(active_projects)
+    _enrich_projects_for_list(inactive_projects)
     context = {
         "active_projects": active_projects,
         "inactive_projects": inactive_projects,

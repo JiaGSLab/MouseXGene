@@ -36,7 +36,8 @@
                 <tr>
                     {% sort_th "name" "Name" %}
                     {% sort_th "owner" "Owner" %}
-                    <th scope="col">Actions</th>
+                    <th scope="col">Members</th>
+                    <th scope="col"></th>
                 </tr>
             </thead>
             <tbody>
@@ -44,19 +45,16 @@
                     <tr>
                         <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
                         <td>{{ project.owner_display }}</td>
+                        <td>{{ project.members_display }}</td>
                         <td>
                             {% if can_import or is_admin %}
                                 <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
-                                <span class="muted">|</span>
-                                <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
-                            {% else %}
-                                <span class="muted">View only</span>
                             {% endif %}
                         </td>
                     </tr>
                 {% empty %}
                     <tr>
-                        <td colspan="3" class="empty-row">No active projects{% if q %} matching your search{% endif %}.</td>
+                        <td colspan="4" class="empty-row">No active projects{% if q %} matching your search{% endif %}.</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -74,7 +72,8 @@
                 <tr>
                     {% sort_th "name" "Name" %}
                     {% sort_th "owner" "Owner" %}
-                    <th scope="col">Actions</th>
+                    <th scope="col">Members</th>
+                    <th scope="col"></th>
                 </tr>
             </thead>
             <tbody>
@@ -82,13 +81,10 @@
                     <tr class="row-inactive">
                         <td><a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a></td>
                         <td>{{ project.owner_display }}</td>
+                        <td>{{ project.members_display }}</td>
                         <td>
                             {% if can_import or is_admin %}
                                 <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
-                                <span class="muted">|</span>
-                                <a class="link-primary" href="{% url 'project_membership_manage' project.pk %}">Members</a>
-                            {% else %}
-                                <span class="muted">View only</span>
                             {% endif %}
                         </td>
                     </tr>
