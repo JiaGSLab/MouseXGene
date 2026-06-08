@@ -16,6 +16,7 @@ from django.utils import timezone
 from openpyxl import Workbook
 
 from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
+from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.models import Cage, CageMembership, Mouse
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
@@ -420,6 +421,7 @@ def _build_xlsx_response(filename: str, sheet_name: str, headers: list[str], row
 @authenticated_required
 def breeding_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
+    strain_line_id = (request.GET.get("strain_line_id") or request.GET.get("strain_line") or "").strip()
     status = (request.GET.get("status") or "").strip()
     breeding_type = (request.GET.get("breeding_type") or "").strip()
     cage = (request.GET.get("cage") or "").strip()
@@ -442,6 +444,11 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
             except (TypeError, ValueError):
                 continue
         breedings = breedings.filter(Q(created_by_id=setup_by) | Q(pk__in=audit_pks))
+    if strain_line_id:
+        try:
+            breedings = breedings.filter(strain_line_member_breeding_filter(int(strain_line_id)))
+        except (TypeError, ValueError):
+            breedings = breedings.none()
     if q:
         breedings = breedings.filter(
             Q(breeding_code__icontains=q)
@@ -532,6 +539,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "breedings": breedings_page_items,
         "pending_breeding_cages": pending_breeding_cages,
         "q": q,
+        "strain_line_id": strain_line_id,
         "status": status,
         "breeding_type": breeding_type,
         "cage": cage,
@@ -770,6 +778,7 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def litter_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
+    strain_line_id = (request.GET.get("strain_line_id") or request.GET.get("strain_line") or "").strip()
     weaned = (request.GET.get("weaned") or "").strip()
     breeding = (request.GET.get("breeding") or "").strip()
     birth_date_from = (request.GET.get("birth_date_from") or "").strip()
@@ -801,6 +810,11 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.exclude(
             litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
         )
+    if strain_line_id:
+        try:
+            litters = litters.filter(strain_line_member_litter_filter(int(strain_line_id)))
+        except (TypeError, ValueError):
+            litters = litters.none()
     if q:
         litters = litters.filter(
             Q(litter_code__icontains=q)

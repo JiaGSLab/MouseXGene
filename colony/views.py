@@ -57,6 +57,14 @@ from colony.cage_lifecycle import (
     sync_cage_breeding_workflow,
     sync_cage_status_from_mice,
 )
+from colony.strain_line_usage import (
+    compute_strain_line_usage_counts,
+    enrich_strain_line_cage_rows,
+    strain_line_cage_ids,
+    strain_line_cage_queryset,
+    strain_line_member_breeding_filter,
+    strain_line_member_litter_filter,
+)
 from colony.import_staging import (
     ImportStagingError,
     clear_staged_cage_import,
@@ -463,9 +471,23 @@ def _filtered_cages_queryset(request: HttpRequest):
     if include_inactive != "yes":
         cages = cages.filter(status=Cage.Status.ACTIVE)
     if strain_line:
-        cages = cages.filter(current_mice__strain_line_id=strain_line)
-        if include_inactive != "yes":
-            cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
+        try:
+            strain_line_pk = int(strain_line)
+        except (TypeError, ValueError):
+            strain_line_pk = None
+        if strain_line_pk is None:
+            cages = cages.none()
+        else:
+            cage_ids = strain_line_cage_ids(
+                strain_line_id=strain_line_pk,
+                active_only=include_inactive != "yes",
+            )
+            if cage_ids:
+                cages = cages.filter(pk__in=cage_ids)
+            else:
+                cages = cages.none()
+            if include_inactive != "yes":
+                cages = cages.filter(status=Cage.Status.ACTIVE)
     if owner:
         cages = cages.filter(current_mice__project__owner_id=owner)
         if include_inactive != "yes":
@@ -1810,52 +1832,6 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_list.html", context)
 
 
-def _strain_line_member_breeding_filter(strain_line_id: int) -> Q:
-    return (
-        Q(male__strain_line_id=strain_line_id)
-        | Q(female_1__strain_line_id=strain_line_id)
-        | Q(female_2__strain_line_id=strain_line_id)
-        | Q(extra_female_links__mouse__strain_line_id=strain_line_id)
-    )
-
-
-def _strain_line_member_litter_filter(strain_line_id: int) -> Q:
-    return (
-        Q(breeding__male__strain_line_id=strain_line_id)
-        | Q(breeding__female_1__strain_line_id=strain_line_id)
-        | Q(breeding__female_2__strain_line_id=strain_line_id)
-        | Q(breeding__extra_female_links__mouse__strain_line_id=strain_line_id)
-    )
-
-
-def compute_strain_line_usage_counts(strain_line_id: int) -> dict[str, int]:
-    """Live usage counts for one strain line (detail page and tests)."""
-    active_litter_statuses = [
-        Litter.LitterStatus.ACTIVE,
-        Litter.LitterStatus.WEANED,
-        Litter.LitterStatus.TAIL_TAGGED,
-    ]
-    mice_qs = Mouse.objects.filter(strain_line_id=strain_line_id)
-    breeding_qs = Breeding.objects.filter(_strain_line_member_breeding_filter(strain_line_id))
-    litter_qs = Litter.objects.filter(_strain_line_member_litter_filter(strain_line_id))
-    return {
-        "active_mice_count": mice_qs.filter(status=Mouse.Status.ACTIVE).count(),
-        "total_mice_count": mice_qs.count(),
-        "active_cages_count": Cage.objects.filter(
-            status=Cage.Status.ACTIVE,
-            current_mice__strain_line_id=strain_line_id,
-            current_mice__status=Mouse.Status.ACTIVE,
-        )
-        .distinct()
-        .count(),
-        "total_cages_count": Cage.objects.filter(current_mice__strain_line_id=strain_line_id).distinct().count(),
-        "active_breedings_count": breeding_qs.filter(active=True).distinct().count(),
-        "total_breedings_count": breeding_qs.distinct().count(),
-        "active_litters_count": litter_qs.filter(litter_status__in=active_litter_statuses).distinct().count(),
-        "total_litters_count": litter_qs.distinct().count(),
-    }
-
-
 def _strain_line_breeding_count_subquery(*, active_only: bool):
     filters = (
         Q(male__strain_line_id=OuterRef("pk"))
@@ -1975,6 +1951,10 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
         lines = lines.filter(is_active=False)
     lines = lines.annotate(**_strain_line_usage_annotations())
     lines = apply_list_sort(lines, request, STRAIN_LINE_LIST_SORT)
+    lines = list(lines)
+    for line in lines:
+        for key, value in compute_strain_line_usage_counts(line.pk).items():
+            setattr(line, key, value)
     context = {
         "lines": lines,
         "q": q,
@@ -2013,15 +1993,12 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .order_by("status", "mouse_uid")
     )
     related_cages = list(
-        Cage.objects.filter(current_mice__strain_line=line)
-        .distinct()
-        .prefetch_related("current_mice__strain_line")
-        .order_by("status", "cage_id")
+        strain_line_cage_queryset(strain_line_id=line.pk, active_only=False).prefetch_related(
+            "current_mice__strain_line",
+            "current_mice__project",
+        )
     )
-    for cage in related_cages:
-        strain_mice = [mouse for mouse in cage.current_mice.all() if mouse.strain_line_id == line.pk]
-        cage.strain_active_mouse_count = sum(1 for mouse in strain_mice if mouse.status == Mouse.Status.ACTIVE)
-        cage.strain_total_mouse_count = len(strain_mice)
+    enrich_strain_line_cage_rows(related_cages, strain_line_id=line.pk)
     related_projects = list(
         Project.objects.filter(mice__strain_line=line)
         .select_related("owner", "owner__profile")

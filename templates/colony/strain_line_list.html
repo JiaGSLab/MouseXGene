@@ -79,14 +79,14 @@
                         <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes" title="All cages including inactive mice/cages">{{ line.total_cages_count }}</a>
                     </td>
                     <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}" title="Active breedings">{{ line.active_breedings_count }}</a>
+                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}" title="Active breedings">{{ line.active_breedings_count }}</a>
                         <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes" title="All breedings including inactive">{{ line.total_breedings_count }}</a>
+                        <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All breedings including inactive">{{ line.total_breedings_count }}</a>
                     </td>
                     <td class="col-num-right strain-count-cell">
-                        <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}" title="Active litters">{{ line.active_litters_count }}</a>
+                        <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}" title="Active litters">{{ line.active_litters_count }}</a>
                         <span class="muted">/</span>
-                        <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes" title="All litters including ended/archived">{{ line.total_litters_count }}</a>
+                        <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes" title="All litters including ended/archived">{{ line.total_litters_count }}</a>
                     </td>
                     <td><span class="status-pill {% if line.is_active %}status-pill--ok{% else %}status-pill--muted{% endif %}">{{ line.is_active|yesno:"Active,Archived" }}</span></td>
                     <td><a class="link-primary" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a></td>

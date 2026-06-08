@@ -63,7 +63,7 @@
                 /
                 <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">{{ usage_counts.total_mice_count }} total</a>
             </dd>
-            <dt>Cages (via mice)</dt>
+            <dt>Cages (housing + breeding)</dt>
             <dd class="strain-count-cell">
                 <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}">{{ usage_counts.active_cages_count }} active</a>
                 /
@@ -71,15 +71,15 @@
             </dd>
             <dt>Breedings</dt>
             <dd class="strain-count-cell">
-                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}">{{ usage_counts.active_breedings_count }} active</a>
+                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}">{{ usage_counts.active_breedings_count }} active</a>
                 /
-                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes">{{ usage_counts.total_breedings_count }} total</a>
+                <a class="link-primary" href="{% url 'breeding:breeding_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">{{ usage_counts.total_breedings_count }} total</a>
             </dd>
             <dt>Litters</dt>
             <dd class="strain-count-cell">
-                <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}">{{ usage_counts.active_litters_count }} active</a>
+                <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}">{{ usage_counts.active_litters_count }} active</a>
                 /
-                <a class="link-primary" href="{% url 'litters:litter_list' %}?q={{ line.line_name|urlencode }}&include_inactive=yes">{{ usage_counts.total_litters_count }} total</a>
+                <a class="link-primary" href="{% url 'litters:litter_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">{{ usage_counts.total_litters_count }} total</a>
             </dd>
         </dl>
     </article>
@@ -87,7 +87,7 @@
 
 <section class="card">
     <div class="page-header-row">
-        <h2>Mice on this strain ({{ related_mice|length }})</h2>
+        <h2>Mice on this strain ({{ usage_counts.active_mice_count }} active / {{ usage_counts.total_mice_count }} total)</h2>
         <a class="link-primary" href="{% url 'mice:mouse_list' %}?strain_line_id={{ line.pk }}&include_inactive=yes">Open full list</a>
     </div>
     {% if related_mice %}
@@ -128,7 +128,7 @@
 
 <section class="card">
     <div class="page-header-row">
-        <h2>Cages with this strain ({{ related_cages|length }})</h2>
+        <h2>Cages for this strain ({{ usage_counts.active_cages_count }} active / {{ usage_counts.total_cages_count }} total)</h2>
         <a class="link-primary" href="{% url 'colony:cage_list' %}?strain_line={{ line.pk }}&include_inactive=yes">Open full list</a>
     </div>
     {% if related_cages %}
@@ -140,6 +140,7 @@
                         <th>Cage status</th>
                         <th>Room</th>
                         <th>Strain mice in cage</th>
+                        <th>Active breedings</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -149,6 +150,13 @@
                             <td><span class="status-pill">{{ cage.get_status_display }}</span></td>
                             <td>{{ cage.room|default:"—" }}</td>
                             <td>{{ cage.strain_active_mouse_count }} active / {{ cage.strain_total_mouse_count }} total</td>
+                            <td>
+                                {% if cage.strain_breeding_codes %}
+                                    {{ cage.strain_breeding_codes|join:", " }}
+                                {% else %}
+                                    <span class="muted">—</span>
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>
