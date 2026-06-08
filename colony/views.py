@@ -1928,7 +1928,10 @@ def _strain_line_usage_annotations() -> dict:
 @authenticated_required
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
-    active = (request.GET.get("active") or "yes").strip()
+    if "active" in request.GET:
+        active = (request.GET.get("active") or "").strip()
+    else:
+        active = "yes"
     lines = StrainLine.objects.select_related("owner", "owner__profile", "created_by", "created_by__profile").annotate(
         pdf_count=Count("documents")
     )
