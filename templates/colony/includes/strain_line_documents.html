@@ -22,7 +22,7 @@
                         {% if doc.uploaded_by %}· {{ doc.uploaded_by.get_username }}{% endif %}
                     </span>
                     <form method="post" action="{% url 'colony:strain_line_document_delete' line.pk doc.pk %}" class="strain-pdf-delete-form">
-                        {% csrf_token %}
+                        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
                         <input type="hidden" name="next" value="{{ request.path }}">
                         <button type="submit" class="button button-light button-small" onclick="return confirm('Remove this PDF?');">Remove</button>
                     </form>
@@ -35,7 +35,7 @@
 
     {% if pdf_slots_remaining > 0 %}
         <form method="post" action="{% url 'colony:strain_line_upload_documents' line.pk %}" enctype="multipart/form-data" class="strain-pdf-upload-form">
-            {% csrf_token %}
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <input type="hidden" name="next" value="{{ request.path }}">
             <div class="form-row">
                 <label for="id_pdf_files">Add PDF(s)</label>

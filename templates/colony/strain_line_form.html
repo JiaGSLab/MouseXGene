@@ -181,7 +181,7 @@
 </section>
 
 {% if line %}
-    {% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining request=request csrf_token=csrf_token only %}
+    {% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining request=request csrf_token=csrf_token %}
 {% else %}
     <section class="card">
         <p class="muted">Save this strain line first, then you can attach PDF introductions on the detail page.</p>

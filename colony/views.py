@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db import transaction
 from django.db.models import Count, F, Max, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
@@ -1809,6 +1810,52 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/cage_list.html", context)
 
 
+def _strain_line_member_breeding_filter(strain_line_id: int) -> Q:
+    return (
+        Q(male__strain_line_id=strain_line_id)
+        | Q(female_1__strain_line_id=strain_line_id)
+        | Q(female_2__strain_line_id=strain_line_id)
+        | Q(extra_female_links__mouse__strain_line_id=strain_line_id)
+    )
+
+
+def _strain_line_member_litter_filter(strain_line_id: int) -> Q:
+    return (
+        Q(breeding__male__strain_line_id=strain_line_id)
+        | Q(breeding__female_1__strain_line_id=strain_line_id)
+        | Q(breeding__female_2__strain_line_id=strain_line_id)
+        | Q(breeding__extra_female_links__mouse__strain_line_id=strain_line_id)
+    )
+
+
+def compute_strain_line_usage_counts(strain_line_id: int) -> dict[str, int]:
+    """Live usage counts for one strain line (detail page and tests)."""
+    active_litter_statuses = [
+        Litter.LitterStatus.ACTIVE,
+        Litter.LitterStatus.WEANED,
+        Litter.LitterStatus.TAIL_TAGGED,
+    ]
+    mice_qs = Mouse.objects.filter(strain_line_id=strain_line_id)
+    breeding_qs = Breeding.objects.filter(_strain_line_member_breeding_filter(strain_line_id))
+    litter_qs = Litter.objects.filter(_strain_line_member_litter_filter(strain_line_id))
+    return {
+        "active_mice_count": mice_qs.filter(status=Mouse.Status.ACTIVE).count(),
+        "total_mice_count": mice_qs.count(),
+        "active_cages_count": Cage.objects.filter(
+            status=Cage.Status.ACTIVE,
+            current_mice__strain_line_id=strain_line_id,
+            current_mice__status=Mouse.Status.ACTIVE,
+        )
+        .distinct()
+        .count(),
+        "total_cages_count": Cage.objects.filter(current_mice__strain_line_id=strain_line_id).distinct().count(),
+        "active_breedings_count": breeding_qs.filter(active=True).distinct().count(),
+        "total_breedings_count": breeding_qs.distinct().count(),
+        "active_litters_count": litter_qs.filter(litter_status__in=active_litter_statuses).distinct().count(),
+        "total_litters_count": litter_qs.distinct().count(),
+    }
+
+
 def _strain_line_breeding_count_subquery(*, active_only: bool):
     filters = (
         Q(male__strain_line_id=OuterRef("pk"))
@@ -1859,7 +1906,11 @@ def _strain_line_usage_annotations() -> dict:
         "total_mice_count": Count("mice", distinct=True),
         "active_cages_count": Count(
             "mice__current_cage",
-            filter=Q(mice__status=Mouse.Status.ACTIVE, mice__current_cage__isnull=False),
+            filter=Q(
+                mice__status=Mouse.Status.ACTIVE,
+                mice__current_cage__isnull=False,
+                mice__current_cage__status=Cage.Status.ACTIVE,
+            ),
             distinct=True,
         ),
         "total_cages_count": Count(
@@ -1933,6 +1984,7 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
     return render(request, "colony/strain_line_list.html", context)
 
 
+@ensure_csrf_cookie
 @authenticated_required
 def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(
@@ -1984,11 +2036,13 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("name")
     )
+    usage_counts = compute_strain_line_usage_counts(line.pk)
     return render(
         request,
         "colony/strain_line_detail.html",
         {
             "line": line,
+            "usage_counts": usage_counts,
             "related_mice": related_mice,
             "related_cages": related_cages,
             "related_projects": related_projects,
@@ -2029,6 +2083,7 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
     )
 
 
+@ensure_csrf_cookie
 @authenticated_required
 @require_POST
 def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
@@ -2099,6 +2154,7 @@ def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> H
     return redirect(next_url)
 
 
+@ensure_csrf_cookie
 @authenticated_required
 def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(StrainLine, pk=pk)
