@@ -6,6 +6,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from colony.models import StrainLine, StrainLineDocument
+from core.models import Project
 from users.models import UserProfile
 
 
@@ -20,53 +21,70 @@ class StrainLinePdfUploadTests(TestCase):
     def _upload_form_token(self, response) -> str:
         html = response.content.decode()
         form_start = html.index('class="strain-pdf-upload-form"')
-        form_chunk = html[form_start : form_start + 800]
+        form_chunk = html[form_start : form_start + 1200]
         match = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"', form_chunk)
         self.assertIsNotNone(match, "Expected csrf token inside PDF upload form")
         token = match.group(1)
         self.assertTrue(token.strip(), "PDF upload form CSRF token must not be empty")
         return token
 
-    def test_edit_page_pdf_form_includes_csrf_token(self):
+    def test_edit_page_has_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
         self._upload_form_token(response)
+        self.assertContains(response, "Add PDF")
 
-    def test_detail_page_pdf_form_includes_csrf_token(self):
+    def test_detail_page_has_no_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
-        self._upload_form_token(response)
+        self.assertNotContains(response, 'class="strain-pdf-upload-form"')
+        self.assertNotContains(response, "Add PDF")
 
-    def test_upload_pdf_with_csrf_succeeds_from_detail_page(self):
-        detail_url = reverse("colony:strain_line_detail", args=[self.line.pk])
-        page = self.client.get(detail_url)
-        token = self._upload_form_token(page)
-        upload_url = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
-        pdf = SimpleUploadedFile("intro.pdf", b"%PDF-1.4 test", content_type="application/pdf")
-        response = self.client.post(
-            upload_url,
-            {
-                "csrfmiddlewaretoken": token,
-                "next": detail_url,
-                "pdf_files": pdf,
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(StrainLineDocument.objects.filter(strain_line=self.line).count(), 1)
-
-    def test_upload_pdf_with_csrf_succeeds_from_edit_page(self):
+    def test_upload_pdf_from_edit_uses_description_as_name(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
         page = self.client.get(edit_url)
         token = self._upload_form_token(page)
         upload_url = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
-        pdf = SimpleUploadedFile("intro.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+        pdf = SimpleUploadedFile("random-upload-name.pdf", b"%PDF-1.4 test", content_type="application/pdf")
         response = self.client.post(
             upload_url,
             {
                 "csrfmiddlewaretoken": token,
                 "next": edit_url,
-                "pdf_files": pdf,
+                "pdf_file": pdf,
+                "pdf_description_kind": "genotype_info",
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(StrainLineDocument.objects.filter(strain_line=self.line).count(), 1)
+        doc = StrainLineDocument.objects.get(strain_line=self.line)
+        self.assertEqual(doc.description, "Genotype info")
+        self.assertEqual(doc.display_name, "Genotype info")
+        self.assertTrue(doc.file.name.endswith(".pdf"))
+        self.assertIn("Genotype", doc.file.name)
+
+
+class StrainLineRelatedRecordLinkTests(TestCase):
+    def setUp(self):
+        self.viewer = get_user_model().objects.create_user(username="viewer", password="x")
+        self.owner = get_user_model().objects.create_user(username="otherowner", password="x")
+        self.client.login(username="viewer", password="x")
+        self.strain = StrainLine.objects.create(line_name="LinkStrain", name="LinkStrain")
+        self.project = Project.objects.create(name="Other Project", owner=self.owner)
+        from colony.models import Mouse
+
+        Mouse.objects.create(
+            mouse_uid="M-LINK-1",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+        )
+
+    def test_strain_line_mouse_link_shows_mice_for_all_owners(self):
+        url = reverse("mice:mouse_list")
+        response = self.client.get(url, {"strain_line_id": self.strain.pk})
+        self.assertContains(response, "M-LINK-1")
+
+    def test_detail_page_does_not_list_mice_table(self):
+        response = self.client.get(reverse("colony:strain_line_detail", args=[self.strain.pk]))
+        self.assertNotContains(response, "Mice on this strain")
+        self.assertNotContains(response, "Cages for this strain")

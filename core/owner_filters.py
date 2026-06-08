@@ -18,6 +18,8 @@ def resolve_project_owner_filter(request: HttpRequest) -> str:
         if owner == OWNER_FILTER_ALL:
             return ""
         return owner
+    if (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip():
+        return ""
     if getattr(request.user, "is_authenticated", False):
         return str(request.user.pk)
     return ""

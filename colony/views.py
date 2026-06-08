@@ -42,7 +42,7 @@ from .breeding_pedigree import (
     resolve_breeding_for_import_cage,
 )
 from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
-from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, validate_strain_line_pdf_file
+from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, resolve_pdf_description, unique_pdf_description, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
@@ -1974,18 +1974,6 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
     actors = merge_actor_labels(line, audit_entries)
-    related_mice = list(
-        Mouse.objects.filter(strain_line=line)
-        .select_related("current_cage", "project")
-        .order_by("status", "mouse_uid")
-    )
-    related_cages = list(
-        strain_line_cage_queryset(strain_line_id=line.pk, active_only=False).prefetch_related(
-            "current_mice__strain_line",
-            "current_mice__project",
-        )
-    )
-    enrich_strain_line_cage_rows(related_cages, strain_line_id=line.pk)
     related_projects = list(
         Project.objects.filter(mice__strain_line=line)
         .select_related("owner", "owner__profile")
@@ -2007,12 +1995,11 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "line": line,
             "usage_counts": usage_counts,
-            "related_mice": related_mice,
-            "related_cages": related_cages,
             "related_projects": related_projects,
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
+            "allow_pdf_upload": False,
             "audit_entries": audit_entries,
             **actors,
         },
@@ -2057,12 +2044,13 @@ def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
         next_url = reverse("colony:strain_line_detail", kwargs={"pk": line.pk})
 
     uploads = request.FILES.getlist("pdf_files")
-    if not uploads:
-        messages.error(request, "No PDF files selected.")
+    uploaded = request.FILES.get("pdf_file") or (uploads[0] if uploads else None)
+    if not uploaded:
+        messages.error(request, "No PDF file selected.")
         return redirect(next_url)
 
     existing = line.documents.count()
-    if existing + len(uploads) > MAX_STRAIN_LINE_PDF_COUNT:
+    if existing >= MAX_STRAIN_LINE_PDF_COUNT:
         messages.error(
             request,
             f"This strain line already has {existing} PDF(s). "
@@ -2070,22 +2058,34 @@ def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
         )
         return redirect(next_url)
 
-    created = 0
-    for uploaded in uploads:
-        try:
-            validate_strain_line_pdf_file(uploaded)
-        except ValidationError as exc:
-            messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
-            continue
-        StrainLineDocument.objects.create(
-            strain_line=line,
-            file=uploaded,
-            uploaded_by=request.user,
+    try:
+        description = resolve_pdf_description(
+            kind=(request.POST.get("pdf_description_kind") or "").strip(),
+            custom=(request.POST.get("pdf_description_custom") or "").strip(),
         )
-        created += 1
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
+        return redirect(next_url)
 
-    if created:
-        messages.success(request, f"Uploaded {created} PDF file(s).")
+    try:
+        validate_strain_line_pdf_file(uploaded)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
+        return redirect(next_url)
+
+    kind = (request.POST.get("pdf_description_kind") or StrainLineDocument.DescriptionKind.CUSTOM).strip()
+    if kind not in StrainLineDocument.DescriptionKind.values:
+        kind = StrainLineDocument.DescriptionKind.CUSTOM
+
+    description = unique_pdf_description(line.pk, description)
+    StrainLineDocument.objects.create(
+        strain_line=line,
+        description=description,
+        description_kind=kind,
+        file=uploaded,
+        uploaded_by=request.user,
+    )
+    messages.success(request, f"Uploaded PDF “{description}”.")
     return redirect(next_url)
 
 
@@ -2178,6 +2178,7 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
+            "allow_pdf_upload": True,
             "page_title": f"Edit Strain Line {line.line_name}",
             "submit_label": "Save Changes",
         },

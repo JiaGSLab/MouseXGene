@@ -21,11 +21,13 @@
                         · {{ doc.created_at|date:"Y-m-d" }}
                         {% if doc.uploaded_by %}· {{ doc.uploaded_by.get_username }}{% endif %}
                     </span>
-                    <form method="post" action="{% url 'colony:strain_line_document_delete' line.pk doc.pk %}" class="strain-pdf-delete-form">
-                        <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-                        <input type="hidden" name="next" value="{{ request.path }}">
-                        <button type="submit" class="button button-light button-small" onclick="return confirm('Remove this PDF?');">Remove</button>
-                    </form>
+                    {% if allow_pdf_upload %}
+                        <form method="post" action="{% url 'colony:strain_line_document_delete' line.pk doc.pk %}" class="strain-pdf-delete-form">
+                            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+                            <input type="hidden" name="next" value="{{ request.path }}">
+                            <button type="submit" class="button button-light button-small" onclick="return confirm('Remove this PDF?');">Remove</button>
+                        </form>
+                    {% endif %}
                 </li>
             {% endfor %}
         </ul>
@@ -33,18 +35,45 @@
         <p class="muted">No PDF files attached yet.</p>
     {% endif %}
 
-    {% if pdf_slots_remaining > 0 %}
+    {% if allow_pdf_upload and pdf_slots_remaining > 0 %}
         <form method="post" action="{% url 'colony:strain_line_upload_documents' line.pk %}" enctype="multipart/form-data" class="strain-pdf-upload-form">
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <input type="hidden" name="next" value="{{ request.path }}">
             <div class="form-row">
-                <label for="id_pdf_files">Add PDF(s)</label>
-                <input type="file" name="pdf_files" id="id_pdf_files" accept="application/pdf,.pdf" multiple>
-                <small class="muted">Select one or more PDF files. Total per strain line cannot exceed 10.</small>
+                <label for="id_pdf_description_kind">PDF description</label>
+                <select name="pdf_description_kind" id="id_pdf_description_kind" class="filter-control" required>
+                    <option value="strain_line_info">Strain line info</option>
+                    <option value="genotype_info">Genotype info</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="form-row" id="pdf-description-custom-row" hidden>
+                <label for="id_pdf_description_custom">Custom description</label>
+                <input type="text" name="pdf_description_custom" id="id_pdf_description_custom" maxlength="255" placeholder="Enter a short label for this PDF">
+            </div>
+            <div class="form-row">
+                <label for="id_pdf_file">PDF file</label>
+                <input type="file" name="pdf_file" id="id_pdf_file" accept="application/pdf,.pdf" required>
+                <small class="muted">The description above is used as the stored file name, not the original upload name.</small>
             </div>
             <div class="form-actions">
-                <button type="submit" class="button button-light">Upload PDF(s)</button>
+                <button type="submit" class="button button-light">Add PDF</button>
             </div>
         </form>
+        <script>
+        (() => {
+            const kind = document.getElementById("id_pdf_description_kind");
+            const customRow = document.getElementById("pdf-description-custom-row");
+            const customInput = document.getElementById("id_pdf_description_custom");
+            if (!kind || !customRow || !customInput) return;
+            const sync = () => {
+                const showCustom = kind.value === "custom";
+                customRow.hidden = !showCustom;
+                customInput.required = showCustom;
+            };
+            kind.addEventListener("change", sync);
+            sync();
+        })();
+        </script>
     {% endif %}
 </section>

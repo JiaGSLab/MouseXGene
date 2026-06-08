@@ -266,7 +266,9 @@ class StrainLine(ActorStampedModel):
 
 
 def strain_line_document_upload_to(instance: "StrainLineDocument", filename: str) -> str:
-    safe = get_valid_filename(filename) or "document.pdf"
+    from colony.strain_pdf import storage_filename_for_description
+
+    safe = storage_filename_for_description(instance.description, fallback=filename)
     line_id = instance.strain_line_id or "pending"
     return f"strain_lines/{line_id}/{safe}"
 
@@ -274,8 +276,19 @@ def strain_line_document_upload_to(instance: "StrainLineDocument", filename: str
 class StrainLineDocument(TimeStampedModel):
     """PDF introductions / protocols attached to a strain line (max 10 per line, 10 MB each)."""
 
+    class DescriptionKind(models.TextChoices):
+        STRAIN_LINE_INFO = "strain_line_info", "Strain line info"
+        GENOTYPE_INFO = "genotype_info", "Genotype info"
+        CUSTOM = "custom", "Custom"
+
     strain_line = models.ForeignKey(StrainLine, on_delete=models.CASCADE, related_name="documents")
     file = models.FileField(upload_to=strain_line_document_upload_to)
+    description = models.CharField(max_length=255, blank=True)
+    description_kind = models.CharField(
+        max_length=32,
+        choices=DescriptionKind.choices,
+        default=DescriptionKind.CUSTOM,
+    )
     original_filename = models.CharField(max_length=255, blank=True)
     file_size = models.PositiveIntegerField(default=0)
     uploaded_by = models.ForeignKey(
@@ -290,7 +303,9 @@ class StrainLineDocument(TimeStampedModel):
         ordering = ("created_at", "id")
 
     def save(self, *args, **kwargs):
-        if self.file and not self.original_filename:
+        if self.description:
+            self.original_filename = get_valid_filename(self.description) or self.description
+        elif self.file and not self.original_filename:
             self.original_filename = get_valid_filename(self.file.name) or self.file.name
         if self.file:
             try:
@@ -301,6 +316,8 @@ class StrainLineDocument(TimeStampedModel):
 
     @property
     def display_name(self) -> str:
+        if self.description:
+            return self.description
         return self.original_filename or (self.file.name.split("/")[-1] if self.file else "PDF")
 
     def __str__(self) -> str:
