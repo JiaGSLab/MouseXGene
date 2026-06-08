@@ -4,6 +4,7 @@ from django.urls import reverse
 
 from colony.models import Cage, Mouse, StrainLine
 from core.models import Project
+from users.models import UserProfile
 
 
 class MouseListOwnerFilterTests(TestCase):
@@ -64,3 +65,18 @@ class HomeOwnerScopeTests(TestCase):
         response = self.client.get(reverse("home"))
         self.assertContains(response, "M-HOME-A")
         self.assertNotContains(response, "M-HOME-B")
+
+    def test_home_all_owners_shows_every_mouse(self):
+        self.client.login(username="home_owner_a", password="x")
+        response = self.client.get(reverse("home"), {"owner": "all"})
+        self.assertContains(response, "M-HOME-A")
+        self.assertContains(response, "M-HOME-B")
+
+    def test_home_admin_sees_all_mice(self):
+        admin = get_user_model().objects.create_user(username="homeadmin", password="x")
+        UserProfile.objects.filter(user=admin).update(role=UserProfile.Role.ADMIN)
+        self.client.login(username="homeadmin", password="x")
+        response = self.client.get(reverse("home"))
+        self.assertContains(response, "M-HOME-A")
+        self.assertContains(response, "M-HOME-B")
+        self.assertNotContains(response, 'id="home-owner-filter"')

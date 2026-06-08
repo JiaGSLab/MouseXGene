@@ -15,7 +15,12 @@ from breeding.analytics import breeding_litter_timing_alert
 from core.audit import log_audit_event
 from core.list_sort import PROJECT_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
-from core.owner_filters import breeding_project_owner_filter_q, litter_project_owner_filter_q
+from core.owner_filters import (
+    breeding_project_owner_filter_q,
+    litter_project_owner_filter_q,
+    project_owner_filter_options,
+    resolve_project_owner_filter,
+)
 from .forms import ProjectForm, ProjectMembershipFormSet
 from .models import AuditLog
 from .models import Project, ProjectMembership
@@ -39,15 +44,18 @@ def home(request: HttpRequest) -> HttpResponse:
     breedings_queryset = Breeding.objects.all()
     litters_queryset = Litter.objects.all()
 
-    if request.user.is_authenticated:
-        mice_queryset = mice_queryset.filter(project__owner=request.user)
-        breedings_queryset = breedings_queryset.filter(
-            breeding_project_owner_filter_q(request.user.pk)
-        ).distinct()
-        litters_queryset = litters_queryset.filter(
-            litter_project_owner_filter_q(request.user.pk)
-        ).distinct()
-        cages_queryset = cages_queryset.filter(current_mice__project__owner=request.user).distinct()
+    home_owner = ""
+    if request.user.is_authenticated and not is_admin(request.user):
+        home_owner = resolve_project_owner_filter(request)
+        if home_owner:
+            mice_queryset = mice_queryset.filter(project__owner_id=home_owner)
+            breedings_queryset = breedings_queryset.filter(
+                breeding_project_owner_filter_q(home_owner)
+            ).distinct()
+            litters_queryset = litters_queryset.filter(
+                litter_project_owner_filter_q(home_owner)
+            ).distinct()
+            cages_queryset = cages_queryset.filter(current_mice__project__owner_id=home_owner).distinct()
 
     mice_without_cage_qs = mice_queryset.filter(current_cage__isnull=True).select_related(
         "strain_line", "project"
@@ -240,6 +248,8 @@ def home(request: HttpRequest) -> HttpResponse:
             :dashboard_list_limit
         ],
         "recent_cages": cages_queryset.order_by("-created_at")[:dashboard_list_limit],
+        "home_owner": home_owner,
+        "owner_options": project_owner_filter_options(),
     }
     return render(request, "core/home.html", context)
 

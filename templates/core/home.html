@@ -8,6 +8,28 @@
     <p class="muted">Daily overview for colony status, data quality, and quick actions.</p>
 </section>
 
+{% if not is_admin %}
+<section class="card card--filters">
+    <form method="get" class="filter-form" id="home-owner-filter">
+        <div class="filter-row filter-row--primary">
+            <label class="filter-label" for="id_home_owner">Show data for</label>
+            {% with owner=home_owner %}
+                {% include "includes/_owner_filter_select.html" %}
+            {% endwith %}
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'home' %}" class="button button-reset">Reset</a>
+            </div>
+        </div>
+    </form>
+    {% if home_owner %}
+        <p class="muted small-print">Showing mice, cages, breedings, and litters for the selected project owner.</p>
+    {% else %}
+        <p class="muted small-print">Showing all lab mice, cages, breedings, and litters.</p>
+    {% endif %}
+</section>
+{% endif %}
+
 <section class="cards cards--stats">
     <article class="card card--stat">
         <div class="stat-card__head">
