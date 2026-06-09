@@ -2892,7 +2892,6 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "cage": cage,
         "current_mice": current_mice,
         "current_mouse_rows": current_mouse_rows,
-        "cage_genotype_overview": build_cage_genotype_overview(current_mice),
         "active_litters": active_litters,
         "current_mouse_count": len(current_mice),
         "cage_setup_date": latest_setup or cage.created_date,
