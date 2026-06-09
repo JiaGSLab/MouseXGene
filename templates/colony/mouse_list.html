@@ -29,7 +29,7 @@
             <input type="hidden" name="strain_line_id" value="{{ strain_line }}">
         {% endif %}
         <div class="filter-row filter-row--primary">
-            <input type="text" name="q" value="{{ query }}" placeholder="Search mouse_uid or ear_tag" class="search-input filter-control">
+            <input type="text" name="q" value="{{ query }}" placeholder="Search UID, tag, origin, coat, notes" class="search-input filter-control">
             <select name="sex" class="filter-control">
                 <option value="">All Sex</option>
                 {% for value, label in sex_options %}

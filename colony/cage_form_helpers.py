@@ -78,6 +78,10 @@ def filter_active_cage_choices_payload(
             {
                 "id": cage.pk,
                 "cage_id": cage.cage_id,
+                "purpose": cage.purpose,
+                "purpose_label": cage.get_purpose_display(),
+                "cage_type": cage.cage_type,
+                "cage_type_label": cage.get_cage_type_display(),
                 "is_empty": not mice,
                 "mouse_count": len(mice),
                 "mouse_uids": [m.mouse_uid for m in mice[:8]],

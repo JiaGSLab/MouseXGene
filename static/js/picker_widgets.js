@@ -58,6 +58,17 @@
         return `${cage.cage_id} (${parts.join("; ")})`;
     }
 
+    function mouseOptionLabel(mouse) {
+        if (!mouse) return "";
+        const uid = mouse.uid || mouse.mouse_uid || mouse.id || "";
+        const parts = [];
+        if (mouse.sex) parts.push(SEX_LABELS[mouse.sex] || mouse.sex);
+        if (mouse.project_name) parts.push(mouse.project_name);
+        if (mouse.strain_line_name) parts.push(mouse.strain_line_name);
+        if (mouse.status && mouse.status !== "active") parts.push(mouse.status_label || mouse.status);
+        return parts.length ? `${uid} (${parts.join("; ")})` : String(uid);
+    }
+
     function idSet(values) {
         return new Set((values || []).map((value) => String(value || "")).filter(Boolean));
     }
@@ -83,14 +94,54 @@
         },
         renderCageSelect(cageSelect, cages, selectedId) {
             const current = cageSelect.value || selectedId || "";
+            const previousLabels = {};
+            Array.from(cageSelect.options || []).forEach((opt) => {
+                if (opt.value) previousLabels[opt.value] = opt.textContent || opt.value;
+            });
             cageSelect.innerHTML = '<option value="">---------</option>';
+            const rendered = new Set();
             for (const cage of cages) {
                 const opt = document.createElement("option");
                 opt.value = String(cage.id);
                 opt.textContent = cageOptionLabel(cage);
                 if (String(cage.id) === String(current)) opt.selected = true;
                 cageSelect.appendChild(opt);
+                rendered.add(String(cage.id));
             }
+            if (current && !rendered.has(String(current))) {
+                const opt = document.createElement("option");
+                opt.value = String(current);
+                opt.textContent = previousLabels[String(current)] || `Selected cage #${current}`;
+                opt.selected = true;
+                cageSelect.appendChild(opt);
+            }
+        },
+        renderMouseSelect(mouseSelect, mice, selectedId) {
+            const current = mouseSelect.value || selectedId || "";
+            const previousLabels = {};
+            Array.from(mouseSelect.options || []).forEach((opt) => {
+                if (opt.value) previousLabels[opt.value] = opt.textContent || opt.value;
+            });
+            mouseSelect.innerHTML = '<option value="">---------</option>';
+            const rendered = new Set();
+            for (const mouse of mice) {
+                const opt = document.createElement("option");
+                opt.value = String(mouse.id);
+                opt.textContent = mouseOptionLabel(mouse);
+                if (String(mouse.id) === String(current)) opt.selected = true;
+                mouseSelect.appendChild(opt);
+                rendered.add(String(mouse.id));
+            }
+            if (current && !rendered.has(String(current))) {
+                const opt = document.createElement("option");
+                opt.value = String(current);
+                opt.textContent = previousLabels[String(current)] || `Selected mouse #${current}`;
+                opt.selected = true;
+                mouseSelect.appendChild(opt);
+            }
+        },
+        formatMouseOption(mouse) {
+            return mouseOptionLabel(mouse);
         },
         formatCageOption(cage) {
             return cageOptionLabel(cage);
@@ -107,8 +158,13 @@
         describeCage(cage) {
             if (!cage) return "";
             const count = cageMouseCount(cage);
-            if (!count) return `${cage.cage_id} is empty.`;
+            if (!count) {
+                const emptyPieces = [`${cage.cage_id} is empty`];
+                if (cage.purpose_label) emptyPieces.push(`Purpose: ${cage.purpose_label}`);
+                return `${emptyPieces.join(". ")}.`;
+            }
             const pieces = [cageOptionLabel(cage)];
+            if (cage.purpose_label) pieces.push(`Purpose: ${cage.purpose_label}`);
             const projects = compactList(cage.project_names || []);
             const mice = compactList(cage.mouse_uids || []);
             if (projects) pieces.push(`Projects: ${projects}`);
@@ -148,6 +204,12 @@
                 }
             }
             return warnings;
+        },
+        cagePurposeWarning(cage, expectedPurpose, expectedLabel) {
+            if (!cage || !expectedPurpose || !cage.purpose || cage.purpose === expectedPurpose) return "";
+            const current = cage.purpose_label || cage.purpose;
+            const target = expectedLabel || expectedPurpose;
+            return `selected cage purpose is ${current}; saving will mark it as ${target}`;
         },
     };
 })();

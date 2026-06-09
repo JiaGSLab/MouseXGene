@@ -55,7 +55,13 @@ class CageForm(forms.ModelForm):
         ]
         widgets = {
             "created_date": forms.DateInput(attrs={"type": "date"}),
+            "rack": forms.TextInput(attrs={"placeholder": "e.g. R1 or Rack-A"}),
+            "position": forms.TextInput(attrs={"placeholder": "e.g. A1"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
+        }
+        help_texts = {
+            "rack": "Use a consistent rack label, for example R1 or Rack-A.",
+            "position": "Use a consistent position label, for example A1.",
         }
 
     def _room_choices(self) -> list[tuple[str, str]]:
@@ -109,6 +115,35 @@ class CageForm(forms.ModelForm):
         return obj
 
 
+def _coerce_positive_int(value) -> int | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw.isdigit():
+        return None
+    value_int = int(raw)
+    return value_int if value_int > 0 else None
+
+
+def _selected_mouse_queryset(*values):
+    ids = {_coerce_positive_int(value) for value in values}
+    ids.discard(None)
+    if not ids:
+        return Mouse.objects.none()
+    return Mouse.objects.filter(pk__in=ids).select_related("project", "strain_line").order_by("mouse_uid")
+
+
+def _selected_cage_queryset(*values, active_only: bool = True):
+    ids = {_coerce_positive_int(value) for value in values}
+    ids.discard(None)
+    if not ids:
+        return Cage.objects.none()
+    cages = Cage.objects.filter(pk__in=ids)
+    if active_only:
+        cages = cages.filter(status=Cage.Status.ACTIVE)
+    return cages.order_by("cage_id")
+
+
 class MouseForm(forms.ModelForm):
     current_cage_lookup = forms.CharField(
         max_length=64,
@@ -152,15 +187,29 @@ class MouseForm(forms.ModelForm):
         if self.instance and self.instance.pk and self.instance.strain_line_id:
             active_strains = (active_strains | StrainLine.objects.filter(pk=self.instance.strain_line_id)).distinct()
         self.fields["strain_line"].queryset = active_strains.order_by("line_name")
-        active_cages = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
-        if self.instance.pk and self.instance.current_cage_id:
-            active_cages = (active_cages | Cage.objects.filter(pk=self.instance.current_cage_id)).distinct()
-        self.fields["current_cage"].queryset = active_cages
+        selected_cage_id = _coerce_positive_int(
+            self.data.get("current_cage") if self.is_bound else self.initial.get("current_cage")
+        )
+        current_cage_qs = Cage.objects.none()
+        if selected_cage_id:
+            current_cage_qs = current_cage_qs | Cage.objects.filter(
+                pk=selected_cage_id,
+                status=Cage.Status.ACTIVE,
+            )
+        if self.instance and self.instance.pk and self.instance.current_cage_id:
+            current_cage_qs = current_cage_qs | Cage.objects.filter(pk=self.instance.current_cage_id)
+        self.fields["current_cage"].queryset = current_cage_qs.distinct().order_by("cage_id")
         self.fields["current_cage"].required = False
         if self.instance.pk and self.instance.current_cage_id:
             self.fields["current_cage_lookup"].initial = self.instance.current_cage.cage_id
-        self.fields["sire"].queryset = self.fields["sire"].queryset.order_by("mouse_uid")
-        self.fields["dam"].queryset = self.fields["dam"].queryset.order_by("mouse_uid")
+        self.fields["sire"].queryset = _selected_mouse_queryset(
+            self.data.get("sire") if self.is_bound else self.initial.get("sire"),
+            self.instance.sire_id if self.instance and self.instance.pk else None,
+        )
+        self.fields["dam"].queryset = _selected_mouse_queryset(
+            self.data.get("dam") if self.is_bound else self.initial.get("dam"),
+            self.instance.dam_id if self.instance and self.instance.pk else None,
+        )
         self.fields["sire"].label = "Sire (Father)"
         self.fields["dam"].label = "Dam (Mother)"
         self.fields["project"].queryset = self.fields["project"].queryset.order_by("name")
@@ -231,9 +280,15 @@ class MouseBatchSharedForm(forms.Form):
         self.user = user
         super().__init__(*args, **kwargs)
         self.fields["strain_line"].queryset = StrainLine.objects.filter(is_active=True).order_by("line_name")
-        self.fields["current_cage"].queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
-        self.fields["sire"].queryset = Mouse.objects.order_by("mouse_uid")
-        self.fields["dam"].queryset = Mouse.objects.order_by("mouse_uid")
+        self.fields["current_cage"].queryset = _selected_cage_queryset(
+            self.data.get("current_cage") if self.is_bound else self.initial.get("current_cage")
+        )
+        self.fields["sire"].queryset = _selected_mouse_queryset(
+            self.data.get("sire") if self.is_bound else self.initial.get("sire")
+        )
+        self.fields["dam"].queryset = _selected_mouse_queryset(
+            self.data.get("dam") if self.is_bound else self.initial.get("dam")
+        )
         self.fields["project"].queryset = Project.objects.filter(is_active=True).order_by("name")
 
     def clean(self):
@@ -289,7 +344,17 @@ class MoveCageForm(forms.Form):
     def __init__(self, *args, mouse: Mouse, **kwargs):
         self.mouse = mouse
         super().__init__(*args, **kwargs)
-        self.fields["destination_cage"].queryset = Cage.objects.order_by("cage_id")
+        selected_id = _coerce_positive_int(
+            self.data.get("destination_cage") if self.is_bound else self.initial.get("destination_cage")
+        )
+        if selected_id:
+            self.fields["destination_cage"].queryset = Cage.objects.filter(
+                pk=selected_id,
+                status=Cage.Status.ACTIVE,
+            ).order_by("cage_id")
+        else:
+            self.fields["destination_cage"].queryset = Cage.objects.none()
+        self.fields["destination_cage"].widget.attrs.update({"class": "filter-control"})
 
     def clean_destination_cage(self):
         destination_cage = self.cleaned_data["destination_cage"]

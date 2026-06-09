@@ -1,0 +1,61 @@
+<div class="card card-nested" id="mouse-parent-picker">
+    <h3>Parents</h3>
+    <p class="muted small-print">Filter/search active mice, then choose sire and dam. Existing inactive parents stay selected; enable inactive search when needed.</p>
+    <div class="filter-grid">
+        <div class="form-row">
+            <label for="id_mouse_parent_owner_filter">Filter by owner</label>
+            <select id="id_mouse_parent_owner_filter" class="filter-control">
+                <option value="">All owners</option>
+                {% for owner in cage_owner_options %}
+                    <option value="{{ owner.id }}">{{ owner.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="id_mouse_parent_project_filter">Filter by project</label>
+            <select id="id_mouse_parent_project_filter" class="filter-control">
+                <option value="">All projects</option>
+                {% for project in cage_project_options %}
+                    <option value="{{ project.id }}">{{ project.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="id_mouse_parent_strain_filter">Filter by strain line</label>
+            <select id="id_mouse_parent_strain_filter" class="filter-control">
+                <option value="">All strain lines</option>
+                {% for strain in cage_strain_line_options %}
+                    <option value="{{ strain.id }}">{{ strain.line_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-row">
+            <label for="id_mouse_parent_search">Search parent UID/tag</label>
+            <input type="text" id="id_mouse_parent_search" class="filter-control" placeholder="UID, ear tag, toe tag">
+        </div>
+    </div>
+    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="button button-light" id="mouse-parent-filter-apply">Refresh parents</button>
+        <label class="inline-checkbox" for="id_mouse_parent_include_inactive">
+            <input type="checkbox" id="id_mouse_parent_include_inactive">
+            Include inactive
+        </label>
+        <span class="muted small-print" id="mouse-parent-filter-status">Loading parent choices...</span>
+    </div>
+    <div class="filter-grid">
+        <div class="form-row">
+            <label for="{{ parent_form.sire.id_for_label }}">{{ parent_form.sire.label }}</label>
+            {{ parent_form.sire }}
+            {% if parent_form.sire.errors %}
+                <div class="field-error">{% for error in parent_form.sire.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+        <div class="form-row">
+            <label for="{{ parent_form.dam.id_for_label }}">{{ parent_form.dam.label }}</label>
+            {{ parent_form.dam }}
+            {% if parent_form.dam.errors %}
+                <div class="field-error">{% for error in parent_form.dam.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+    </div>
+</div>

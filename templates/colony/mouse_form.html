@@ -31,7 +31,7 @@
         {% endif %}
 
         {% for field in form %}
-            {% if field.name == "current_cage" or field.name == "current_cage_lookup" %}
+            {% if field.name == "current_cage" or field.name == "current_cage_lookup" or field.name == "sire" or field.name == "dam" %}
             {% elif field.name == "project" %}
                 <div class="form-row">
                     <label for="{{ field.id_for_label }}">
@@ -140,10 +140,12 @@
                         <p class="muted">
                             When you choose a strain line, expected loci are shown below. Fill the actual genotype display for this mouse
                             (for example <code>Cre/+</code>, <code>fl/fl</code>, <code>+/Y</code>).
+                            For detailed corrections, use the mouse detail page's Edit Genotyping Results workflow.
                         </p>
                         <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
                         <div id="genotype-template-rows"></div>
                     </section>
+                    {% include "colony/_mouse_parent_picker.html" with parent_form=form %}
                 {% endif %}
             {% endif %}
         {% endfor %}
@@ -163,6 +165,7 @@
 {% if strain_default_project_map %}{{ strain_default_project_map|json_script:"strain-default-project-map" }}{% endif %}
 {{ existing_genotype_map|json_script:"existing-genotype-map" }}
 {{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
+{% include "colony/_mouse_parent_picker_script.html" %}
 <script>
 (async () => {
     const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
@@ -421,10 +424,15 @@
                 return;
             }
         }
-        if (!statusSelect || initialStatus !== "active") return;
-        if (statusSelect.value === "active") return;
+        if (!statusSelect || !initialStatus || statusSelect.value === initialStatus) return;
         const label = statusSelect.options[statusSelect.selectedIndex]?.text || statusSelect.value;
-        const message = `Change mouse status from Active to "${label}"? This affects colony counts and workflows.`;
+        let message = "";
+        if (initialStatus === "active" && statusSelect.value !== "active") {
+            message = `Change mouse status from Active to "${label}"? This affects colony counts and workflows.`;
+        } else if (initialStatus !== "active" && statusSelect.value === "active") {
+            message = `Reactivate this mouse from "${initialStatus}" to Active? This affects colony counts and workflows.`;
+        }
+        if (!message) return;
         if (!window.confirm(message)) {
             event.preventDefault();
         }

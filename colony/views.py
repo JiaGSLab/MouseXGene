@@ -639,9 +639,10 @@ def _filtered_mice_queryset(request: HttpRequest):
             | Q(ear_tag__icontains=query)
             | Q(toe_tag__icontains=query)
             | Q(origin__icontains=query)
+            | Q(coat_color__icontains=query)
         )
         if len(query) >= 4:
-            q_filter |= Q(genotype_summary__icontains=query)
+            q_filter |= Q(genotype_summary__icontains=query) | Q(notes__icontains=query)
         mice = mice.filter(q_filter)
     if sex:
         mice = mice.filter(sex=sex)
@@ -1019,6 +1020,52 @@ def _validate_batch_uid_uniqueness(entry_forms: list[MouseBatchEntryForm]) -> li
     return errors
 
 
+def _validate_batch_shared_sex_linked_genotype(
+    *,
+    shared_form: MouseBatchSharedForm,
+    entry_forms: list[MouseBatchEntryForm],
+    genotype_rows: list[dict[str, str]],
+) -> bool:
+    active_sexes = {
+        form.cleaned_data.get("sex")
+        for form in entry_forms
+        if form.is_valid() and (form.cleaned_data.get("mouse_uid") or "").strip()
+    }
+    active_sexes.discard("")
+    if len(active_sexes) <= 1:
+        return True
+    filled_rows = {
+        StrainLine.normalize_locus_name(row.get("locus") or "").casefold()
+        for row in genotype_rows
+        if (row.get("genotype") or "").strip()
+    }
+    if not filled_rows:
+        return True
+    template_entries = _resolved_template_loci_entries_for_context(
+        strain_line=shared_form.cleaned_data.get("strain_line"),
+        sire=shared_form.cleaned_data.get("sire"),
+        dam=shared_form.cleaned_data.get("dam"),
+        source_breeding=None,
+    )
+    linked_loci = [
+        entry["locus_name"]
+        for entry in template_entries
+        if entry.get("chromosome_type") in {StrainLine.ChromosomeType.X_LINKED, StrainLine.ChromosomeType.Y_LINKED}
+        and StrainLine.normalize_locus_name(entry.get("locus_name") or "").casefold() in filled_rows
+    ]
+    if not linked_loci:
+        return True
+    shared_form.add_error(
+        None,
+        (
+            "Shared genotype rows include sex-linked loci "
+            f"({', '.join(linked_loci)}) but this batch contains multiple sexes. "
+            "Create separate batches by sex, or leave those genotype rows blank and edit genotypes per mouse."
+        ),
+    )
+    return False
+
+
 def _create_mice_from_batch(
     *,
     shared: dict,
@@ -1184,19 +1231,37 @@ def _resolved_template_loci_for_context(
     source_breeding: Breeding | None = None,
 ) -> list[str]:
     """Resolve logical template loci with parental-union priority."""
+    return [
+        row["locus_name"]
+        for row in _resolved_template_loci_entries_for_context(
+            strain_line=strain_line,
+            sire=sire,
+            dam=dam,
+            source_breeding=source_breeding,
+        )
+        if (row.get("locus_name") or "").strip()
+    ]
+
+
+def _resolved_template_loci_entries_for_context(
+    *,
+    strain_line: StrainLine | None,
+    sire: Mouse | None,
+    dam: Mouse | None,
+    source_breeding: Breeding | None = None,
+) -> list[dict[str, str]]:
+    """Resolve logical template locus entries with parental-union priority."""
     if source_breeding is not None:
         parent_sire, parent_dams = breeding_sire_and_dams(source_breeding)
         parent_rows = _template_loci_union_for_mouse_relations(sire=parent_sire, dams=parent_dams)
-        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
-        if parent_loci:
-            return parent_loci
+        if parent_rows:
+            return parent_rows
     if sire is not None and dam is not None:
         parent_rows = _template_loci_union_for_mouse_relations(sire=sire, dam=dam)
-        parent_loci = [row["locus_name"] for row in parent_rows if (row.get("locus_name") or "").strip()]
-        if parent_loci:
-            return parent_loci
+        if parent_rows:
+            return parent_rows
     if strain_line is not None:
-        return strain_line.expected_loci_list()
+        return strain_line.expected_loci_entries()
     return []
 
 
@@ -3482,7 +3547,12 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                 messages.error(request, "Add at least one mouse with a UID before saving.")
             elif shared_form.is_valid() and all(form.is_valid() for form in active_entry_forms):
                 _validate_batch_uid_uniqueness(active_entry_forms)
-                if all(form.is_valid() for form in active_entry_forms):
+                genotype_ok = _validate_batch_shared_sex_linked_genotype(
+                    shared_form=shared_form,
+                    entry_forms=active_entry_forms,
+                    genotype_rows=posted_genotype_rows,
+                )
+                if genotype_ok and all(form.is_valid() for form in active_entry_forms):
                     created = _create_mice_from_batch(
                         shared=shared_form.cleaned_data,
                         entry_forms=active_entry_forms,
@@ -3741,6 +3811,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "mouse": mouse,
         "form": form,
+        **cage_filter_form_context(),
     }
     return render(request, "colony/mouse_move.html", context)
 

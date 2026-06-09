@@ -20,6 +20,14 @@
     {% if family_breeding_cage %}
         <p class="muted">Breeding cage origin: <strong>{{ family_breeding_cage.cage_id }}</strong></p>
     {% endif %}
+    {% if family_pedigree.source_breeding %}
+        <p class="muted">
+            Source breeding:
+            <a class="table-link" href="{% url 'breeding:breeding_detail' family_pedigree.source_breeding.pk %}">
+                {{ family_pedigree.source_breeding.breeding_code }}
+            </a>
+        </p>
+    {% endif %}
     <div class="pedigree-tree__parents">
         <article class="pedigree-tree__node card">
             <h2 class="pedigree-tree__node-title">Father (Sire)</h2>

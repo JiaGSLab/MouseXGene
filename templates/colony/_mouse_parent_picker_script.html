@@ -1,0 +1,64 @@
+<script>
+(() => {
+    const mouseApiUrl = "{{ mouse_picker_api_url|default:'/mice/api/picker/'|escapejs }}";
+    const ownerFilter = document.getElementById("id_mouse_parent_owner_filter");
+    const projectFilter = document.getElementById("id_mouse_parent_project_filter");
+    const strainFilter = document.getElementById("id_mouse_parent_strain_filter");
+    const searchInput = document.getElementById("id_mouse_parent_search");
+    const includeInactive = document.getElementById("id_mouse_parent_include_inactive");
+    const refreshBtn = document.getElementById("mouse-parent-filter-apply");
+    const statusEl = document.getElementById("mouse-parent-filter-status");
+    const sireSelect = document.getElementById("id_sire");
+    const damSelect = document.getElementById("id_dam");
+    if (!sireSelect || !damSelect || !window.MXGPicker) return;
+
+    let selectedSireId = sireSelect.value || "";
+    let selectedDamId = damSelect.value || "";
+
+    function baseFilters(sex) {
+        return {
+            owner_id: ownerFilter?.value || "",
+            project_id: projectFilter?.value || "",
+            strain_line_id: strainFilter?.value || "",
+            q: searchInput?.value || "",
+            include_inactive: includeInactive?.checked ? "1" : "",
+            sex,
+        };
+    }
+
+    async function reloadParents() {
+        if (statusEl) statusEl.textContent = "Loading parent choices...";
+        selectedSireId = sireSelect.value || selectedSireId;
+        selectedDamId = damSelect.value || selectedDamId;
+        try {
+            const [sires, dams] = await Promise.all([
+                MXGPicker.loadMice(mouseApiUrl, baseFilters("M")),
+                MXGPicker.loadMice(mouseApiUrl, baseFilters("F")),
+            ]);
+            MXGPicker.renderMouseSelect(sireSelect, sires, selectedSireId);
+            MXGPicker.renderMouseSelect(damSelect, dams, selectedDamId);
+            if (statusEl) statusEl.textContent = `Showing ${sires.length} sire candidate(s), ${dams.length} dam candidate(s).`;
+        } catch (err) {
+            if (statusEl) {
+                statusEl.textContent = `Failed to load parent choices: ${err.message}`;
+                statusEl.className = "field-error small-print";
+            }
+        }
+    }
+
+    const reloadParentsDebounced = MXGPicker.debounce(reloadParents, 300);
+    sireSelect.addEventListener("change", () => {
+        selectedSireId = sireSelect.value || "";
+    });
+    damSelect.addEventListener("change", () => {
+        selectedDamId = damSelect.value || "";
+    });
+    ownerFilter?.addEventListener("change", reloadParentsDebounced);
+    projectFilter?.addEventListener("change", reloadParentsDebounced);
+    strainFilter?.addEventListener("change", reloadParentsDebounced);
+    searchInput?.addEventListener("input", reloadParentsDebounced);
+    includeInactive?.addEventListener("change", reloadParents);
+    refreshBtn?.addEventListener("click", reloadParents);
+    reloadParents();
+})();
+</script>

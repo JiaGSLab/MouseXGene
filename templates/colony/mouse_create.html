@@ -41,7 +41,7 @@
         <section class="card card-nested">
             <h2>Shared information (same for all mice)</h2>
             {% for field in shared_form %}
-                {% if field.name == "current_cage" or field.name == "current_cage_lookup" %}
+                {% if field.name == "current_cage" or field.name == "current_cage_lookup" or field.name == "sire" or field.name == "dam" %}
                 {% elif field.name == "project" %}
                     <div class="form-row">
                         <label for="{{ field.id_for_label }}">
@@ -125,6 +125,9 @@
                             <div class="field-error">{% for error in field.errors %}<div>{{ error }}</div>{% endfor %}</div>
                         {% endif %}
                     </div>
+                    {% if field.name == "strain_line" %}
+                        {% include "colony/_mouse_parent_picker.html" with parent_form=shared_form %}
+                    {% endif %}
                 {% endif %}
             {% endfor %}
         </section>
@@ -180,6 +183,7 @@
         <section class="card">
             <h2>Genotype rows (shared for all mice)</h2>
             <p class="muted">Expected loci from strain line and parents. Applied to every mouse in this batch.</p>
+            <p class="muted small-print" id="batch-sex-linked-warning" aria-live="polite"></p>
             <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
             <div id="genotype-template-rows"></div>
         </section>
@@ -196,6 +200,7 @@
 {% if strain_default_project_map %}{{ strain_default_project_map|json_script:"strain-default-project-map" }}{% endif %}
 {{ existing_genotype_map|json_script:"existing-genotype-map" }}
 {{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
+{% include "colony/_mouse_parent_picker_script.html" %}
 <script>
 (async () => {
     const DRAFT_KEY = "mousexgene-mouse-create-draft-v1";
@@ -382,6 +387,12 @@
         const submitter = event.submitter;
         const action = submitter?.value || "create";
         if (action === "draft") return;
+        const linkedLoci = filledSharedSexLinkedLoci();
+        if (linkedLoci.length) {
+            window.alert(`Shared sex-linked genotype rows cannot be saved for a mixed-sex batch: ${linkedLoci.join(", ")}.`);
+            event.preventDefault();
+            return;
+        }
         const uids = collectUids();
         if (!uids.length) {
             window.alert("Add at least one mouse UID before saving.");
@@ -458,6 +469,8 @@
     const damSelect = document.getElementById("id_dam");
     const genotypeRowCountInput = document.getElementById("id_genotype_row_count");
     const container = document.getElementById("genotype-template-rows");
+    const sexLinkedWarning = document.getElementById("batch-sex-linked-warning");
+    let renderedGenotypeLoci = [];
 
     const AUTOSOMAL_OPTIONS = {
         standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
@@ -486,6 +499,8 @@
     const Y_LINKED_MALE_OPTIONS = ["+/Y", "-/Y", "KI/Y", "Custom"];
 
     function batchSexForGenotype() {
+        const sexes = activeSexes();
+        if (sexes.length === 1) return sexes[0];
         const first = document.querySelector(".batch-sex-select");
         return first?.value || "M";
     }
@@ -573,6 +588,7 @@
             ...parentLoci(sireSelect),
             ...parentLoci(damSelect),
         ]);
+        renderedGenotypeLoci = loci;
         const pMap = postedMap();
         container.innerHTML = "";
         if (!loci.length) {
@@ -581,6 +597,7 @@
             p.className = "muted";
             p.textContent = "No expected loci template on this strain line.";
             container.appendChild(p);
+            updateSexLinkedWarning();
             return;
         }
         loci.forEach((item, idx) => {
@@ -640,6 +657,8 @@
             select.disabled = optionPack.disabled;
             select.addEventListener("change", syncValue);
             customInput.addEventListener("input", syncValue);
+            select.addEventListener("change", updateSexLinkedWarning);
+            customInput.addEventListener("input", updateSexLinkedWarning);
             syncValue();
             row.appendChild(label);
             row.appendChild(hidden);
@@ -649,6 +668,32 @@
             container.appendChild(row);
         });
         genotypeRowCountInput.value = String(loci.length);
+        updateSexLinkedWarning();
+    }
+
+    function filledSharedSexLinkedLoci() {
+        const sexes = activeSexes();
+        if (sexes.length <= 1) return [];
+        return renderedGenotypeLoci
+            .map((item, idx) => {
+                const chromosomeType = item.chromosome_type || "autosomal";
+                if (chromosomeType !== "x_linked" && chromosomeType !== "y_linked") return "";
+                const value = (document.querySelector(`[name="genotype_display_${idx}"]`)?.value || "").trim();
+                return value ? item.locus_name : "";
+            })
+            .filter(Boolean);
+    }
+
+    function updateSexLinkedWarning() {
+        if (!sexLinkedWarning) return;
+        const loci = filledSharedSexLinkedLoci();
+        if (!loci.length) {
+            sexLinkedWarning.textContent = "";
+            sexLinkedWarning.className = "muted small-print";
+            return;
+        }
+        sexLinkedWarning.textContent = `This batch has multiple sexes and shared sex-linked genotype values (${loci.join(", ")}). Create separate batches by sex or leave these rows blank.`;
+        sexLinkedWarning.className = "field-error small-print";
     }
 
     function applyDefaultProjectFromStrain() {
@@ -663,6 +708,9 @@
     });
     sireSelect?.addEventListener("change", renderRows);
     damSelect?.addEventListener("change", renderRows);
+    document.querySelectorAll(".batch-sex-select").forEach((select) => {
+        select.addEventListener("change", updateSexLinkedWarning);
+    });
     applyDefaultProjectFromStrain();
     await renderRows();
     syncRowCountInput();

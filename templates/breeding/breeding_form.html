@@ -142,6 +142,7 @@
                             <small class="muted">{{ form.cage_lookup.help_text }}</small>
                         {% endif %}
                         <p class="muted small-print" id="breeding-cage-lookup-status" aria-live="polite"></p>
+                        <p class="muted small-print" id="breeding-cage-selected-summary" aria-live="polite"></p>
                         {% if form.cage_lookup.errors %}
                             <div class="field-error">
                                 {% for error in form.cage_lookup.errors %}
@@ -344,6 +345,8 @@
     const applyFilterBtn = document.getElementById("breeding-cage-filter-apply");
     const filterStatus = document.getElementById("breeding-cage-filter-status");
     const lookupStatus = document.getElementById("breeding-cage-lookup-status");
+    const selectedSummary = document.getElementById("breeding-cage-selected-summary");
+    const breedingForm = document.getElementById("breeding-form");
     if (!cageSelect || !window.MXGPicker) return;
 
     let cages = [];
@@ -356,6 +359,37 @@
         };
     }
 
+    function selectedCage() {
+        return MXGPicker.findCage(cages, cageSelect.value);
+    }
+
+    function selectedPurposeWarning() {
+        return MXGPicker.cagePurposeWarning(selectedCage(), "breeding", "Breeding");
+    }
+
+    function updateSelectedSummary() {
+        if (!selectedSummary) return;
+        const cage = selectedCage();
+        if (!cage) {
+            selectedSummary.textContent = "";
+            selectedSummary.className = "muted small-print";
+            return;
+        }
+        const warning = selectedPurposeWarning();
+        selectedSummary.textContent = warning
+            ? `${MXGPicker.describeCage(cage)} Warning: ${warning}.`
+            : MXGPicker.describeCage(cage);
+        selectedSummary.className = warning ? "field-error small-print" : "muted small-print";
+    }
+
+    function ensureCageInOptions(cage) {
+        if (!cage) return;
+        if (!cages.some((item) => String(item.id) === String(cage.id))) {
+            cages = [cage, ...cages];
+            MXGPicker.renderCageSelect(cageSelect, cages, cage.id);
+        }
+    }
+
     async function reloadCages(extra = {}) {
         if (filterStatus) filterStatus.textContent = "Loading cages...";
         try {
@@ -366,6 +400,7 @@
                 const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
                 filterStatus.textContent = `Showing ${cages.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
             }
+            updateSelectedSummary();
         } catch (err) {
             if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
         }
@@ -379,6 +414,7 @@
         if (!query) {
             lookupStatus.textContent = "";
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         let matches = MXGPicker.lookupCages(cages, query);
@@ -397,14 +433,17 @@
             return;
         }
         if (matches.length === 1) {
+            ensureCageInOptions(matches[0]);
             cageSelect.value = String(matches[0].id);
             lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
         lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
         lookupStatus.className = "field-error";
+        updateSelectedSummary();
     }
 
     applyFilterBtn?.addEventListener("click", () => reloadCages());
@@ -419,6 +458,14 @@
                 cageLookupInput.value = cage.cage_id;
                 syncLookupToSelect();
             }
+        }
+        updateSelectedSummary();
+    });
+    breedingForm?.addEventListener("submit", (event) => {
+        const warning = selectedPurposeWarning();
+        if (!warning) return;
+        if (!window.confirm(`${warning}. Save breeding anyway?`)) {
+            event.preventDefault();
         }
     });
     reloadCages();

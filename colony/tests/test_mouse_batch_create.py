@@ -49,6 +49,53 @@ class MouseBatchCreateTests(TestCase):
         self.assertTrue(Mouse.objects.filter(mouse_uid="BATCH-M2", ear_tag="E2").exists())
         self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
 
+    def test_mixed_sex_batch_rejects_shared_sex_linked_genotype(self):
+        self.strain.expected_loci_config = [
+            {
+                "locus_name": "Xgene",
+                "locus_type": StrainLine.LocusType.CUSTOM,
+                "chromosome_type": StrainLine.ChromosomeType.X_LINKED,
+            }
+        ]
+        self.strain.save()
+        payload = self._shared_payload()
+        payload.update(
+            {
+                "genotype_row_count": "1",
+                "genotype_locus_0": "Xgene",
+                "genotype_display_0": "+/Y",
+            }
+        )
+
+        response = self.client.post(reverse("mice:mouse_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Shared genotype rows include sex-linked loci")
+        self.assertFalse(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).exists())
+
+    def test_mixed_sex_batch_allows_blank_shared_sex_linked_genotype(self):
+        self.strain.expected_loci_config = [
+            {
+                "locus_name": "Xgene",
+                "locus_type": StrainLine.LocusType.CUSTOM,
+                "chromosome_type": StrainLine.ChromosomeType.X_LINKED,
+            }
+        ]
+        self.strain.save()
+        payload = self._shared_payload()
+        payload.update(
+            {
+                "genotype_row_count": "1",
+                "genotype_locus_0": "Xgene",
+                "genotype_display_0": "",
+            }
+        )
+
+        response = self.client.post(reverse("mice:mouse_create"), payload)
+
+        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertEqual(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).count(), 2)
+
     def test_save_draft_stores_session(self):
         payload = self._shared_payload()
         payload["form_action"] = "draft"

@@ -52,5 +52,19 @@
                 window.location = mergeFormIntoUrl(link.getAttribute("href"), form);
             });
         });
+
+        document
+            .querySelectorAll(
+                "#mouse-list-filters select.filter-control:not([name='per_page']), " +
+                "#cage-list-filters select.filter-control:not([name='per_page'])"
+            )
+            .forEach(function (select) {
+                select.addEventListener("change", function () {
+                    if (!select.form) {
+                        return;
+                    }
+                    select.form.requestSubmit();
+                });
+            });
     });
 })();

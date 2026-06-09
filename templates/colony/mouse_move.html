@@ -1,6 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Move Cage | Mouse {{ mouse.mouse_uid }}{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'js/picker_widgets.js' %}?v={{ APP_RELEASE }}"></script>
+{% endblock %}
 
 {% block content %}
 <section class="page-header">
@@ -19,7 +24,7 @@
 </section>
 
 <section class="card">
-    <form method="post" class="form-layout">
+    <form method="post" class="form-layout" id="mouse-move-form">
         {% csrf_token %}
 
         {% if form.non_field_errors %}
@@ -31,17 +36,74 @@
         {% endif %}
 
         {% for field in form %}
-            <div class="form-row">
-                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                {{ field }}
-                {% if field.errors %}
-                    <div class="field-error">
-                        {% for error in field.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
+            {% if field.name == "destination_cage" %}
+                <div class="card card-nested">
+                    <h2>Destination Cage</h2>
+                    <p class="muted small-print">Filter by owner, project, and/or strain line, then pick a destination cage or type a cage ID.</p>
+                    <div class="filter-grid">
+                        <div class="form-row">
+                            <label for="id_move_cage_owner_filter">Filter by owner</label>
+                            <select id="id_move_cage_owner_filter" class="filter-control">
+                                <option value="">All owners</option>
+                                {% for owner in cage_owner_options %}
+                                    <option value="{{ owner.id }}">{{ owner.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_move_cage_project_filter">Filter by project</label>
+                            <select id="id_move_cage_project_filter" class="filter-control">
+                                <option value="">All projects</option>
+                                {% for project in cage_project_options %}
+                                    <option value="{{ project.id }}" {% if mouse.project_id == project.id %}selected{% endif %}>{{ project.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_move_cage_strain_filter">Filter by strain line</label>
+                            <select id="id_move_cage_strain_filter" class="filter-control">
+                                <option value="">All strain lines</option>
+                                {% for strain in cage_strain_line_options %}
+                                    <option value="{{ strain.id }}" {% if mouse.strain_line_id == strain.id %}selected{% endif %}>{{ strain.line_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
-                {% endif %}
-            </div>
+                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="button button-light" id="move-cage-filter-apply">Refresh cages</button>
+                        <span class="muted small-print" id="move-cage-filter-status">Loading cages...</span>
+                    </div>
+                    <div class="form-row">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="field-error">
+                                {% for error in field.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <label for="id_move_cage_lookup">Or enter cage ID</label>
+                        <input type="text" id="id_move_cage_lookup" class="filter-control" placeholder="Partial cage ID">
+                        <p class="muted small-print" id="move-cage-lookup-status" aria-live="polite"></p>
+                        <p class="muted small-print" id="move-cage-selected-summary" aria-live="polite"></p>
+                    </div>
+                </div>
+            {% else %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endif %}
         {% endfor %}
 
         <div class="form-actions">
@@ -50,4 +112,149 @@
         </div>
     </form>
 </section>
+<script>
+(() => {
+    const cageApiUrl = "{{ cage_picker_api_url|default:'/cages/api/picker/'|escapejs }}";
+    const currentCageId = "{{ mouse.current_cage_id|default:''|escapejs }}";
+    const mouseProjectId = "{{ mouse.project_id|default:''|escapejs }}";
+    const mouseStrainId = "{{ mouse.strain_line_id|default:''|escapejs }}";
+    const mouseSex = "{{ mouse.sex|default:''|escapejs }}";
+    const projectFilter = document.getElementById("id_move_cage_project_filter");
+    const ownerFilter = document.getElementById("id_move_cage_owner_filter");
+    const strainFilter = document.getElementById("id_move_cage_strain_filter");
+    const cageSelect = document.getElementById("id_destination_cage");
+    const lookupInput = document.getElementById("id_move_cage_lookup");
+    const refreshBtn = document.getElementById("move-cage-filter-apply");
+    const filterStatus = document.getElementById("move-cage-filter-status");
+    const lookupStatus = document.getElementById("move-cage-lookup-status");
+    const selectedSummary = document.getElementById("move-cage-selected-summary");
+    const moveForm = document.getElementById("mouse-move-form");
+    if (!cageSelect || !window.MXGPicker) return;
+
+    let cages = [];
+    const selectedCageId = "{{ form.destination_cage.value|default:''|escapejs }}";
+
+    function currentFilters() {
+        return {
+            project_id: projectFilter?.value || "",
+            owner_id: ownerFilter?.value || "",
+            strain_line_id: strainFilter?.value || "",
+        };
+    }
+
+    function withoutCurrentCage(values) {
+        return (values || []).filter((cage) => String(cage.id) !== String(currentCageId));
+    }
+
+    function selectedCage() {
+        return MXGPicker.findCage(cages, cageSelect.value);
+    }
+
+    function selectedWarnings() {
+        return MXGPicker.cageWarnings(selectedCage(), {
+            projectId: mouseProjectId,
+            strainLineId: mouseStrainId,
+            sex: mouseSex,
+        });
+    }
+
+    function updateSelectedSummary() {
+        if (!selectedSummary) return;
+        const cage = selectedCage();
+        if (!cage) {
+            selectedSummary.textContent = "";
+            selectedSummary.className = "muted small-print";
+            return;
+        }
+        const warnings = selectedWarnings();
+        selectedSummary.textContent = warnings.length
+            ? `${MXGPicker.describeCage(cage)} Warning: ${warnings.join("; ")}.`
+            : MXGPicker.describeCage(cage);
+        selectedSummary.className = warnings.length ? "field-error small-print" : "muted small-print";
+    }
+
+    function ensureCageInOptions(cage) {
+        if (!cage) return;
+        if (!cages.some((item) => String(item.id) === String(cage.id))) {
+            cages = [cage, ...cages];
+            MXGPicker.renderCageSelect(cageSelect, cages, cage.id);
+        }
+    }
+
+    async function reloadCages(extra = {}) {
+        if (filterStatus) filterStatus.textContent = "Loading cages...";
+        try {
+            cages = withoutCurrentCage(await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), ...extra }));
+            MXGPicker.renderCageSelect(cageSelect, cages, selectedCageId);
+            if (filterStatus) filterStatus.textContent = `Showing ${cages.length} destination cage(s).`;
+            updateSelectedSummary();
+        } catch (err) {
+            if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
+        }
+    }
+
+    const reloadCagesDebounced = MXGPicker.debounce(() => reloadCages(), 250);
+
+    async function syncLookupToSelect() {
+        if (!lookupInput || !lookupStatus) return;
+        const query = lookupInput.value.trim();
+        if (!query) {
+            lookupStatus.textContent = "";
+            lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
+            return;
+        }
+        let matches = withoutCurrentCage(MXGPicker.lookupCages(cages, query));
+        if (!matches.length) {
+            try {
+                matches = withoutCurrentCage(await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), q: query }));
+            } catch (err) {
+                lookupStatus.textContent = err.message;
+                lookupStatus.className = "field-error";
+                return;
+            }
+        }
+        if (!matches.length) {
+            lookupStatus.textContent = `No destination cage found matching "${query}".`;
+            lookupStatus.className = "field-error";
+            return;
+        }
+        if (matches.length === 1) {
+            ensureCageInOptions(matches[0]);
+            cageSelect.value = String(matches[0].id);
+            lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
+            lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
+            return;
+        }
+        const codes = matches.slice(0, 5).map((cage) => cage.cage_id).join(", ");
+        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "..." : ""}. Enter a more specific cage ID.`;
+        lookupStatus.className = "field-error";
+        updateSelectedSummary();
+    }
+
+    refreshBtn?.addEventListener("click", () => reloadCages());
+    projectFilter?.addEventListener("change", reloadCagesDebounced);
+    ownerFilter?.addEventListener("change", reloadCagesDebounced);
+    strainFilter?.addEventListener("change", reloadCagesDebounced);
+    lookupInput?.addEventListener("input", syncLookupToSelect);
+    lookupInput?.addEventListener("change", syncLookupToSelect);
+    cageSelect.addEventListener("change", () => {
+        const cage = selectedCage();
+        if (lookupInput && cage) {
+            lookupInput.value = cage.cage_id;
+        }
+        updateSelectedSummary();
+    });
+    moveForm?.addEventListener("submit", (event) => {
+        const warnings = selectedWarnings();
+        if (!warnings.length) return;
+        const warningText = warnings.map((warning) => `- ${warning}`).join("\n");
+        if (!window.confirm(`Destination cage warning:\n${warningText}\n\nMove anyway?`)) {
+            event.preventDefault();
+        }
+    });
+    reloadCages();
+})();
+</script>
 {% endblock %}
