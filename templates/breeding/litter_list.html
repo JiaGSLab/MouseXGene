@@ -77,6 +77,17 @@
     </form>
 </section>
 
+<section class="litter-workflow-summary" aria-label="Litter weaning summary">
+    <div class="litter-workflow-summary__item litter-workflow-summary__item--open">
+        <span class="litter-workflow-summary__label">Not weaned</span>
+        <strong>{{ not_weaned_count }}</strong>
+    </div>
+    <div class="litter-workflow-summary__item litter-workflow-summary__item--weaned">
+        <span class="litter-workflow-summary__label">Weaned / closed</span>
+        <strong>{{ weaned_count }}</strong>
+    </div>
+</section>
+
 <div class="container-wide">
 <section class="table-wrap table-wrap-scroll">
     <table class="data-table data-table-compact">
@@ -101,7 +112,15 @@
         </thead>
         <tbody>
             {% for litter in litters %}
-            <tr class="{% if litter.litter_status == 'archived' or litter.litter_status == 'ended' %}row-inactive{% endif %}">
+            {% if litter.show_wean_section_header %}
+                <tr class="litter-section-row litter-section-row--{{ litter.wean_section_bucket }}">
+                    <td colspan="15">
+                        <span>{{ litter.wean_section_title }}</span>
+                        <strong>{{ litter.wean_section_count }}</strong>
+                    </td>
+                </tr>
+            {% endif %}
+            <tr class="{% if litter.litter_status == 'archived' or litter.litter_status == 'ended' %}row-inactive {% endif %}{% if litter.is_weaned %}litter-row-weaned{% else %}litter-row-open{% endif %}">
                 <td class="cage-owners-cell">
                     {% for row in litter.owner_rows %}
                         <div class="cage-projects-cell__row">
@@ -137,7 +156,8 @@
                 <td>{{ litter.pups_count_display|default:"—" }}</td>
                 <td>{{ litter.wean_due_date|default:"—" }}</td>
                 <td>
-                    {{ litter.weaning_status }}
+                    <span class="status-pill {{ litter.wean_state_badge_class }}">{{ litter.wean_state_label }}</span>
+                    <div class="muted small-print">{{ litter.weaning_status }}</div>
                     {% if litter.wean_overdue_days > 0 %}
                         <span class="status-pill status-pill-archived">Overdue</span>
                     {% endif %}

@@ -649,6 +649,16 @@ body.col-resize-active * {
     font-weight: 600;
 }
 
+.breeding-badge-link {
+    text-decoration: none;
+}
+
+.breeding-badge-link:hover {
+    border-color: #60a5fa;
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
 .breeder-members {
     display: flex;
     flex-direction: column;
@@ -1264,6 +1274,67 @@ body.col-resize-active * {
     background: #eff6ff;
     border-color: #93c5fd;
     color: #1e40af;
+}
+
+.litter-workflow-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 12px;
+}
+
+.litter-workflow-summary__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.litter-workflow-summary__item--open {
+    border-color: #86efac;
+    background: #f0fdf4;
+    color: #14532d;
+}
+
+.litter-workflow-summary__item--weaned {
+    border-color: #93c5fd;
+    background: #eff6ff;
+    color: #1e3a8a;
+}
+
+.litter-workflow-summary__label {
+    font-size: 0.86rem;
+    font-weight: 600;
+}
+
+.litter-section-row td {
+    padding: 8px 12px;
+    border-top: 2px solid #cbd5e1;
+    border-bottom: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 0.84rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.litter-section-row td strong {
+    margin-left: 8px;
+}
+
+.litter-section-row--not-weaned td {
+    border-left: 4px solid #22c55e;
+}
+
+.litter-section-row--weaned td {
+    border-left: 4px solid #3b82f6;
+}
+
+.data-table tbody tr.litter-row-weaned > td {
+    background: #f8fbff;
 }
 
 .status-pill-tail_tagged {

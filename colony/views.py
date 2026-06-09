@@ -836,15 +836,16 @@ def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, lis
         .distinct()
     )
     for breeding in breedings:
+        badge = {"id": breeding.pk, "code": breeding.breeding_code}
         if breeding.male_id in out:
-            out[breeding.male_id].append({"role": "Sire", "code": breeding.breeding_code})
+            out[breeding.male_id].append({**badge, "role": "Sire"})
         if breeding.female_1_id in out:
-            out[breeding.female_1_id].append({"role": "Dam", "code": breeding.breeding_code})
+            out[breeding.female_1_id].append({**badge, "role": "Dam"})
         if breeding.female_2_id in out:
-            out[breeding.female_2_id].append({"role": "Dam", "code": breeding.breeding_code})
+            out[breeding.female_2_id].append({**badge, "role": "Dam"})
         for row in breeding.extra_female_links.all():
             if row.mouse_id in out:
-                out[row.mouse_id].append({"role": "Dam", "code": breeding.breeding_code})
+                out[row.mouse_id].append({**badge, "role": "Dam"})
     return out
 
 

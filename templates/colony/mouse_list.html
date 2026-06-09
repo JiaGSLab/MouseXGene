@@ -176,7 +176,7 @@
                 <td>
                     {% if mouse.active_breeding_badges %}
                         {% for b in mouse.active_breeding_badges %}
-                            <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                            <a class="breeding-badge breeding-badge-link" href="{% url 'breeding:breeding_detail' b.id %}">{{ b.role }} · {{ b.code }}</a>
                         {% endfor %}
                     {% else %}
                         <span class="cell-empty">—</span>

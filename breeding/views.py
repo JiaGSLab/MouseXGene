@@ -1238,6 +1238,17 @@ def _enrich_litters_for_list(litters: list[Litter], *, today, user) -> None:
             if litter.pups_count_display is not None and litter.created_mice_count >= litter.pups_count_display
             else f"{litter.created_mice_count}/{litter.pups_count_display or '?'}"
         )
+        litter.is_weaned = bool(litter.wean_date or litter.litter_status == Litter.LitterStatus.WEANED)
+        if litter.is_weaned:
+            litter.wean_state_label = "Weaned / closed"
+            litter.wean_state_badge_class = "status-pill-weaned"
+            litter.wean_section_bucket = "weaned"
+            litter.wean_section_title = "Weaned / closed litters"
+        else:
+            litter.wean_state_label = "Not weaned"
+            litter.wean_state_badge_class = "status-pill-active"
+            litter.wean_section_bucket = "not-weaned"
+            litter.wean_section_title = "Not weaned litters"
 
         litter.parent_lines = _union_loci_from_strain_lines(
             litter.sire_mouse.strain_line if litter.sire_mouse else None,
@@ -1334,10 +1345,6 @@ def litter_list(request: HttpRequest) -> HttpResponse:
             | Q(breeding__male__mouse_uid__icontains=q)
             | Q(breeding__female_1__mouse_uid__icontains=q)
         )
-    if weaned == "yes":
-        litters = litters.filter(wean_date__isnull=False)
-    elif weaned == "no":
-        litters = litters.filter(wean_date__isnull=True)
     if breeding:
         litters = litters.filter(breeding_id=breeding)
     if birth_date_from:
@@ -1346,6 +1353,20 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.filter(birth_date__lte=birth_date_to)
     if litter_status:
         litters = litters.filter(litter_status=litter_status)
+
+    litters_for_wean_counts = litters
+    not_weaned_count = (
+        litters_for_wean_counts.filter(wean_date__isnull=True)
+        .exclude(litter_status=Litter.LitterStatus.WEANED)
+        .count()
+    )
+    weaned_count = litters_for_wean_counts.filter(
+        Q(wean_date__isnull=False) | Q(litter_status=Litter.LitterStatus.WEANED)
+    ).count()
+    if weaned == "yes":
+        litters = litters.filter(Q(wean_date__isnull=False) | Q(litter_status=Litter.LitterStatus.WEANED))
+    elif weaned == "no":
+        litters = litters.filter(wean_date__isnull=True).exclude(litter_status=Litter.LitterStatus.WEANED)
 
     litters_qs = apply_list_sort(litters, request, LITTER_LIST_SORT)
     today = timezone.localdate()
@@ -1408,9 +1429,17 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     pagination = _paginate_queryset_for_list(request, litters_qs, viewname="litters:litter_list")
     litters_page_items = list(pagination["items"])
     _enrich_litters_for_list(litters_page_items, today=today, user=request.user)
+    litters_page_items = sorted(litters_page_items, key=lambda litter: 1 if litter.is_weaned else 0)
+    previous_wean_bucket = None
+    for litter in litters_page_items:
+        litter.show_wean_section_header = litter.wean_section_bucket != previous_wean_bucket
+        litter.wean_section_count = weaned_count if litter.is_weaned else not_weaned_count
+        previous_wean_bucket = litter.wean_section_bucket
 
     context = {
         "litters": litters_page_items,
+        "not_weaned_count": not_weaned_count,
+        "weaned_count": weaned_count,
         "q": q,
         "weaned": weaned,
         "breeding": breeding,
