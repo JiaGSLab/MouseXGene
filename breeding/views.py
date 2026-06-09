@@ -10,11 +10,12 @@ from django.contrib import messages
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Prefetch, Q
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
 
+from colony.cage_form_helpers import cage_filter_form_context
 from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.id_uniqueness import find_conflicting_mouse
@@ -22,7 +23,7 @@ from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
 
 from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
-from .models import Breeding, Litter, LitterPup
+from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
 from core.list_sort import BREEDING_LIST_SORT, LITTER_LIST_SORT, apply_list_sort, build_list_sort_context
@@ -32,7 +33,6 @@ from core.owner_filters import (
     breeding_project_owner_filter_q,
     litter_project_owner_filter_q,
     project_owner_filter_options,
-    project_owner_wean_options,
     resolve_project_owner_filter,
 )
 from users.permissions import (
@@ -89,30 +89,30 @@ def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str
 
 
 def _paginate_queryset_for_list(request: HttpRequest, queryset, *, viewname: str) -> dict:
-    total = queryset.count()
     raw_per = (request.GET.get("per_page") or "").strip().lower()
 
-    use_all = raw_per == "all" and total <= LIST_ALL_RESULTS_MAX
-    if raw_per == "all" and total > LIST_ALL_RESULTS_MAX:
-        messages.warning(
-            request,
-            (
-                f"Cannot show all {total} rows at once (limit is {LIST_ALL_RESULTS_MAX}). "
-                f"Using {LIST_PAGE_DEFAULT} per page - narrow filters or use export."
-            ),
-        )
-        use_all = False
-
-    if use_all:
-        return {
-            "page_obj": None,
-            "paginator": None,
-            "pagination_hrefs": None,
-            "per_page": "all",
-            "total_count": total,
-            "all_allowed": True,
-            "items": list(queryset),
-        }
+    if raw_per == "all":
+        total = queryset.count()
+        use_all = total <= LIST_ALL_RESULTS_MAX
+        if total > LIST_ALL_RESULTS_MAX:
+            messages.warning(
+                request,
+                (
+                    f"Cannot show all {total} rows at once (limit is {LIST_ALL_RESULTS_MAX}). "
+                    f"Using {LIST_PAGE_DEFAULT} per page - narrow filters or use export."
+                ),
+            )
+            use_all = False
+        if use_all:
+            return {
+                "page_obj": None,
+                "paginator": None,
+                "pagination_hrefs": None,
+                "per_page": "all",
+                "total_count": total,
+                "all_allowed": True,
+                "items": list(queryset),
+            }
 
     try:
         per_int = int(raw_per) if raw_per and raw_per != "all" else LIST_PAGE_DEFAULT
@@ -122,6 +122,7 @@ def _paginate_queryset_for_list(request: HttpRequest, queryset, *, viewname: str
         per_int = LIST_PAGE_DEFAULT
 
     paginator = Paginator(queryset, per_int)
+    total = paginator.count
     raw_page = request.GET.get("page") or "1"
     try:
         pnum = int(raw_page)
@@ -150,15 +151,60 @@ def _scoped_breedings(user):
         "cage",
         "male",
         "male__project",
+        "male__project__owner",
+        "male__project__owner__profile",
+        "male__strain_line",
+        "male__current_cage",
         "female_1",
         "female_1__project",
+        "female_1__project__owner",
+        "female_1__project__owner__profile",
+        "female_1__strain_line",
+        "female_1__current_cage",
         "female_2",
         "female_2__project",
+        "female_2__project__owner",
+        "female_2__project__owner__profile",
+        "female_2__strain_line",
+        "female_2__current_cage",
         "created_by",
         "created_by__profile",
         "updated_by",
         "updated_by__profile",
-    ).prefetch_related("extra_female_links__mouse")
+    ).prefetch_related(
+        _breeding_member_prefetch(),
+        _extra_female_prefetch(),
+    )
+
+
+def _breeding_member_queryset():
+    return BreedingMember.objects.select_related(
+        "mouse",
+        "mouse__project",
+        "mouse__project__owner",
+        "mouse__project__owner__profile",
+        "mouse__strain_line",
+        "mouse__current_cage",
+    ).order_by("role", "sort_order", "mouse__mouse_uid")
+
+
+def _extra_female_queryset():
+    return BreedingExtraFemale.objects.select_related(
+        "mouse",
+        "mouse__project",
+        "mouse__project__owner",
+        "mouse__project__owner__profile",
+        "mouse__strain_line",
+        "mouse__current_cage",
+    ).order_by("mouse__mouse_uid")
+
+
+def _breeding_member_prefetch(path: str = "breeding_members") -> Prefetch:
+    return Prefetch(path, queryset=_breeding_member_queryset(), to_attr="prefetched_breeding_members")
+
+
+def _extra_female_prefetch(path: str = "extra_female_links") -> Prefetch:
+    return Prefetch(path, queryset=_extra_female_queryset(), to_attr="prefetched_extra_female_links")
 
 
 def _breeding_setup_by_label(breeding: Breeding, audit_entries: list | None = None) -> str:
@@ -257,12 +303,12 @@ def _enrich_breedings_for_list(breedings: list[Breeding], *, today) -> None:
             b.alert_days_style = alert_styles["days_style"]
         b.display_sire, b.display_dams = _breeding_sire_and_dams(b)
         b.display_sire_age_days = _mouse_age_days(b.display_sire, today=today)
-        b.display_sire_genotype = _mouse_genotype_summary(b.display_sire)
+        b.display_sire_genotype = _mouse_genotype_summary_for_list(b.display_sire)
         b.display_dam_rows = [
             {
                 "mouse": dam,
                 "age_days": _mouse_age_days(dam, today=today),
-                "genotype": _mouse_genotype_summary(dam),
+                "genotype": _mouse_genotype_summary_for_list(dam),
             }
             for dam in (b.display_dams or [])
         ]
@@ -270,30 +316,36 @@ def _enrich_breedings_for_list(breedings: list[Breeding], *, today) -> None:
 
 
 def _breeding_member_mice(breeding: Breeding) -> list[Mouse]:
-    try:
-        members = [row.mouse for row in breeding.breeding_members.select_related("mouse").all()]
-    except (ProgrammingError, OperationalError):
-        members = []
+    prefetched_members = getattr(breeding, "prefetched_breeding_members", None)
+    if prefetched_members is not None:
+        members = [row.mouse for row in prefetched_members]
+    else:
+        try:
+            members = [row.mouse for row in breeding.breeding_members.select_related("mouse").all()]
+        except (ProgrammingError, OperationalError):
+            members = []
     if members:
         return members
-    fallback = [breeding.male, breeding.female_1, breeding.female_2, *[r.mouse for r in breeding.extra_female_links.all()]]
+    prefetched_extra = getattr(breeding, "prefetched_extra_female_links", None)
+    if prefetched_extra is not None:
+        extra_mice = [row.mouse for row in prefetched_extra]
+    else:
+        extra_mice = [r.mouse for r in breeding.extra_female_links.select_related("mouse").all()]
+    fallback = [breeding.male, breeding.female_1, breeding.female_2, *extra_mice]
     return [m for m in fallback if m is not None]
 
 
 def _breeding_sire_and_dams(breeding: Breeding) -> tuple[Mouse | None, list[Mouse]]:
     sire: Mouse | None = None
     dams: list[Mouse] = []
-    try:
-        members = list(
-            breeding.breeding_members.select_related(
-                "mouse",
-                "mouse__project",
-                "mouse__project__owner",
-                "mouse__project__owner__profile",
-            ).all().order_by("role", "sort_order", "mouse__mouse_uid")
-        )
-    except (ProgrammingError, OperationalError):
-        members = []
+    prefetched_members = getattr(breeding, "prefetched_breeding_members", None)
+    if prefetched_members is not None:
+        members = list(prefetched_members)
+    else:
+        try:
+            members = list(_breeding_member_queryset().filter(breeding=breeding))
+        except (ProgrammingError, OperationalError):
+            members = []
     if members:
         for row in members:
             if row.role == Breeding.MemberRole.SIRE and sire is None:
@@ -306,12 +358,12 @@ def _breeding_sire_and_dams(breeding: Breeding) -> tuple[Mouse | None, list[Mous
         dams.append(breeding.female_1)
     if breeding.female_2:
         dams.append(breeding.female_2)
-    for row in breeding.extra_female_links.select_related(
-        "mouse",
-        "mouse__project",
-        "mouse__project__owner",
-        "mouse__project__owner__profile",
-    ).all().order_by("mouse__mouse_uid"):
+    prefetched_extra = getattr(breeding, "prefetched_extra_female_links", None)
+    if prefetched_extra is not None:
+        extra_links = prefetched_extra
+    else:
+        extra_links = _extra_female_queryset().filter(breeding=breeding)
+    for row in extra_links:
         if row.mouse not in dams:
             dams.append(row.mouse)
     return sire, dams
@@ -346,10 +398,17 @@ def _active_breeding_codes_for_mouse_ids(mouse_ids: list[int], *, exclude_breedi
     out: dict[int, set[str]] = {mid: set() for mid in mouse_ids}
     if not mouse_ids:
         return {}
-    q = Breeding.objects.filter(active=True)
+    q = Breeding.objects.filter(active=True).filter(
+        Q(male_id__in=mouse_ids)
+        | Q(female_1_id__in=mouse_ids)
+        | Q(female_2_id__in=mouse_ids)
+        | Q(extra_female_links__mouse_id__in=mouse_ids)
+        | Q(breeding_members__mouse_id__in=mouse_ids)
+    )
     if exclude_breeding_id:
         q = q.exclude(pk=exclude_breeding_id)
-    for breeding in q.prefetch_related("extra_female_links__mouse"):
+    q = q.distinct().prefetch_related("extra_female_links__mouse", "breeding_members__mouse")
+    for breeding in q:
         code = breeding.breeding_code
         for mouse in _breeding_member_mice(breeding):
             if mouse.id in out:
@@ -410,48 +469,10 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
     return payload
 
 
-def _wean_target_cage_choices_payload() -> list[dict]:
-    cages = (
-        Cage.objects.filter(status=Cage.Status.ACTIVE)
-        .prefetch_related(
-            "current_mice__project",
-            "current_mice__project__owner",
-        )
-        .order_by("cage_id")
-    )
-    payload: list[dict] = []
-    for cage in cages:
-        mice = list(cage.current_mice.all())
-        project_ids = sorted({m.project_id for m in mice if m.project_id})
-        owner_ids = sorted(
-            {m.project.owner_id for m in mice if getattr(m, "project_id", None) and m.project.owner_id}
-        )
-        payload.append(
-            {
-                "id": cage.pk,
-                "cage_id": cage.cage_id,
-                "is_empty": not mice,
-                "project_ids": project_ids,
-                "owner_ids": owner_ids,
-            }
-        )
-    return payload
-
-
-def _wean_cage_filter_options() -> tuple[list[dict], list[dict]]:
-    projects = list(Project.objects.filter(is_active=True).order_by("name").values("id", "name"))
-    owners = project_owner_wean_options()
-    return projects, owners
-
-
 def _breeding_form_cage_context() -> dict:
-    projects, owners = _wean_cage_filter_options()
-    return {
-        "breeding_cage_choices": _wean_target_cage_choices_payload(),
-        "cage_project_options": projects,
-        "cage_owner_options": owners,
-        "mouse_owner_options": owners,
-    }
+    ctx = cage_filter_form_context()
+    ctx["mouse_owner_options"] = ctx["cage_owner_options"]
+    return ctx
 
 
 def _litter_wean_orphan_pups(litter: Litter) -> list[LitterPup]:
@@ -619,7 +640,7 @@ def _litter_wean_page_context(
     cage_project_filter: str = "",
     cage_owner_filter: str = "",
 ) -> dict:
-    projects, owners = _wean_cage_filter_options()
+    cage_ctx = cage_filter_form_context()
     sire_strain = breeding_sire.strain_line if breeding_sire and breeding_sire.strain_line_id else None
     dam_strain = wean_primary_dam.strain_line if wean_primary_dam and wean_primary_dam.strain_line_id else None
     return {
@@ -636,9 +657,11 @@ def _litter_wean_page_context(
         "sire_strain_line": sire_strain,
         "dam_strain_line": dam_strain,
         "litter_age_display": _litter_age_display(litter),
-        "target_cage_choices": _wean_target_cage_choices_payload(),
-        "wean_project_options": projects,
-        "wean_owner_options": owners,
+        "target_cage_choices": [],
+        "cage_picker_api_url": cage_ctx.get("cage_picker_api_url", "/cages/api/picker/"),
+        "wean_project_options": cage_ctx["cage_project_options"],
+        "wean_owner_options": cage_ctx["cage_owner_options"],
+        "cage_strain_line_options": cage_ctx["cage_strain_line_options"],
         "cage_project_filter": cage_project_filter,
         "cage_owner_filter": cage_owner_filter,
         "litter_recorded_male_count": litter.male_count,
@@ -670,6 +693,12 @@ def _mouse_genotype_summary(mouse: Mouse | None) -> str:
         return "-"
     summary = ", ".join(parts)
     return f"{summary}..." if len(records) > 3 else summary
+
+
+def _mouse_genotype_summary_for_list(mouse: Mouse | None) -> str:
+    if mouse is None:
+        return "-"
+    return mouse.genotype_summary or "-"
 
 
 def _union_loci_from_strain_lines(*strain_lines) -> list[str]:
@@ -800,10 +829,10 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     )
     breedings = apply_list_sort(breedings, request, BREEDING_LIST_SORT)
     today = timezone.localdate()
-    breedings_export_list = list(breedings)
-    _enrich_breedings_for_list(breedings_export_list, today=today)
 
     if export in {"csv", "xlsx"}:
+        breedings_export_list = list(breedings)
+        _enrich_breedings_for_list(breedings_export_list, today=today)
         headers = [
             "setup_by",
             "litter_alert",
@@ -962,7 +991,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
         "cancel_url": "breeding:breeding_list",
         "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
         "breeding_age_hints": TIER_HINT,
-        "breeder_mouse_choices": _breeder_mouse_choices_payload(),
+        "breeder_mouse_choices": [],
         **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
@@ -1018,7 +1047,7 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "cancel_kwargs": {"pk": breeding.pk},
         "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
         "breeding_age_hints": TIER_HINT,
-        "breeder_mouse_choices": _breeder_mouse_choices_payload(editing_breeding_id=breeding.pk),
+        "breeder_mouse_choices": [],
         **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
@@ -1126,82 +1155,7 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect("breeding:breeding_detail", pk=breeding.pk)
 
 
-@authenticated_required
-def litter_list(request: HttpRequest) -> HttpResponse:
-    q = (request.GET.get("q") or "").strip()
-    strain_line_id = (request.GET.get("strain_line_id") or request.GET.get("strain_line") or "").strip()
-    weaned = (request.GET.get("weaned") or "").strip()
-    breeding = (request.GET.get("breeding") or "").strip()
-    birth_date_from = (request.GET.get("birth_date_from") or "").strip()
-    birth_date_to = (request.GET.get("birth_date_to") or "").strip()
-    include_inactive = (request.GET.get("include_inactive") or "").strip()
-    litter_status = (request.GET.get("litter_status") or "").strip()
-    owner = resolve_project_owner_filter(request)
-    export = (request.GET.get("export") or "").strip().lower()
-
-    litters = (
-        Litter.objects.filter(breeding__in=_scoped_breedings(request.user))
-        .select_related(
-            "breeding",
-            "breeding__male",
-            "breeding__male__project",
-            "breeding__male__project__owner",
-            "breeding__male__project__owner__profile",
-            "breeding__male__strain_line",
-            "breeding__female_1",
-            "breeding__female_1__project",
-            "breeding__female_1__project__owner",
-            "breeding__female_1__project__owner__profile",
-            "breeding__female_1__strain_line",
-            "breeding__female_1__current_cage",
-            "breeding__female_2",
-            "breeding__female_2__project",
-            "breeding__female_2__project__owner",
-            "breeding__female_2__project__owner__profile",
-            "breeding__cage",
-        )
-        .annotate(
-            _pup_total=Count("pups"),
-            _pup_m=Count("pups", filter=Q(pups__sex=Mouse.Sex.MALE)),
-            _pup_f=Count("pups", filter=Q(pups__sex=Mouse.Sex.FEMALE)),
-            _max_pup_tail=Max("pups__tail_tag_date"),
-            _created_mouse_count=Count("pups__mouse", filter=Q(pups__mouse__isnull=False), distinct=True),
-        )
-    )
-    if include_inactive != "yes":
-        litters = litters.exclude(
-            litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
-        )
-    if owner and not strain_line_id:
-        litters = litters.filter(litter_project_owner_filter_q(owner))
-    if strain_line_id:
-        try:
-            litters = litters.filter(strain_line_member_litter_filter(int(strain_line_id)))
-        except (TypeError, ValueError):
-            litters = litters.none()
-    if q:
-        litters = litters.filter(
-            Q(litter_code__icontains=q)
-            | Q(breeding__breeding_code__icontains=q)
-            | Q(breeding__male__mouse_uid__icontains=q)
-            | Q(breeding__female_1__mouse_uid__icontains=q)
-        )
-    if weaned == "yes":
-        litters = litters.filter(wean_date__isnull=False)
-    elif weaned == "no":
-        litters = litters.filter(wean_date__isnull=True)
-    if breeding:
-        litters = litters.filter(breeding_id=breeding)
-    if birth_date_from:
-        litters = litters.filter(birth_date__gte=birth_date_from)
-    if birth_date_to:
-        litters = litters.filter(birth_date__lte=birth_date_to)
-    if litter_status:
-        litters = litters.filter(litter_status=litter_status)
-
-    litters_qs = apply_list_sort(litters, request, LITTER_LIST_SORT)
-    litters = list(litters_qs)
-    today = timezone.localdate()
+def _enrich_litters_for_list(litters: list[Litter], *, today, user) -> None:
     for litter in litters:
         sire_mouse, dam_mice = _breeding_sire_and_dams(litter.breeding)
         litter.sire_mouse = sire_mouse
@@ -1214,7 +1168,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
                     "role": "Sire",
                     "mouse": sire_mouse,
                     "age_display": _mouse_age_weeks_display(sire_mouse, today=today),
-                    "genotype_summary": _mouse_genotype_summary(sire_mouse),
+                    "genotype_summary": _mouse_genotype_summary_for_list(sire_mouse),
                     "cage": sire_mouse.current_cage,
                 }
             )
@@ -1224,14 +1178,14 @@ def litter_list(request: HttpRequest) -> HttpResponse:
                     "role": "Dam",
                     "mouse": dam,
                     "age_display": _mouse_age_weeks_display(dam, today=today),
-                    "genotype_summary": _mouse_genotype_summary(dam),
+                    "genotype_summary": _mouse_genotype_summary_for_list(dam),
                     "cage": dam.current_cage,
                 }
             )
         litter.primary_dam = dam_mice[0] if dam_mice else litter.breeding.female_1
-        litter.sire_genotype_summary = _mouse_genotype_summary(litter.sire_mouse or litter.breeding.male)
-        litter.dam_genotype_summary = _mouse_genotype_summary(litter.primary_dam)
-        litter.user_can_edit = user_can_edit_litter(request.user, litter)
+        litter.sire_genotype_summary = _mouse_genotype_summary_for_list(litter.sire_mouse or litter.breeding.male)
+        litter.dam_genotype_summary = _mouse_genotype_summary_for_list(litter.primary_dam)
+        litter.user_can_edit = user_can_edit_litter(user, litter)
         if litter.total_born is not None:
             litter.litter_size_display = litter.total_born
         elif litter.alive_count is not None:
@@ -1311,7 +1265,93 @@ def litter_list(request: HttpRequest) -> HttpResponse:
             alerts.append("Pup count vs created mice mismatch")
         litter.workflow_alerts = alerts
 
+
+@authenticated_required
+def litter_list(request: HttpRequest) -> HttpResponse:
+    q = (request.GET.get("q") or "").strip()
+    strain_line_id = (request.GET.get("strain_line_id") or request.GET.get("strain_line") or "").strip()
+    weaned = (request.GET.get("weaned") or "").strip()
+    breeding = (request.GET.get("breeding") or "").strip()
+    birth_date_from = (request.GET.get("birth_date_from") or "").strip()
+    birth_date_to = (request.GET.get("birth_date_to") or "").strip()
+    include_inactive = (request.GET.get("include_inactive") or "").strip()
+    litter_status = (request.GET.get("litter_status") or "").strip()
+    owner = resolve_project_owner_filter(request)
+    export = (request.GET.get("export") or "").strip().lower()
+
+    litters = (
+        Litter.objects.filter(breeding__in=_scoped_breedings(request.user))
+        .select_related(
+            "breeding",
+            "breeding__male",
+            "breeding__male__project",
+            "breeding__male__project__owner",
+            "breeding__male__project__owner__profile",
+            "breeding__male__strain_line",
+            "breeding__male__current_cage",
+            "breeding__female_1",
+            "breeding__female_1__project",
+            "breeding__female_1__project__owner",
+            "breeding__female_1__project__owner__profile",
+            "breeding__female_1__strain_line",
+            "breeding__female_1__current_cage",
+            "breeding__female_2",
+            "breeding__female_2__project",
+            "breeding__female_2__project__owner",
+            "breeding__female_2__project__owner__profile",
+            "breeding__female_2__strain_line",
+            "breeding__female_2__current_cage",
+            "breeding__cage",
+        )
+        .prefetch_related(
+            _breeding_member_prefetch("breeding__breeding_members"),
+            _extra_female_prefetch("breeding__extra_female_links"),
+        )
+        .annotate(
+            _pup_total=Count("pups"),
+            _pup_m=Count("pups", filter=Q(pups__sex=Mouse.Sex.MALE)),
+            _pup_f=Count("pups", filter=Q(pups__sex=Mouse.Sex.FEMALE)),
+            _max_pup_tail=Max("pups__tail_tag_date"),
+            _created_mouse_count=Count("pups__mouse", filter=Q(pups__mouse__isnull=False), distinct=True),
+        )
+    )
+    if include_inactive != "yes":
+        litters = litters.exclude(
+            litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
+        )
+    if owner and not strain_line_id:
+        litters = litters.filter(litter_project_owner_filter_q(owner))
+    if strain_line_id:
+        try:
+            litters = litters.filter(strain_line_member_litter_filter(int(strain_line_id)))
+        except (TypeError, ValueError):
+            litters = litters.none()
+    if q:
+        litters = litters.filter(
+            Q(litter_code__icontains=q)
+            | Q(breeding__breeding_code__icontains=q)
+            | Q(breeding__male__mouse_uid__icontains=q)
+            | Q(breeding__female_1__mouse_uid__icontains=q)
+        )
+    if weaned == "yes":
+        litters = litters.filter(wean_date__isnull=False)
+    elif weaned == "no":
+        litters = litters.filter(wean_date__isnull=True)
+    if breeding:
+        litters = litters.filter(breeding_id=breeding)
+    if birth_date_from:
+        litters = litters.filter(birth_date__gte=birth_date_from)
+    if birth_date_to:
+        litters = litters.filter(birth_date__lte=birth_date_to)
+    if litter_status:
+        litters = litters.filter(litter_status=litter_status)
+
+    litters_qs = apply_list_sort(litters, request, LITTER_LIST_SORT)
+    today = timezone.localdate()
+
     if export in {"csv", "xlsx"}:
+        litters = list(litters_qs)
+        _enrich_litters_for_list(litters, today=today, user=request.user)
         headers = [
             "litter_id",
             "breeding_code",
@@ -1366,35 +1406,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
 
     pagination = _paginate_queryset_for_list(request, litters_qs, viewname="litters:litter_list")
     litters_page_items = list(pagination["items"])
-    enriched_map = {l.pk: l for l in litters}
-    for litter in litters_page_items:
-        enriched = enriched_map.get(litter.pk)
-        if enriched is None:
-            continue
-        litter.sire_mouse = enriched.sire_mouse
-        litter.dam_mice = enriched.dam_mice
-        litter.owner_rows = enriched.owner_rows
-        litter.breeder_member_rows = enriched.breeder_member_rows
-        litter.primary_dam = enriched.primary_dam
-        litter.sire_genotype_summary = enriched.sire_genotype_summary
-        litter.dam_genotype_summary = enriched.dam_genotype_summary
-        litter.user_can_edit = enriched.user_can_edit
-        litter.litter_size_display = enriched.litter_size_display
-        litter.males_display = enriched.males_display
-        litter.females_display = enriched.females_display
-        litter.tail_tag_display = enriched.tail_tag_display
-        litter.pups_count_display = enriched.pups_count_display
-        litter.created_mice_count = enriched.created_mice_count
-        litter.age_days = enriched.age_days
-        litter.age_display = enriched.age_display
-        litter.wean_due_date = enriched.wean_due_date
-        litter.wean_overdue_days = enriched.wean_overdue_days
-        litter.weaning_status = enriched.weaning_status
-        litter.tagging_status = enriched.tagging_status
-        litter.mice_created_status = enriched.mice_created_status
-        litter.parent_lines = enriched.parent_lines
-        litter.parent_line_names = enriched.parent_line_names
-        litter.workflow_alerts = enriched.workflow_alerts
+    _enrich_litters_for_list(litters_page_items, today=today, user=request.user)
 
     context = {
         "litters": litters_page_items,
@@ -1786,6 +1798,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                                 sire=wean_sire,
                                 dam=primary_dam,
                                 project=inherited_project,
+                                source_breeding=breeding,
                                 ear_tag=form.cleaned_data["ear_tag"],
                                 coat_color=form.cleaned_data["coat_color"],
                                 notes=form.cleaned_data["notes"],

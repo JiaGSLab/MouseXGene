@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
-from users.permissions import is_admin
+from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
@@ -110,6 +110,13 @@ class CageForm(forms.ModelForm):
 
 
 class MouseForm(forms.ModelForm):
+    current_cage_lookup = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Or enter cage ID",
+        help_text="Partial cage ID is supported. Must match an existing cage.",
+    )
+
     class Meta:
         model = Mouse
         fields = [
@@ -145,10 +152,13 @@ class MouseForm(forms.ModelForm):
         if self.instance and self.instance.pk and self.instance.strain_line_id:
             active_strains = (active_strains | StrainLine.objects.filter(pk=self.instance.strain_line_id)).distinct()
         self.fields["strain_line"].queryset = active_strains.order_by("line_name")
-        if self.instance.pk and self.instance.strain_line_id and not is_admin(self.user):
-            self.fields["strain_line"].disabled = True
-            self.fields["strain_line"].help_text = "Only lab admins can change strain line after it is set."
-        self.fields["current_cage"].queryset = self.fields["current_cage"].queryset.order_by("cage_id")
+        active_cages = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        if self.instance.pk and self.instance.current_cage_id:
+            active_cages = (active_cages | Cage.objects.filter(pk=self.instance.current_cage_id)).distinct()
+        self.fields["current_cage"].queryset = active_cages
+        self.fields["current_cage"].required = False
+        if self.instance.pk and self.instance.current_cage_id:
+            self.fields["current_cage_lookup"].initial = self.instance.current_cage.cage_id
         self.fields["sire"].queryset = self.fields["sire"].queryset.order_by("mouse_uid")
         self.fields["dam"].queryset = self.fields["dam"].queryset.order_by("mouse_uid")
         self.fields["sire"].label = "Sire (Father)"
@@ -171,12 +181,96 @@ class MouseForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        if self.instance.pk and self.instance.strain_line_id and not is_admin(self.user):
-            new_strain = cleaned_data.get("strain_line")
-            if new_strain and new_strain.pk != self.instance.strain_line_id:
-                raise forms.ValidationError("Only lab admins can change strain line after it is set.")
-            cleaned_data["strain_line"] = self.instance.strain_line
+        lookup = (cleaned_data.get("current_cage_lookup") or "").strip()
+        if lookup:
+            resolved, err = resolve_cage_from_lookup(lookup)
+            if err:
+                self.add_error("current_cage_lookup", err)
+            elif resolved is not None:
+                cleaned_data["current_cage"] = resolved
+
         return cleaned_data
+
+
+MOUSE_BATCH_MAX_ROWS = 50
+
+
+class MouseBatchSharedForm(forms.Form):
+    """Shared litter/colony fields when creating multiple mice at once."""
+
+    birth_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+    )
+    death_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+    )
+    euthanasia_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+    )
+    death_reason = forms.CharField(required=False, max_length=255)
+    status = forms.ChoiceField(choices=Mouse.Status.choices, initial=Mouse.Status.ACTIVE)
+    strain_line = forms.ModelChoiceField(queryset=StrainLine.objects.none(), required=True)
+    current_cage = forms.ModelChoiceField(queryset=Cage.objects.none(), required=False, label="Current cage")
+    current_cage_lookup = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Or enter cage ID",
+        help_text="Partial cage ID is supported. Must match an existing cage.",
+    )
+    sire = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Sire (Father)")
+    dam = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Dam (Mother)")
+    project = forms.ModelChoiceField(queryset=Project.objects.none(), required=True)
+    origin = forms.CharField(required=False, max_length=128)
+    coat_color = forms.CharField(required=False, max_length=64)
+    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+        self.fields["strain_line"].queryset = StrainLine.objects.filter(is_active=True).order_by("line_name")
+        self.fields["current_cage"].queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        self.fields["sire"].queryset = Mouse.objects.order_by("mouse_uid")
+        self.fields["dam"].queryset = Mouse.objects.order_by("mouse_uid")
+        self.fields["project"].queryset = Project.objects.filter(is_active=True).order_by("name")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        lookup = (cleaned_data.get("current_cage_lookup") or "").strip()
+        if lookup:
+            resolved, err = resolve_cage_from_lookup(lookup)
+            if err:
+                self.add_error("current_cage_lookup", err)
+            elif resolved is not None:
+                cleaned_data["current_cage"] = resolved
+        return cleaned_data
+
+
+class MouseBatchEntryForm(forms.Form):
+    mouse_uid = forms.CharField(
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Mouse UID"}),
+    )
+    sex = forms.ChoiceField(choices=Mouse.Sex.choices, widget=forms.Select(attrs={"class": "filter-control"}))
+    ear_tag = forms.CharField(
+        required=False,
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Ear tag"}),
+    )
+    toe_tag = forms.CharField(
+        required=False,
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Toe tag"}),
+    )
+
+    def clean_mouse_uid(self):
+        mouse_uid = normalize_identifier(self.cleaned_data.get("mouse_uid"))
+        if not mouse_uid:
+            raise ValidationError("Mouse UID is required.")
+        validate_mouse_uid_available(mouse_uid)
+        return mouse_uid
 
 
 class MoveCageForm(forms.Form):

@@ -27,7 +27,7 @@ SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
 DEBUG = get_env("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
 
 # Bumped on each deploy; used for static cache-busting and support checks.
-APP_RELEASE = get_env("APP_RELEASE", "20260529d")
+APP_RELEASE = get_env("APP_RELEASE", "20260529e")
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -111,6 +111,9 @@ DATABASES = {
         "PASSWORD": get_env("POSTGRES_PASSWORD", "mousexgene_dev_password"),
         "HOST": _db_host if _db_host else get_env("POSTGRES_HOST", "db"),
         "PORT": _db_port if _db_port else get_env("POSTGRES_PORT", "5432"),
+        "OPTIONS": {
+            "options": get_env("POSTGRES_OPTIONS", "-c jit=off"),
+        },
     }
 }
 

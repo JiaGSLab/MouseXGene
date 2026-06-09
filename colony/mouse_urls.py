@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .picker_api import mouse_picker_api, mouse_strain_line_map_api
 from .views import (
     family_tree,
     mouse_create,
@@ -23,6 +24,8 @@ from .views import (
 app_name = "mice"
 
 urlpatterns = [
+    path("api/picker/", mouse_picker_api, name="mouse_picker_api"),
+    path("api/strain-line-map/", mouse_strain_line_map_api, name="mouse_strain_line_map_api"),
     path("family-tree/", family_tree, name="family_tree"),
     path("new/", mouse_create, name="mouse_create"),
     path("import/", mouse_import, name="mouse_import"),

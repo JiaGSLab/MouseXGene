@@ -93,8 +93,10 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if m.family_mothers_display %}
-                            {{ m.family_mothers_display }}
+                        {% if m.family_mothers %}
+                            {% for dam in m.family_mothers %}
+                                <a class="link-primary" href="{% url 'mice:mouse_pedigree' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
+                            {% endfor %}
                         {% else %}
                             -
                         {% endif %}

@@ -1,6 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ page_title }} | MouseXGene{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'js/picker_widgets.js' %}?v={{ APP_RELEASE }}"></script>
+{% endblock %}
 
 {% block content %}
 <section class="page-header">
@@ -26,32 +31,119 @@
         {% endif %}
 
         {% for field in form %}
-            <div class="form-row">
-                <label for="{{ field.id_for_label }}">
-                    {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
-                </label>
-                {{ field }}
-                {% if field.help_text %}
-                    <small class="muted">{{ field.help_text }}</small>
-                {% endif %}
-                {% if field.errors %}
-                    <div class="field-error">
-                        {% for error in field.errors %}
-                            <div>{{ error }}</div>
-                        {% endfor %}
+            {% if field.name == "current_cage" or field.name == "current_cage_lookup" %}
+            {% elif field.name == "project" %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="card card-nested">
+                    <h2>Current Cage</h2>
+                    <p class="muted small-print">Filter by owner, project, and/or strain line, then pick a cage or type a cage ID (partial match supported).</p>
+                    <div class="filter-grid">
+                        <div class="form-row">
+                            <label for="id_mouse_cage_owner_filter">Filter by owner</label>
+                            <select id="id_mouse_cage_owner_filter" class="filter-control">
+                                <option value="">All owners</option>
+                                {% for owner in cage_owner_options %}
+                                    <option value="{{ owner.id }}">{{ owner.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_mouse_cage_project_filter">Filter by project</label>
+                            <select id="id_mouse_cage_project_filter" class="filter-control">
+                                <option value="">All projects</option>
+                                {% for project in cage_project_options %}
+                                    <option value="{{ project.id }}">{{ project.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_mouse_cage_strain_filter">Filter by strain line</label>
+                            <select id="id_mouse_cage_strain_filter" class="filter-control">
+                                <option value="">All strain lines</option>
+                                {% for strain in cage_strain_line_options %}
+                                    <option value="{{ strain.id }}">{{ strain.line_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
+                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="button button-light" id="mouse-cage-filter-apply">Refresh list</button>
+                        <button type="button" class="button button-light" id="mouse-cage-sync-form-filters">Use form project / strain</button>
+                        <span class="muted small-print" id="mouse-cage-filter-status">Showing all active cages.</span>
+                    </div>
+                    <div class="form-row">
+                        <label for="{{ form.current_cage.id_for_label }}">{{ form.current_cage.label }}</label>
+                        {{ form.current_cage }}
+                        {% if form.current_cage.errors %}
+                            <div class="field-error">
+                                {% for error in form.current_cage.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <label for="{{ form.current_cage_lookup.id_for_label }}">{{ form.current_cage_lookup.label }}</label>
+                        {{ form.current_cage_lookup }}
+                        {% if form.current_cage_lookup.help_text %}
+                            <small class="muted">{{ form.current_cage_lookup.help_text }}</small>
+                        {% endif %}
+                        <p class="muted small-print" id="mouse-cage-lookup-status" aria-live="polite"></p>
+                        {% if form.current_cage_lookup.errors %}
+                            <div class="field-error">
+                                {% for error in form.current_cage_lookup.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <small class="muted">
+                        Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
+                    </small>
+                </div>
+            {% else %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">
+                        {{ field.label }}{% if field.field.required %}<span class="required-mark">*</span>{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                {% if field.name == "strain_line" %}
+                    <section class="card">
+                        <h2>Genotype Rows (from Strain Line)</h2>
+                        <p class="muted">
+                            When you choose a strain line, expected loci are shown below. Fill the actual genotype display for this mouse
+                            (for example <code>Cre/+</code>, <code>fl/fl</code>, <code>+/Y</code>).
+                        </p>
+                        <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
+                        <div id="genotype-template-rows"></div>
+                    </section>
                 {% endif %}
-            </div>
-            {% if field.name == "strain_line" %}
-                <section class="card">
-                    <h2>Genotype Rows (from Strain Line)</h2>
-                    <p class="muted">
-                        When you choose a strain line, expected loci are shown below. Fill the actual genotype display for this mouse
-                        (for example <code>Cre/+</code>, <code>fl/fl</code>, <code>+/Y</code>).
-                    </p>
-                    <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
-                    <div id="genotype-template-rows"></div>
-                </section>
             {% endif %}
         {% endfor %}
 
@@ -67,14 +159,20 @@
 </section>
 
 {{ strain_template_loci_map|json_script:"strain-template-loci-map" }}
-{{ mouse_strain_line_map|json_script:"mouse-strain-line-map" }}
 {% if strain_default_project_map %}{{ strain_default_project_map|json_script:"strain-default-project-map" }}{% endif %}
 {{ existing_genotype_map|json_script:"existing-genotype-map" }}
 {{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
 <script>
-(() => {
+(async () => {
     const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
-    const mouseStrainMap = JSON.parse(document.getElementById("mouse-strain-line-map").textContent || "{}");
+    let mouseStrainMap = {};
+    if (window.MXGPicker) {
+        try {
+            mouseStrainMap = await MXGPicker.loadMouseStrainMap("{{ mouse_strain_map_api_url|default:'/mice/api/strain-line-map/'|escapejs }}");
+        } catch (err) {
+            console.warn("Failed to load mouse strain map", err);
+        }
+    }
     const defaultProjectEl = document.getElementById("strain-default-project-map");
     const strainDefaultProjectMap = defaultProjectEl
         ? JSON.parse(defaultProjectEl.textContent || "{}")
@@ -309,6 +407,109 @@
             event.preventDefault();
         }
     });
+})();
+</script>
+<script>
+(() => {
+    const cageApiUrl = "{{ cage_picker_api_url|default:'/cages/api/picker/'|escapejs }}";
+    const projectFilter = document.getElementById("id_mouse_cage_project_filter");
+    const ownerFilter = document.getElementById("id_mouse_cage_owner_filter");
+    const strainFilter = document.getElementById("id_mouse_cage_strain_filter");
+    const formProject = document.getElementById("id_project");
+    const formStrain = document.getElementById("id_strain_line");
+    const cageSelect = document.getElementById("id_current_cage");
+    const cageLookupInput = document.getElementById("id_current_cage_lookup");
+    const applyFilterBtn = document.getElementById("mouse-cage-filter-apply");
+    const syncFormFiltersBtn = document.getElementById("mouse-cage-sync-form-filters");
+    const filterStatus = document.getElementById("mouse-cage-filter-status");
+    const lookupStatus = document.getElementById("mouse-cage-lookup-status");
+    if (!cageSelect || !window.MXGPicker) return;
+
+    let cages = [];
+    const selectedCageId = "{{ form.current_cage.value|default:''|escapejs }}";
+
+    function currentFilters() {
+        return {
+            project_id: projectFilter?.value || "",
+            owner_id: ownerFilter?.value || "",
+            strain_line_id: strainFilter?.value || "",
+        };
+    }
+
+    async function reloadCages(extra = {}) {
+        if (filterStatus) filterStatus.textContent = "Loading cages...";
+        try {
+            cages = await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), ...extra });
+            MXGPicker.renderCageSelect(cageSelect, cages, selectedCageId);
+            if (filterStatus) {
+                const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
+                const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
+                const strainLabel = strainFilter?.selectedOptions?.[0]?.text || "All strain lines";
+                filterStatus.textContent = `Showing ${cages.length} cage(s) for ${ownerLabel} / ${projectLabel} / ${strainLabel}.`;
+            }
+        } catch (err) {
+            if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
+        }
+    }
+
+    const reloadCagesDebounced = MXGPicker.debounce(() => reloadCages(), 250);
+
+    async function syncLookupToSelect() {
+        if (!cageLookupInput || !lookupStatus) return;
+        const query = cageLookupInput.value.trim();
+        if (!query) {
+            lookupStatus.textContent = "";
+            lookupStatus.className = "muted small-print";
+            return;
+        }
+        let matches = MXGPicker.lookupCages(cages, query);
+        if (!matches.length) {
+            try {
+                matches = await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), q: query });
+            } catch (err) {
+                lookupStatus.textContent = err.message;
+                lookupStatus.className = "field-error";
+                return;
+            }
+        }
+        if (!matches.length) {
+            lookupStatus.textContent = `No cage found matching "${query}". Create the cage first.`;
+            lookupStatus.className = "field-error";
+            return;
+        }
+        if (matches.length === 1) {
+            cageSelect.value = String(matches[0].id);
+            lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
+            lookupStatus.className = "muted small-print";
+            return;
+        }
+        const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
+        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
+        lookupStatus.className = "field-error";
+    }
+
+    applyFilterBtn?.addEventListener("click", () => reloadCages());
+    projectFilter?.addEventListener("change", reloadCagesDebounced);
+    ownerFilter?.addEventListener("change", reloadCagesDebounced);
+    strainFilter?.addEventListener("change", reloadCagesDebounced);
+    syncFormFiltersBtn?.addEventListener("click", () => {
+        if (projectFilter && formProject) projectFilter.value = formProject.value || "";
+        if (strainFilter && formStrain) strainFilter.value = formStrain.value || "";
+        reloadCages();
+    });
+    cageLookupInput?.addEventListener("input", syncLookupToSelect);
+    cageLookupInput?.addEventListener("change", syncLookupToSelect);
+    cageSelect.addEventListener("change", () => {
+        if (cageLookupInput && cageSelect.value) {
+            const cage = cages.find((c) => String(c.id) === String(cageSelect.value));
+            if (cage) {
+                cageLookupInput.value = cage.cage_id;
+                syncLookupToSelect();
+            }
+        }
+    });
+    reloadCages();
+    syncLookupToSelect();
 })();
 </script>
 {% endblock %}

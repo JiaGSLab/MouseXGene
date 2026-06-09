@@ -55,7 +55,9 @@ def home(request: HttpRequest) -> HttpResponse:
             litters_queryset = litters_queryset.filter(
                 litter_project_owner_filter_q(home_owner)
             ).distinct()
-            cages_queryset = cages_queryset.filter(current_mice__project__owner_id=home_owner).distinct()
+            cages_queryset = cages_queryset.filter(
+                Q(current_mice__isnull=True) | Q(current_mice__project__owner_id=home_owner)
+            ).distinct()
 
     mice_without_cage_qs = mice_queryset.filter(current_cage__isnull=True).select_related(
         "strain_line", "project"
@@ -115,11 +117,16 @@ def home(request: HttpRequest) -> HttpResponse:
     cages_without_mice_count = cages_without_mice_qs.count()
     weaning_due_soon_count = weaning_due_soon_qs.count()
     breeding_without_litter_count = breeding_without_litter_qs.count()
+    breeding_overdue_cutoff = today - timedelta(days=22)
     breeding_overdue_qs = (
         breedings_queryset.filter(Q(active=True) & ~Q(status=Breeding.Status.CLOSED))
         .select_related("cage", "male", "female_1")
         .annotate(litter_count=Count("litters", distinct=True), latest_litter_date=Max("litters__birth_date"))
-        .order_by("-start_date")
+        .filter(
+            Q(litter_count=0, start_date__lte=breeding_overdue_cutoff)
+            | Q(litter_count__gt=0, latest_litter_date__lte=breeding_overdue_cutoff)
+        )
+        .order_by("-start_date")[:200]
     )
     breeding_overdue_all: list[Breeding] = []
     for b in breeding_overdue_qs:

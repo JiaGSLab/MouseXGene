@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from django.db.models import Q
+
 from breeding.models import Breeding
 from colony.models import Cage, Mouse
 
@@ -64,12 +66,75 @@ class MouseFamilyPedigree:
     source_breeding: Breeding | None
 
 
-def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
+def infer_source_breeding_for_mouse(mouse: Mouse) -> Breeding | None:
+    """Resolve the breeding record used for pedigree when source_breeding is unset."""
+    if mouse.source_breeding_id:
+        return mouse.source_breeding
+
+    if hasattr(mouse, "litter_pup_origin"):
+        return mouse.litter_pup_origin.litter.breeding
+
+    if not mouse.sire_id:
+        return None
+
+    sire_q = Q(male_id=mouse.sire_id) | Q(
+        breeding_members__mouse_id=mouse.sire_id,
+        breeding_members__role=Breeding.MemberRole.SIRE,
+    )
+    qs = Breeding.objects.filter(sire_q).distinct()
+    if mouse.birth_date:
+        qs = qs.filter(start_date__lte=mouse.birth_date)
+    if mouse.dam_id:
+        dam_q = (
+            Q(female_1_id=mouse.dam_id)
+            | Q(female_2_id=mouse.dam_id)
+            | Q(extra_female_links__mouse_id=mouse.dam_id)
+            | Q(
+                breeding_members__mouse_id=mouse.dam_id,
+                breeding_members__role=Breeding.MemberRole.DAM,
+            )
+        )
+        qs = qs.filter(dam_q)
+    candidates = list(qs.order_by("-start_date", "-pk")[:2])
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
+def mouse_family_pedigree_from_prefetch(mouse: Mouse) -> MouseFamilyPedigree:
+    """Prefer relations already on the mouse instance (list views prefetch)."""
+    breeding: Breeding | None = None
     if mouse.source_breeding_id:
         breeding = mouse.source_breeding
+    else:
+        origin = getattr(mouse, "litter_pup_origin", None)
+        if origin is not None:
+            breeding = origin.litter.breeding
+    if breeding is not None:
+        sire, dams = breeding_sire_and_dams(breeding)
+        if mouse.sire_id:
+            sire = mouse.sire
+        if mouse.dam_id and mouse.dam and all(d.pk != mouse.dam_id for d in dams):
+            dams = [mouse.dam, *dams]
+        return MouseFamilyPedigree(
+            sire=sire or mouse.sire,
+            dams=dams,
+            breeding_cage=breeding.cage,
+            source_breeding=breeding,
+        )
+    return mouse_family_pedigree(mouse)
+
+
+def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
+    breeding = infer_source_breeding_for_mouse(mouse)
+    if breeding is not None:
         sire, dams = breeding_sire_and_dams(breeding)
         if mouse.sire_id and sire is None:
             sire = mouse.sire
+        elif mouse.sire_id:
+            sire = mouse.sire
+        if mouse.dam_id and mouse.dam and all(d.pk != mouse.dam_id for d in dams):
+            dams = [mouse.dam, *dams]
         return MouseFamilyPedigree(
             sire=sire or mouse.sire,
             dams=dams,

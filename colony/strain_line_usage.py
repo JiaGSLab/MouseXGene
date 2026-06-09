@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 
 from breeding.models import Breeding, Litter
 from colony.models import Cage, Mouse
@@ -97,6 +97,111 @@ def compute_strain_line_usage_counts(strain_line_id: int) -> dict[str, int]:
         "active_litters_count": litter_qs.filter(litter_status__in=active_litter_statuses).count(),
         "total_litters_count": litter_qs.count(),
     }
+
+
+def compute_strain_line_usage_counts_bulk(strain_line_ids: list[int]) -> dict[int, dict[str, int]]:
+    """Compute list-page strain-line usage counts with fixed query count."""
+    ids = [int(pk) for pk in strain_line_ids if pk]
+    base = {
+        "active_mice_count": 0,
+        "total_mice_count": 0,
+        "active_cages_count": 0,
+        "total_cages_count": 0,
+        "active_breedings_count": 0,
+        "total_breedings_count": 0,
+        "active_litters_count": 0,
+        "total_litters_count": 0,
+    }
+    out = {pk: dict(base) for pk in ids}
+    if not ids:
+        return out
+
+    active_litter_statuses = [
+        Litter.LitterStatus.ACTIVE,
+        Litter.LitterStatus.WEANED,
+        Litter.LitterStatus.TAIL_TAGGED,
+    ]
+
+    for row in (
+        Mouse.objects.filter(strain_line_id__in=ids)
+        .values("strain_line_id")
+        .annotate(
+            total=Count("pk"),
+            active=Count("pk", filter=Q(status=Mouse.Status.ACTIVE)),
+        )
+    ):
+        counts = out[row["strain_line_id"]]
+        counts["total_mice_count"] = row["total"]
+        counts["active_mice_count"] = row["active"]
+
+    total_cages: dict[int, set[int]] = {pk: set() for pk in ids}
+    active_cages: dict[int, set[int]] = {pk: set() for pk in ids}
+    total_breedings: dict[int, set[int]] = {pk: set() for pk in ids}
+    active_breedings: dict[int, set[int]] = {pk: set() for pk in ids}
+    total_litters: dict[int, set[int]] = {pk: set() for pk in ids}
+    active_litters: dict[int, set[int]] = {pk: set() for pk in ids}
+
+    def add_pair(target: dict[int, set[int]], strain_id, object_id) -> None:
+        if strain_id in target and object_id:
+            target[strain_id].add(object_id)
+
+    for strain_id, cage_id in (
+        Mouse.objects.filter(strain_line_id__in=ids)
+        .exclude(current_cage_id__isnull=True)
+        .values_list("strain_line_id", "current_cage_id")
+    ):
+        add_pair(total_cages, strain_id, cage_id)
+    for strain_id, cage_id in (
+        Mouse.objects.filter(
+            strain_line_id__in=ids,
+            status=Mouse.Status.ACTIVE,
+            current_cage__status=Cage.Status.ACTIVE,
+        )
+        .exclude(current_cage_id__isnull=True)
+        .values_list("strain_line_id", "current_cage_id")
+    ):
+        add_pair(active_cages, strain_id, cage_id)
+
+    breeding_sources = [
+        "male__strain_line_id",
+        "female_1__strain_line_id",
+        "female_2__strain_line_id",
+        "extra_female_links__mouse__strain_line_id",
+        "breeding_members__mouse__strain_line_id",
+    ]
+    for field in breeding_sources:
+        for strain_id, breeding_id, cage_id, is_active, cage_status in (
+            Breeding.objects.filter(**{f"{field}__in": ids})
+            .values_list(field, "pk", "cage_id", "active", "cage__status")
+            .distinct()
+        ):
+            add_pair(total_breedings, strain_id, breeding_id)
+            if is_active:
+                add_pair(active_breedings, strain_id, breeding_id)
+            add_pair(total_cages, strain_id, cage_id)
+            if is_active and cage_status == Cage.Status.ACTIVE:
+                add_pair(active_cages, strain_id, cage_id)
+
+    litter_sources = [f"breeding__{field}" for field in breeding_sources]
+    for field in litter_sources:
+        for strain_id, litter_id, litter_status in (
+            Litter.objects.filter(**{f"{field}__in": ids})
+            .values_list(field, "pk", "litter_status")
+            .distinct()
+        ):
+            add_pair(total_litters, strain_id, litter_id)
+            if litter_status in active_litter_statuses:
+                add_pair(active_litters, strain_id, litter_id)
+
+    for pk in ids:
+        counts = out[pk]
+        counts["active_cages_count"] = len(active_cages[pk])
+        counts["total_cages_count"] = len(total_cages[pk])
+        counts["active_breedings_count"] = len(active_breedings[pk])
+        counts["total_breedings_count"] = len(total_breedings[pk])
+        counts["active_litters_count"] = len(active_litters[pk])
+        counts["total_litters_count"] = len(total_litters[pk])
+    return out
 
 
 def enrich_strain_line_cage_rows(cages: list[Cage], *, strain_line_id: int) -> None:

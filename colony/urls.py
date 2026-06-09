@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .picker_api import cage_picker_api, mouse_picker_api, mouse_strain_line_map_api
 from .views import (
     cage_create,
     cage_detail,
@@ -27,6 +28,7 @@ from .views import (
 app_name = "colony"
 
 urlpatterns = [
+    path("api/picker/", cage_picker_api, name="cage_picker_api"),
     path("strain-lines/", strain_line_list, name="strain_line_list"),
     path("strain-lines/new/", strain_line_create, name="strain_line_create"),
     path("strain-lines/<int:pk>/edit/", strain_line_edit, name="strain_line_edit"),

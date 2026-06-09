@@ -1,6 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ page_title }} | MouseXGene{% endblock %}
+
+{% block extra_head %}
+<script src="{% static 'js/picker_widgets.js' %}?v={{ APP_RELEASE }}"></script>
+{% endblock %}
 
 {% block content %}
 <section class="page-header">
@@ -9,8 +14,6 @@
 </section>
 
 <section class="card">
-    {{ breeder_mouse_choices|json_script:"breeder-mouse-choices" }}
-    {{ breeding_cage_choices|json_script:"breeding-cage-choices" }}
     <form method="post" class="form-layout" id="breeding-form">
         {% csrf_token %}
 
@@ -39,12 +42,18 @@
                     <label for="id_mouse_project_filter">Filter by project</label>
                     <select id="id_mouse_project_filter" class="filter-control">
                         <option value="">All projects</option>
+                        {% for project in cage_project_options %}
+                            <option value="{{ project.id }}">{{ project.name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="form-row">
                     <label for="id_mouse_strain_filter">Filter by strain line</label>
                     <select id="id_mouse_strain_filter" class="filter-control">
                         <option value="">All strain lines</option>
+                        {% for strain in cage_strain_line_options %}
+                            <option value="{{ strain.id }}">{{ strain.line_name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
             </div>
@@ -90,7 +99,7 @@
             {% elif field.name == 'cage' %}
                 <div class="card card-nested">
                     <h2>Cage</h2>
-                    <p class="muted small-print">Filter by project and/or owner, click <strong>Apply cage filter</strong>, then pick a cage or type a cage ID (partial match supported).</p>
+                    <p class="muted small-print">Filter by project and/or owner, then pick a cage or type a cage ID (partial match supported).</p>
                     <div class="filter-grid">
                         <div class="form-row">
                             <label for="id_breeding_cage_project_filter">Filter by project</label>
@@ -112,7 +121,7 @@
                         </div>
                     </div>
                     <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                        <button type="button" class="button" id="breeding-cage-filter-apply">Apply cage filter</button>
+                        <button type="button" class="button button-light" id="breeding-cage-filter-apply">Refresh list</button>
                         <span class="muted small-print" id="breeding-cage-filter-status">Showing all active cages.</span>
                     </div>
                     <div class="form-row">
@@ -201,7 +210,8 @@
 </section>
 <script>
 (() => {
-    const dataEl = document.getElementById("breeder-mouse-choices");
+    const mouseApiUrl = "{{ mouse_picker_api_url|default:'/mice/api/picker/'|escapejs }}";
+    const excludeBreedingId = "{{ form.instance.pk|default:''|escapejs }}";
     const projectFilter = document.getElementById("id_mouse_project_filter");
     const ownerFilter = document.getElementById("id_mouse_owner_filter");
     const strainFilter = document.getElementById("id_mouse_strain_filter");
@@ -209,84 +219,59 @@
     const damsSelect = document.getElementById("id_dams");
     const tableBody = document.getElementById("breeder-picker-body");
     const breedingForm = document.getElementById("breeding-form");
-    if (!dataEl || !projectFilter || !ownerFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm) return;
+    if (!projectFilter || !ownerFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm || !window.MXGPicker) return;
 
-    const mice = JSON.parse(dataEl.textContent || "[]");
+    let mice = [];
     let selectedSireId = sireSelect.value || "";
     let selectedDamIds = new Set(Array.from(damsSelect.selectedOptions || []).map((o) => o.value));
+    const mouseById = () => Object.fromEntries(mice.map((m) => [String(m.id), m]));
 
     function sexLabel(sex) {
         return sex === "M" ? "Male" : (sex === "F" ? "Female" : "Unknown");
     }
-    function uniqueBy(items, keyFn) {
-        const out = [];
-        const seen = new Set();
-        items.forEach((item) => {
-            const key = keyFn(item);
-            if (!key || seen.has(key)) return;
-            seen.add(key);
-            out.push(item);
-        });
-        return out;
+    function pickerFilters() {
+        const filters = {
+            owner_id: ownerFilter.value,
+            project_id: projectFilter.value,
+            strain_line_id: strainFilter.value,
+        };
+        if (excludeBreedingId) filters.exclude_breeding_id = excludeBreedingId;
+        return filters;
     }
-    function fillFilters() {
-        const projects = uniqueBy(
-            mice.filter(m => m.project_id).map(m => ({ id: String(m.project_id), name: m.project_name })),
-            x => x.id
-        ).sort((a, b) => a.name.localeCompare(b.name));
-        const strains = uniqueBy(
-            mice.filter(m => m.strain_line_id).map(m => ({ id: String(m.strain_line_id), name: m.strain_line_name })),
-            x => x.id
-        ).sort((a, b) => a.name.localeCompare(b.name));
-        projectFilter.replaceChildren();
-        const projectDefault = document.createElement("option");
-        projectDefault.value = "";
-        projectDefault.textContent = "All projects";
-        projectFilter.appendChild(projectDefault);
-        projects.forEach((p) => {
-            const opt = document.createElement("option");
-            opt.value = p.id;
-            opt.textContent = p.name;
-            projectFilter.appendChild(opt);
-        });
-        strainFilter.replaceChildren();
-        const strainDefault = document.createElement("option");
-        strainDefault.value = "";
-        strainDefault.textContent = "All strain lines";
-        strainFilter.appendChild(strainDefault);
-        strains.forEach((s) => {
-            const opt = document.createElement("option");
-            opt.value = s.id;
-            opt.textContent = s.name;
-            strainFilter.appendChild(opt);
-        });
-    }
-    function filteredMice() {
-        const owner = ownerFilter.value;
-        const p = projectFilter.value;
-        const s = strainFilter.value;
-        return mice.filter((m) => {
-            if (owner && String(m.project_owner_id || "") !== owner) return false;
-            if (p && String(m.project_id || "") !== p) return false;
-            if (s && String(m.strain_line_id || "") !== s) return false;
-            return true;
-        });
+    function ensureHiddenOption(selectEl, mouse) {
+        if (!mouse) return;
+        const id = String(mouse.id);
+        let opt = selectEl.querySelector(`option[value="${CSS.escape(id)}"]`);
+        if (!opt) {
+            opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = mouse.uid || id;
+            selectEl.appendChild(opt);
+        }
     }
     function syncHiddenSelects() {
-        Array.from(sireSelect.options).forEach((opt) => {
-            opt.selected = !!selectedSireId && opt.value === selectedSireId;
-        });
+        const lookup = mouseById();
+        if (selectedSireId) {
+            ensureHiddenOption(sireSelect, lookup[selectedSireId] || { id: selectedSireId, uid: selectedSireId });
+            sireSelect.value = selectedSireId;
+        } else {
+            sireSelect.value = "";
+        }
         Array.from(damsSelect.options).forEach((opt) => {
             opt.selected = selectedDamIds.has(opt.value);
         });
+        selectedDamIds.forEach((damId) => {
+            ensureHiddenOption(damsSelect, lookup[damId] || { id: damId, uid: damId });
+            const opt = damsSelect.querySelector(`option[value="${CSS.escape(damId)}"]`);
+            if (opt) opt.selected = true;
+        });
     }
     function renderBreederTable() {
-        const items = filteredMice();
-        if (!items.length) {
+        if (!mice.length) {
             tableBody.innerHTML = '<tr><td colspan="7" class="muted">No mice match current filters.</td></tr>';
             return;
         }
-        const rows = items.map((m) => {
+        const rows = mice.map((m) => {
             const id = String(m.id);
             const sireCell = m.sex === "M"
                 ? `<input type="radio" name="sire_picker" value="${id}" ${selectedSireId === id ? "checked" : ""}>`
@@ -311,6 +296,16 @@
         });
         tableBody.innerHTML = rows.join("");
     }
+    async function reloadMice() {
+        tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading mice...</td></tr>';
+        try {
+            mice = await MXGPicker.loadMice(mouseApiUrl, pickerFilters());
+            renderBreederTable();
+            syncHiddenSelects();
+        } catch (err) {
+            tableBody.innerHTML = `<tr><td colspan="7" class="field-error">Failed to load mice: ${err.message}</td></tr>`;
+        }
+    }
     function onTableChange(event) {
         const target = event.target;
         if (!(target instanceof HTMLInputElement)) return;
@@ -329,18 +324,16 @@
         }
         syncHiddenSelects();
     }
-    fillFilters();
-    renderBreederTable();
-    syncHiddenSelects();
     tableBody.addEventListener("change", onTableChange);
-    ownerFilter.addEventListener("change", renderBreederTable);
-    projectFilter.addEventListener("change", renderBreederTable);
-    strainFilter.addEventListener("change", renderBreederTable);
+    ownerFilter.addEventListener("change", reloadMice);
+    projectFilter.addEventListener("change", reloadMice);
+    strainFilter.addEventListener("change", reloadMice);
     breedingForm.addEventListener("submit", syncHiddenSelects);
+    reloadMice();
 })();
 
 (() => {
-    const dataEl = document.getElementById("breeding-cage-choices");
+    const cageApiUrl = "{{ cage_picker_api_url|default:'/cages/api/picker/'|escapejs }}";
     const projectFilter = document.getElementById("id_breeding_cage_project_filter");
     const ownerFilter = document.getElementById("id_breeding_cage_owner_filter");
     const cageSelect = document.getElementById("id_cage");
@@ -348,56 +341,36 @@
     const applyFilterBtn = document.getElementById("breeding-cage-filter-apply");
     const filterStatus = document.getElementById("breeding-cage-filter-status");
     const lookupStatus = document.getElementById("breeding-cage-lookup-status");
-    if (!dataEl || !cageSelect) return;
+    if (!cageSelect || !window.MXGPicker) return;
 
-    const cages = JSON.parse(dataEl.textContent || "[]");
+    let cages = [];
     const selectedCageId = "{{ form.cage.value|default:''|escapejs }}";
 
-    function filteredCages() {
-        const project = projectFilter?.value || "";
-        const owner = ownerFilter?.value || "";
-        return cages.filter((c) => {
-            if (c.is_empty) return true;
-            if (project && !c.project_ids.map(String).includes(project)) return false;
-            if (owner && !c.owner_ids.map(String).includes(owner)) return false;
-            return true;
-        });
+    function currentFilters() {
+        return {
+            project_id: projectFilter?.value || "",
+            owner_id: ownerFilter?.value || "",
+        };
     }
 
-    function ensureSelectedCageOption(rows) {
-        const current = cageSelect.value || selectedCageId;
-        if (!current) return rows;
-        if (rows.some((c) => String(c.id) === String(current))) return rows;
-        const selected = cages.find((c) => String(c.id) === String(current));
-        return selected ? [selected, ...rows] : rows;
-    }
-
-    function renderCageOptions() {
-        const current = cageSelect.value || selectedCageId;
-        let rows = filteredCages();
-        rows = ensureSelectedCageOption(rows);
-        cageSelect.innerHTML = '<option value="">---------</option>';
-        for (const cage of rows) {
-            const opt = document.createElement("option");
-            opt.value = String(cage.id);
-            opt.textContent = cage.is_empty ? `${cage.cage_id} (empty)` : cage.cage_id;
-            if (String(cage.id) === String(current)) opt.selected = true;
-            cageSelect.appendChild(opt);
-        }
-        if (filterStatus) {
-            const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
-            const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
-            filterStatus.textContent = `Showing ${rows.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
+    async function reloadCages(extra = {}) {
+        if (filterStatus) filterStatus.textContent = "Loading cages...";
+        try {
+            cages = await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), ...extra });
+            MXGPicker.renderCageSelect(cageSelect, cages, selectedCageId);
+            if (filterStatus) {
+                const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
+                const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
+                filterStatus.textContent = `Showing ${cages.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
+            }
+        } catch (err) {
+            if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
         }
     }
 
-    function lookupMatches(query) {
-        const q = query.trim().toLowerCase();
-        if (!q) return [];
-        return cages.filter((c) => String(c.cage_id || "").toLowerCase().includes(q));
-    }
+    const reloadCagesDebounced = MXGPicker.debounce(() => reloadCages(), 250);
 
-    function syncLookupToSelect() {
+    async function syncLookupToSelect() {
         if (!cageLookupInput || !lookupStatus) return;
         const query = cageLookupInput.value.trim();
         if (!query) {
@@ -405,7 +378,16 @@
             lookupStatus.className = "muted small-print";
             return;
         }
-        const matches = lookupMatches(query);
+        let matches = MXGPicker.lookupCages(cages, query);
+        if (!matches.length) {
+            try {
+                matches = await MXGPicker.loadCages(cageApiUrl, { ...currentFilters(), q: query });
+            } catch (err) {
+                lookupStatus.textContent = err.message;
+                lookupStatus.className = "field-error";
+                return;
+            }
+        }
         if (!matches.length) {
             lookupStatus.textContent = `No cage found matching "${query}". Create the cage first.`;
             lookupStatus.className = "field-error";
@@ -422,7 +404,9 @@
         lookupStatus.className = "field-error";
     }
 
-    applyFilterBtn?.addEventListener("click", renderCageOptions);
+    applyFilterBtn?.addEventListener("click", () => reloadCages());
+    projectFilter?.addEventListener("change", reloadCagesDebounced);
+    ownerFilter?.addEventListener("change", reloadCagesDebounced);
     cageLookupInput?.addEventListener("input", syncLookupToSelect);
     cageLookupInput?.addEventListener("change", syncLookupToSelect);
     cageSelect.addEventListener("change", () => {
@@ -434,7 +418,7 @@
             }
         }
     });
-    renderCageOptions();
+    reloadCages();
     syncLookupToSelect();
 })();
 </script>

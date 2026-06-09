@@ -100,9 +100,32 @@ class BreedingForm(forms.ModelForm):
         self.fields["female_1"].queryset = female_qs
         self.fields["female_1"].required = False
         self.fields["female_2"].queryset = female_qs
-        self.fields["sire"].queryset = male_qs
-        self.fields["dams"].queryset = female_qs
+        self.fields["sire"].queryset = Mouse.objects.none()
+        self.fields["dams"].queryset = Mouse.objects.none()
         self.fields["extra_females"].queryset = female_qs
+        if self.is_bound:
+            bound_ids: list[int] = []
+            sire_raw = str(self.data.get("sire") or "").strip()
+            if sire_raw.isdigit():
+                bound_ids.append(int(sire_raw))
+            if hasattr(self.data, "getlist"):
+                dam_raws = self.data.getlist("dams")
+            else:
+                dams_val = self.data.get("dams")
+                if dams_val is None:
+                    dam_raws = []
+                elif isinstance(dams_val, (list, tuple)):
+                    dam_raws = list(dams_val)
+                else:
+                    dam_raws = [dams_val]
+            for raw in dam_raws:
+                raw_text = str(raw or "").strip()
+                if raw_text.isdigit():
+                    bound_ids.append(int(raw_text))
+            if bound_ids:
+                bound_mice = Mouse.objects.filter(pk__in=bound_ids)
+                self.fields["sire"].queryset = bound_mice.filter(sex=Mouse.Sex.MALE)
+                self.fields["dams"].queryset = bound_mice.filter(sex=Mouse.Sex.FEMALE)
         self.warning_messages: list[str] = []
         self.member_rows: list[dict] = []
         if self.instance.pk:

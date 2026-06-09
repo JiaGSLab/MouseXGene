@@ -20,6 +20,9 @@ from openpyxl import Workbook
 from .forms import (
     CageForm,
     CageImportForm,
+    MOUSE_BATCH_MAX_ROWS,
+    MouseBatchEntryForm,
+    MouseBatchSharedForm,
     MouseForm,
     MouseGenotypeComponentFormSet,
     MouseImportForm,
@@ -40,8 +43,10 @@ from .breeding_pedigree import (
     breeding_sire_and_dams,
     littermate_queryset_for_mouse,
     mouse_family_pedigree,
+    mouse_family_pedigree_from_prefetch,
     resolve_breeding_for_import_cage,
 )
+from .cage_form_helpers import cage_filter_form_context
 from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
 from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, resolve_pdf_description, unique_pdf_description, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
@@ -63,6 +68,7 @@ from colony.cage_lifecycle import (
     sync_cage_status_from_mice,
 )
 from colony.strain_line_usage import (
+    compute_strain_line_usage_counts_bulk,
     compute_strain_line_usage_counts,
     enrich_strain_line_cage_rows,
     strain_line_cage_ids,
@@ -370,30 +376,30 @@ def paginate_queryset_for_list(
     viewname: str,
 ) -> dict:
     """Split queryset into pages or full list (all, only if count ≤ LIST_ALL_RESULTS_MAX)."""
-    total = queryset.count()
     raw_per = (request.GET.get("per_page") or "").strip().lower()
 
-    use_all = raw_per == "all" and total <= LIST_ALL_RESULTS_MAX
-    if raw_per == "all" and total > LIST_ALL_RESULTS_MAX:
-        messages.warning(
-            request,
-            (
-                f"Cannot show all {total} rows at once (limit is {LIST_ALL_RESULTS_MAX}). "
-                f"Using {LIST_PAGE_DEFAULT} per page — narrow filters or use export."
-            ),
-        )
-        use_all = False
-
-    if use_all:
-        return {
-            "page_obj": None,
-            "paginator": None,
-            "pagination_hrefs": None,
-            "per_page": "all",
-            "total_count": total,
-            "all_allowed": True,
-            "items": list(queryset),
-        }
+    if raw_per == "all":
+        total = queryset.count()
+        use_all = total <= LIST_ALL_RESULTS_MAX
+        if total > LIST_ALL_RESULTS_MAX:
+            messages.warning(
+                request,
+                (
+                    f"Cannot show all {total} rows at once (limit is {LIST_ALL_RESULTS_MAX}). "
+                    f"Using {LIST_PAGE_DEFAULT} per page — narrow filters or use export."
+                ),
+            )
+            use_all = False
+        if use_all:
+            return {
+                "page_obj": None,
+                "paginator": None,
+                "pagination_hrefs": None,
+                "per_page": "all",
+                "total_count": total,
+                "all_allowed": True,
+                "items": list(queryset),
+            }
 
     try:
         per_int = int(raw_per) if raw_per and raw_per != "all" else LIST_PAGE_DEFAULT
@@ -403,6 +409,7 @@ def paginate_queryset_for_list(
         per_int = LIST_PAGE_DEFAULT
 
     paginator = Paginator(queryset, per_int)
+    total = paginator.count
     raw_page = request.GET.get("page") or "1"
     try:
         pnum = int(raw_page)
@@ -534,7 +541,7 @@ def _cages_export_headers() -> list[str]:
 def _cages_export_rows_from_queryset(cages) -> list[list]:
     rows: list[list] = []
     for cage in cages:
-        cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
+        cage_mice = sorted(cage.current_mice.all(), key=lambda m: (m.mouse_uid or "").lower())
         project_rows = cage_projects_from_mice(cage_mice)
         projects_text = "; ".join(pr["project"].name for pr in project_rows)
         owners_text = "; ".join(pr["owner_display"] for pr in project_rows)
@@ -614,13 +621,15 @@ def _filtered_mice_queryset(request: HttpRequest):
         mice = mice.filter(status=Mouse.Status.ACTIVE)
 
     if query:
-        mice = mice.filter(
+        q_filter = (
             Q(mouse_uid__icontains=query)
-            | Q(genotype_summary__icontains=query)
             | Q(ear_tag__icontains=query)
             | Q(toe_tag__icontains=query)
             | Q(origin__icontains=query)
         )
+        if len(query) >= 4:
+            q_filter |= Q(genotype_summary__icontains=query)
+        mice = mice.filter(q_filter)
     if sex:
         mice = mice.filter(sex=sex)
     if status:
@@ -724,6 +733,40 @@ def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
 
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
+    """Read-only genotype display for lists and exports (no DB writes)."""
+    return display_genotype_summary(mouse)
+
+
+def display_genotype_summary(mouse: Mouse) -> str:
+    stored = (mouse.genotype_summary or "").strip()
+    if stored and stored != "-":
+        return stored
+    if hasattr(mouse, "_prefetched_objects_cache") and "genotype_components" in mouse._prefetched_objects_cache:
+        genotype_records = list(mouse.genotype_components.all())
+    else:
+        genotype_records = list(mouse.genotype_components.select_related("strain_line").all())
+    if genotype_records:
+        parts = []
+        for component in genotype_records[:3]:
+            locus = (component.locus_name or "").strip() or "locus"
+            zygosity = (component.zygosity or "").strip()
+            parts.append(f"{locus}:{zygosity}" if zygosity else locus)
+        summary = ", ".join(parts)
+        return f"{summary}..." if len(genotype_records) > 3 else summary
+    legacy_records = list(mouse.genotypes.all()) if hasattr(mouse, "genotypes") else []
+    parts = []
+    for gt in legacy_records[:3]:
+        locus = gt.gene.symbol if gt.gene else (gt.locus_name or "locus")
+        genotype_part = gt.zygosity_display or "/".join([p for p in [gt.allele_1, gt.allele_2] if p])
+        parts.append(f"{locus}:{genotype_part}" if genotype_part else locus)
+    if not parts:
+        return ""
+    summary = ", ".join(parts)
+    return f"{summary}..." if len(legacy_records) > 3 else summary
+
+
+def refresh_genotype_summary_if_stale(mouse: Mouse) -> str:
+    """Recompute and persist genotype summary when editing a single mouse."""
     has_template = bool(
         mouse.strain_line_id and mouse.strain_line.expected_loci_entries()
     )
@@ -741,17 +784,7 @@ def build_short_genotype_summary(mouse: Mouse) -> str:
     if genotype_records:
         mouse.rebuild_genotype_summary(save=True)
         return (mouse.genotype_summary or "").strip()
-    # Backward compatibility fallback to legacy assay-oriented genotype rows.
-    legacy_records = list(mouse.genotypes.all())
-    parts = []
-    for gt in legacy_records[:3]:
-        locus = gt.gene.symbol if gt.gene else (gt.locus_name or "locus")
-        genotype_part = gt.zygosity_display or "/".join([p for p in [gt.allele_1, gt.allele_2] if p])
-        parts.append(f"{locus}:{genotype_part}" if genotype_part else locus)
-    if not parts:
-        return ""
-    summary = ", ".join(parts)
-    return f"{summary}..." if len(legacy_records) > 3 else summary
+    return display_genotype_summary(mouse)
 
 
 def build_mouse_relation_card(mouse: Mouse) -> dict:
@@ -877,6 +910,188 @@ def _extract_mouse_genotype_rows_from_post(request: HttpRequest) -> list[dict[st
             continue
         rows.append({"locus": locus, "genotype": genotype})
     return rows
+
+
+MOUSE_CREATE_DRAFT_SESSION_KEY = "mouse_create_draft_v1"
+MOUSE_CREATE_DEFAULT_BATCH_ROWS = 3
+
+
+def _mouse_create_batch_row_count(request: HttpRequest, *, default: int = MOUSE_CREATE_DEFAULT_BATCH_ROWS) -> int:
+    raw = request.POST.get("batch_row_count") if request.method == "POST" else None
+    if raw is None:
+        draft = request.session.get(MOUSE_CREATE_DRAFT_SESSION_KEY) or {}
+        raw = draft.get("batch_row_count")
+    try:
+        count = int(raw if raw is not None else default)
+    except (TypeError, ValueError):
+        count = default
+    return max(1, min(count, MOUSE_BATCH_MAX_ROWS))
+
+
+def _extract_batch_mouse_rows_from_post(request: HttpRequest) -> list[dict[str, str]]:
+    count = _mouse_create_batch_row_count(request)
+    rows: list[dict[str, str]] = []
+    for idx in range(count):
+        rows.append(
+            {
+                "mouse_uid": (request.POST.get(f"batch_mouse_uid_{idx}") or "").strip(),
+                "sex": (request.POST.get(f"batch_sex_{idx}") or Mouse.Sex.UNKNOWN).strip(),
+                "ear_tag": (request.POST.get(f"batch_ear_tag_{idx}") or "").strip(),
+                "toe_tag": (request.POST.get(f"batch_toe_tag_{idx}") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _batch_entry_form_data_from_post(request: HttpRequest, idx: int) -> dict[str, str]:
+    return {
+        "mouse_uid": (request.POST.get(f"batch_mouse_uid_{idx}") or "").strip(),
+        "sex": (request.POST.get(f"batch_sex_{idx}") or Mouse.Sex.UNKNOWN).strip(),
+        "ear_tag": (request.POST.get(f"batch_ear_tag_{idx}") or "").strip(),
+        "toe_tag": (request.POST.get(f"batch_toe_tag_{idx}") or "").strip(),
+    }
+
+
+def _batch_entry_forms_from_request(request: HttpRequest, rows: list[dict[str, str]] | None = None) -> list[MouseBatchEntryForm]:
+    if rows is None:
+        rows = _extract_batch_mouse_rows_from_post(request)
+    if request.method == "POST":
+        return [
+            MouseBatchEntryForm(_batch_entry_form_data_from_post(request, idx))
+            for idx in range(len(rows))
+        ]
+    return [
+        MouseBatchEntryForm(initial=row)
+        for idx, row in enumerate(rows)
+    ]
+
+
+def _mouse_create_draft_from_request(request: HttpRequest) -> dict:
+    shared: dict[str, str] = {}
+    for name in MouseBatchSharedForm.base_fields:
+        value = request.POST.get(name)
+        if value is not None:
+            shared[name] = value
+    return {
+        "shared": shared,
+        "batch_rows": _extract_batch_mouse_rows_from_post(request),
+        "batch_row_count": _mouse_create_batch_row_count(request),
+        "genotype_rows": _extract_mouse_genotype_rows_from_post(request),
+    }
+
+
+def _save_mouse_create_draft(request: HttpRequest) -> None:
+    request.session[MOUSE_CREATE_DRAFT_SESSION_KEY] = _mouse_create_draft_from_request(request)
+    request.session.modified = True
+
+
+def _clear_mouse_create_draft(request: HttpRequest) -> None:
+    if MOUSE_CREATE_DRAFT_SESSION_KEY in request.session:
+        del request.session[MOUSE_CREATE_DRAFT_SESSION_KEY]
+        request.session.modified = True
+
+
+def _validate_batch_uid_uniqueness(entry_forms: list[MouseBatchEntryForm]) -> list[str]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    for form in entry_forms:
+        if not form.is_valid():
+            continue
+        uid = (form.cleaned_data.get("mouse_uid") or "").casefold()
+        if not uid:
+            continue
+        if uid in seen:
+            form.add_error("mouse_uid", "Duplicate mouse UID in this batch.")
+            errors.append(uid)
+        seen.add(uid)
+    return errors
+
+
+def _create_mice_from_batch(
+    *,
+    shared: dict,
+    entry_forms: list[MouseBatchEntryForm],
+    genotype_rows: list[dict[str, str]],
+    user,
+) -> list[Mouse]:
+    project = shared["project"]
+    ensure_can_edit_project_data(user, project)
+    strain_line = shared.get("strain_line")
+    sire = shared.get("sire")
+    dam = shared.get("dam")
+    current_cage = shared.get("current_cage")
+    template_loci = _resolved_template_loci_for_context(
+        strain_line=strain_line,
+        sire=sire,
+        dam=dam,
+        source_breeding=None,
+    )
+    membership_start = shared.get("birth_date") or timezone.localdate()
+    created: list[Mouse] = []
+    memberships: list[CageMembership] = []
+
+    with transaction.atomic():
+        for form in entry_forms:
+            row = form.cleaned_data
+            mouse = Mouse.objects.create(
+                mouse_uid=row["mouse_uid"],
+                sex=row["sex"],
+                birth_date=shared.get("birth_date"),
+                death_date=shared.get("death_date"),
+                euthanasia_date=shared.get("euthanasia_date"),
+                death_reason=shared.get("death_reason") or "",
+                status=shared.get("status") or Mouse.Status.ACTIVE,
+                strain_line=strain_line,
+                current_cage=current_cage,
+                sire=sire,
+                dam=dam,
+                project=project,
+                ear_tag=row.get("ear_tag") or "",
+                toe_tag=row.get("toe_tag") or "",
+                origin=shared.get("origin") or "",
+                coat_color=shared.get("coat_color") or "",
+                notes=shared.get("notes") or "",
+                created_by=user,
+                updated_by=user,
+            )
+            before_signature = _genotype_components_signature(mouse)
+            prefilled = mouse.ensure_template_genotype_components(
+                extra_loci=template_loci,
+                include_strain_template=False,
+            )
+            filled = _apply_mouse_genotype_rows(mouse, genotype_rows)
+            after_signature = _genotype_components_signature(mouse)
+            log_audit_event(
+                user=user,
+                action=AuditLog.Action.CREATE,
+                obj=mouse,
+                message=f"Created mouse {mouse.mouse_uid} (batch create).",
+            )
+            _log_specific_genotype_changes(
+                user=user,
+                mouse=mouse,
+                before_signature=before_signature,
+                after_signature=after_signature,
+                source_label="Batch New Mouse form",
+            )
+            if prefilled or filled:
+                pass  # messages handled by caller
+            created.append(mouse)
+            if current_cage is not None:
+                memberships.append(
+                    CageMembership(
+                        mouse=mouse,
+                        cage=current_cage,
+                        start_date=membership_start,
+                        end_date=None,
+                        is_current=True,
+                        reason="Initial cage assignment",
+                        notes="Batch mouse create",
+                    )
+                )
+        if memberships:
+            CageMembership.objects.bulk_create(memberships)
+    return created
 
 
 def _template_loci_union_for_mouse_relations(
@@ -1822,7 +2037,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     page_ctx = paginate_queryset_for_list(request, cages, viewname="colony:cage_list")
     cages_page = list(page_ctx.pop("items"))
     for cage in cages_page:
-        cage_mice = list(cage.current_mice.all().order_by("mouse_uid"))
+        cage_mice = sorted(cage.current_mice.all(), key=lambda m: (m.mouse_uid or "").lower())
         cage.current_mouse_count = len(cage_mice)
         cage.project_rows = cage_projects_from_mice(cage_mice)
     context = {
@@ -1955,11 +2170,14 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
             | Q(owner__last_name__icontains=q)
             | Q(owner__profile__display_name__icontains=q)
         )
-    lines = lines.annotate(**_strain_line_usage_annotations())
+    sort_key = (request.GET.get("sort") or "").strip()
+    if sort_key in {"active_mice", "active_cages", "active_breedings", "active_litters"}:
+        lines = lines.annotate(**_strain_line_usage_annotations())
     lines = apply_list_sort(lines, request, STRAIN_LINE_LIST_SORT)
     lines = list(lines)
+    usage_counts_by_line = compute_strain_line_usage_counts_bulk([line.pk for line in lines])
     for line in lines:
-        for key, value in compute_strain_line_usage_counts(line.pk).items():
+        for key, value in usage_counts_by_line.get(line.pk, {}).items():
             setattr(line, key, value)
     active_lines = [line for line in lines if line.is_active]
     inactive_lines = [line for line in lines if not line.is_active]
@@ -2731,10 +2949,15 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     if export in {"csv", "xlsx"}:
         return _mice_export_http_response(request, export)
 
-    current_cage_options = Cage.objects.filter(current_mice__in=mice).distinct().order_by("cage_id")
-    project_options = (
-        Project.objects.filter(id__in=mice.values_list("project_id", flat=True)).distinct().order_by("name")
-    )
+    current_cage_options = Cage.objects.filter(
+        pk__in=_scoped_mouse_queryset(request.user)
+        .exclude(current_cage__isnull=True)
+        .values_list("current_cage_id", flat=True)
+        .distinct()
+    ).order_by("cage_id")
+    project_options = Project.objects.filter(
+        pk__in=_scoped_mouse_queryset(request.user).values_list("project_id", flat=True).distinct()
+    ).order_by("name")
 
     page_ctx = paginate_queryset_for_list(request, mice, viewname="mice:mouse_list")
     mice_page = list(page_ctx.pop("items"))
@@ -2761,7 +2984,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     }
     today = timezone.localdate()
     for m in mice_page:
-        m.genotype_summary = build_short_genotype_summary(m)
+        m.genotype_summary = display_genotype_summary(m)
         m.list_age_band = mouse_list_age_band(m.birth_date, today)
         if m.birth_date:
             age_days = (today - m.birth_date).days
@@ -3132,7 +3355,13 @@ def family_tree(request: HttpRequest) -> HttpResponse:
             "project__owner",
             "project__owner__profile",
         )
-        .prefetch_related("genotype_components__strain_line", "genotypes__gene")
+        .prefetch_related(
+            "genotype_components__strain_line",
+            "genotypes__gene",
+            "litter_pup_origin__litter__breeding",
+            "source_breeding__breeding_members__mouse",
+            "source_breeding__extra_female_links__mouse",
+        )
     )
     if include_inactive != "yes":
         mice = mice.filter(status=Mouse.Status.ACTIVE)
@@ -3161,15 +3390,10 @@ def family_tree(request: HttpRequest) -> HttpResponse:
 
     mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
     for m in mice:
-        m.family_genotype_summary = build_short_genotype_summary(m)
-        pedigree = mouse_family_pedigree(m)
+        m.family_genotype_summary = display_genotype_summary(m)
+        pedigree = mouse_family_pedigree_from_prefetch(m)
         m.family_breeding_cage = pedigree.breeding_cage.cage_id if pedigree.breeding_cage else ""
-        if pedigree.dams:
-            m.family_mothers_display = ", ".join(d.mouse_uid for d in pedigree.dams)
-        elif m.dam_id and not pedigree.source_breeding:
-            m.family_mothers_display = m.dam.mouse_uid
-        else:
-            m.family_mothers_display = ""
+        m.family_mothers = pedigree.dams
     strain_line_model = Mouse._meta.get_field("strain_line").related_model
     return render(
         request,
@@ -3201,78 +3425,105 @@ def family_tree(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _active_batch_entry_forms(entry_forms: list[MouseBatchEntryForm]) -> list[MouseBatchEntryForm]:
+    active: list[MouseBatchEntryForm] = []
+    for form in entry_forms:
+        raw_uid = (form.data.get("mouse_uid") or "") if form.is_bound else (form.initial.get("mouse_uid") or "")
+        if (raw_uid or "").strip():
+            active.append(form)
+    return active
+
+
+def _default_batch_mouse_rows(count: int = MOUSE_CREATE_DEFAULT_BATCH_ROWS) -> list[dict[str, str]]:
+    return [
+        {"mouse_uid": "", "sex": Mouse.Sex.MALE, "ear_tag": "", "toe_tag": ""}
+        for _ in range(count)
+    ]
+
+
 @authenticated_required
 def mouse_create(request: HttpRequest) -> HttpResponse:
+    if request.GET.get("discard_draft") == "1":
+        _clear_mouse_create_draft(request)
+        messages.info(request, "Draft discarded.")
+        return redirect("mice:mouse_create")
+
     posted_genotype_rows: list[dict[str, str]] = []
+    draft = request.session.get(MOUSE_CREATE_DRAFT_SESSION_KEY)
+    shared_initial: dict = {}
+    batch_rows: list[dict[str, str]] = _default_batch_mouse_rows()
+    draft_loaded = False
+
     if request.method == "POST":
-        form = MouseForm(request.POST, user=request.user)
+        form_action = (request.POST.get("form_action") or "create").strip()
         posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
-        if form.is_valid():
-            ensure_can_edit_project_data(request.user, form.cleaned_data.get("project"))
-            mouse = form.save()
-            before_signature = _genotype_components_signature(mouse)
-            template_loci = _resolved_template_loci_for_context(
-                strain_line=mouse.strain_line,
-                sire=mouse.sire,
-                dam=mouse.dam,
-                source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
-            )
-            prefilled = mouse.ensure_template_genotype_components(
-                extra_loci=template_loci,
-                include_strain_template=False,
-            )
-            filled = _apply_mouse_genotype_rows(mouse, posted_genotype_rows)
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.CREATE,
-                obj=mouse,
-                message=f"Created mouse {mouse.mouse_uid}.",
-            )
-            after_signature = _genotype_components_signature(mouse)
-            _log_specific_genotype_changes(
-                user=request.user,
-                mouse=mouse,
-                before_signature=before_signature,
-                after_signature=after_signature,
-                source_label="New Mouse form",
-            )
-            if prefilled:
-                messages.info(
-                    request,
-                    f"Pre-populated {prefilled} genotype template row(s) from strain line '{mouse.strain_line}'.",
-                )
-            if filled:
-                messages.info(request, f"Applied {filled} genotype row(s) from New Mouse form.")
-            return redirect("mice:mouse_detail", pk=mouse.pk)
+        shared_form = MouseBatchSharedForm(request.POST, user=request.user)
+        batch_rows = _extract_batch_mouse_rows_from_post(request)
+        entry_forms = _batch_entry_forms_from_request(request, batch_rows)
+
+        if form_action == "draft":
+            _save_mouse_create_draft(request)
+            messages.success(request, "Draft saved. You can continue editing on this page.")
+        else:
+            active_entry_forms = _active_batch_entry_forms(entry_forms)
+            if not active_entry_forms:
+                messages.error(request, "Add at least one mouse with a UID before saving.")
+            elif shared_form.is_valid() and all(form.is_valid() for form in active_entry_forms):
+                _validate_batch_uid_uniqueness(active_entry_forms)
+                if all(form.is_valid() for form in active_entry_forms):
+                    created = _create_mice_from_batch(
+                        shared=shared_form.cleaned_data,
+                        entry_forms=active_entry_forms,
+                        genotype_rows=posted_genotype_rows,
+                        user=request.user,
+                    )
+                    _clear_mouse_create_draft(request)
+                    uids = ", ".join(mouse.mouse_uid for mouse in created[:5])
+                    suffix = "…" if len(created) > 5 else ""
+                    messages.success(request, f"Created {len(created)} mouse(s): {uids}{suffix}.")
+                    if len(created) == 1:
+                        return redirect("mice:mouse_detail", pk=created[0].pk)
+                    return redirect("mice:mouse_list")
     else:
-        initial: dict = {}
-        strain_id = (request.GET.get("strain_line_id") or "").strip()
-        if strain_id.isdigit():
-            line = (
-                StrainLine.objects.filter(pk=int(strain_id))
-                .select_related("default_project")
-                .first()
-            )
-            if line:
-                initial["strain_line"] = line.pk
-                default_project_id = _effective_default_project_id(line)
-                if default_project_id:
-                    initial["project"] = default_project_id
-        form = MouseForm(user=request.user, initial=initial)
+        if draft:
+            shared_initial = draft.get("shared") or {}
+            batch_rows = draft.get("batch_rows") or _default_batch_mouse_rows()
+            posted_genotype_rows = draft.get("genotype_rows") or []
+            draft_loaded = True
+        else:
+            strain_id = (request.GET.get("strain_line_id") or "").strip()
+            if strain_id.isdigit():
+                line = (
+                    StrainLine.objects.filter(pk=int(strain_id))
+                    .select_related("default_project")
+                    .first()
+                )
+                if line:
+                    shared_initial["strain_line"] = line.pk
+                    default_project_id = _effective_default_project_id(line)
+                    if default_project_id:
+                        shared_initial["project"] = default_project_id
+        shared_form = MouseBatchSharedForm(user=request.user, initial=shared_initial)
+        entry_forms = _batch_entry_forms_from_request(request, batch_rows)
+        if draft_loaded:
+            messages.info(request, "Loaded your saved draft.")
 
     context = {
-        "form": form,
-        "page_title": "Create Mouse",
-        "submit_label": "Save Mouse",
+        "shared_form": shared_form,
+        "entry_forms": entry_forms,
+        "batch_row_count": len(entry_forms),
+        "page_title": "Create Mice",
         "cancel_url": "mice:mouse_list",
         "strain_template_loci_map": _strain_template_loci_map(),
-        "mouse_strain_line_map": _mouse_to_strain_line_map(),
         "strain_default_project_map": _strain_default_project_map(),
         "apply_strain_default_project": True,
         "existing_genotype_map": {},
         "posted_genotype_rows": posted_genotype_rows,
+        "has_saved_draft": bool(draft),
+        "max_batch_rows": MOUSE_BATCH_MAX_ROWS,
+        **cage_filter_form_context(),
     }
-    return render(request, "colony/mouse_form.html", context)
+    return render(request, "colony/mouse_create.html", context)
 
 
 @authenticated_required
@@ -3409,7 +3660,6 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "cancel_url": "mice:mouse_detail",
         "cancel_kwargs": {"pk": mouse.pk},
         "strain_template_loci_map": _strain_template_loci_map(),
-        "mouse_strain_line_map": _mouse_to_strain_line_map(),
         "apply_strain_default_project": False,
         "existing_genotype_map": {
             (c.locus_name or "").strip(): (c.zygosity or "")
@@ -3417,6 +3667,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
             if (c.locus_name or "").strip()
         },
         "posted_genotype_rows": posted_genotype_rows,
+        **cage_filter_form_context(),
     }
     return render(request, "colony/mouse_form.html", context)
 
