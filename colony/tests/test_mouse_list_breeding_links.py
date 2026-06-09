@@ -54,3 +54,10 @@ class MouseListBreedingLinksTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.breeding.breeding_code)
         self.assertContains(response, f'href="{reverse("breeding:breeding_detail", args=[self.breeding.pk])}"')
+
+    def test_cage_detail_current_mice_breeding_badge_links_to_breeding_detail(self):
+        response = self.client.get(reverse("colony:cage_detail", args=[self.cage.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.breeding.breeding_code)
+        self.assertContains(response, f'href="{reverse("breeding:breeding_detail", args=[self.breeding.pk])}"')
