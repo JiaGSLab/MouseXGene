@@ -5,6 +5,7 @@ from io import BytesIO
 
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.contrib import messages
+from django.core.cache import cache
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -110,6 +111,7 @@ from users.permissions import (
 LIST_PAGE_SIZES = (25, 50, 100)
 LIST_PAGE_DEFAULT = 25
 LIST_ALL_RESULTS_MAX = 500
+FILTER_OPTION_CACHE_TIMEOUT = 120
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +359,61 @@ def _scoped_cage_queryset(user):
     if not getattr(user, "is_authenticated", False):
         return Cage.objects.none()
     return Cage.objects.all()
+
+
+def _cached_list_option_rows(cache_key: str, queryset_builder):
+    rows = cache.get(cache_key)
+    if rows is None:
+        rows = list(queryset_builder())
+        cache.set(cache_key, rows, FILTER_OPTION_CACHE_TIMEOUT)
+    return rows
+
+
+def _cached_cage_room_options() -> list[str]:
+    return _cached_list_option_rows(
+        "cage-list-room-options:v2",
+        lambda: Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
+    )
+
+
+def _cached_cage_rack_options() -> list[str]:
+    return _cached_list_option_rows(
+        "cage-list-rack-options:v2",
+        lambda: Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
+    )
+
+
+def _user_option_cache_key(prefix: str, user) -> str:
+    user_key = getattr(user, "pk", None) or "anon"
+    return f"{prefix}:v2:user:{user_key}"
+
+
+def _cached_mouse_current_cage_options(user) -> list[dict]:
+    return _cached_list_option_rows(
+        _user_option_cache_key("mouse-list-current-cage-options", user),
+        lambda: Cage.objects.filter(
+            pk__in=_scoped_mouse_queryset(user)
+            .exclude(current_cage__isnull=True)
+            .values_list("current_cage_id", flat=True)
+            .distinct()
+        )
+        .order_by("cage_id")
+        .values("pk", "cage_id"),
+    )
+
+
+def _cached_mouse_project_options(user) -> list[dict]:
+    return _cached_list_option_rows(
+        _user_option_cache_key("mouse-list-project-options", user),
+        lambda: Project.objects.filter(
+            pk__in=_scoped_mouse_queryset(user)
+            .exclude(project__isnull=True)
+            .values_list("project_id", flat=True)
+            .distinct()
+        )
+        .order_by("name")
+        .values("pk", "name"),
+    )
 
 
 def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
@@ -2132,8 +2189,8 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "strain_line_filter_label": strain_line_filter_label,
         "owner": owner,
         "owner_options": project_owner_filter_options(),
-        "room_options": Cage.objects.exclude(room="").values_list("room", flat=True).distinct().order_by("room"),
-        "rack_options": Cage.objects.exclude(rack="").values_list("rack", flat=True).distinct().order_by("rack"),
+        "room_options": _cached_cage_room_options(),
+        "rack_options": _cached_cage_rack_options(),
         "cage_type_options": Cage.CageType.choices,
         "purpose_options": Cage.Purpose.choices,
         "status_options": Cage.Status.choices,
@@ -3027,15 +3084,8 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     if export in {"csv", "xlsx"}:
         return _mice_export_http_response(request, export)
 
-    current_cage_options = Cage.objects.filter(
-        pk__in=_scoped_mouse_queryset(request.user)
-        .exclude(current_cage__isnull=True)
-        .values_list("current_cage_id", flat=True)
-        .distinct()
-    ).order_by("cage_id")
-    project_options = Project.objects.filter(
-        pk__in=_scoped_mouse_queryset(request.user).values_list("project_id", flat=True).distinct()
-    ).order_by("name")
+    current_cage_options = _cached_mouse_current_cage_options(request.user)
+    project_options = _cached_mouse_project_options(request.user)
 
     page_ctx = paginate_queryset_for_list(request, mice, viewname="mice:mouse_list")
     mice_page = list(page_ctx.pop("items"))

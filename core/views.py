@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
@@ -32,6 +33,15 @@ from users.permissions import (
     is_admin,
     role_required,
 )
+
+
+DASHBOARD_STATS_CACHE_TIMEOUT = 30
+
+
+def _dashboard_stats_cache_key(user, owner: str) -> str:
+    user_key = getattr(user, "pk", None) or "anon"
+    owner_key = owner or "all"
+    return f"dashboard-stats:v2:user:{user_key}:owner:{owner_key}"
 
 
 @authenticated_required
@@ -108,15 +118,34 @@ def home(request: HttpRequest) -> HttpResponse:
     )
 
     dashboard_list_limit = 8
-    total_cages = cages_queryset.count()
-    active_cages = cages_queryset.filter(status=Cage.Status.ACTIVE).count()
-    total_mice = mice_queryset.count()
-    active_mice = active_mice_qs.count()
-    mice_without_cage_count = mice_without_cage_qs.count()
-    mice_without_genotype_count = mice_without_genotype_qs.count()
-    cages_without_mice_count = cages_without_mice_qs.count()
-    weaning_due_soon_count = weaning_due_soon_qs.count()
-    breeding_without_litter_count = breeding_without_litter_qs.count()
+    stats_cache_key = _dashboard_stats_cache_key(request.user, home_owner)
+    cached_stats = cache.get(stats_cache_key)
+    if cached_stats is None:
+        cached_stats = {
+            "total_cages": cages_queryset.count(),
+            "active_cages": cages_queryset.filter(status=Cage.Status.ACTIVE).count(),
+            "total_mice": mice_queryset.count(),
+            "active_mice": active_mice_qs.count(),
+            "mice_without_cage_count": mice_without_cage_qs.count(),
+            "mice_without_genotype_count": mice_without_genotype_qs.count(),
+            "cages_without_mice_count": cages_without_mice_qs.count(),
+            "weaning_due_soon_count": weaning_due_soon_qs.count(),
+            "breeding_without_litter_count": breeding_without_litter_qs.count(),
+            "pups_lacking_genotype_count": pups_lacking_genotype_qs.count(),
+            "empty_active_cages_long_count": empty_active_cages_long_qs.count(),
+        }
+        cache.set(stats_cache_key, cached_stats, DASHBOARD_STATS_CACHE_TIMEOUT)
+    total_cages = cached_stats["total_cages"]
+    active_cages = cached_stats["active_cages"]
+    total_mice = cached_stats["total_mice"]
+    active_mice = cached_stats["active_mice"]
+    mice_without_cage_count = cached_stats["mice_without_cage_count"]
+    mice_without_genotype_count = cached_stats["mice_without_genotype_count"]
+    cages_without_mice_count = cached_stats["cages_without_mice_count"]
+    weaning_due_soon_count = cached_stats["weaning_due_soon_count"]
+    breeding_without_litter_count = cached_stats["breeding_without_litter_count"]
+    pups_lacking_genotype_count = cached_stats["pups_lacking_genotype_count"]
+    empty_active_cages_long_count = cached_stats["empty_active_cages_long_count"]
     breeding_overdue_cutoff = today - timedelta(days=22)
     breeding_overdue_qs = (
         breedings_queryset.filter(Q(active=True) & ~Q(status=Breeding.Status.CLOSED))
@@ -142,8 +171,6 @@ def home(request: HttpRequest) -> HttpResponse:
             b.litter_timing_alert = alert
             breeding_overdue_all.append(b)
     breeding_overdue_count = len(breeding_overdue_all)
-    pups_lacking_genotype_count = pups_lacking_genotype_qs.count()
-    empty_active_cages_long_count = empty_active_cages_long_qs.count()
 
     weaning_due_soon = list(weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit])
     mice_without_cage = list(mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit])

@@ -20,7 +20,7 @@ from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_bre
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
-from colony.mouse_age import TIER_HINT, tier_map_for_breeding_select_mice
+from colony.mouse_age import breeding_age_tier
 
 from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
@@ -440,7 +440,6 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
     )
     mouse_ids = [m.id for m in mice]
     active_codes_map = _active_breeding_codes_for_mouse_ids(mouse_ids, exclude_breeding_id=editing_breeding_id)
-    tier_map = tier_map_for_breeding_select_mice()
     today = timezone.localdate()
     payload: list[dict] = []
     for m in mice:
@@ -462,7 +461,7 @@ def _breeder_mouse_choices_payload(*, editing_breeding_id: int | None = None) ->
                 "status_label": m.get_status_display(),
                 "age_days": age_days,
                 "genotype_summary": m.genotype_summary or "",
-                "age_tier": tier_map.get(str(m.pk), "none"),
+                "age_tier": breeding_age_tier(m.birth_date, today),
                 "active_breeding_codes": active_codes_map.get(m.pk, []),
             }
         )
@@ -990,8 +989,6 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
         "page_title": "Create Breeding",
         "submit_label": "Save Breeding",
         "cancel_url": "breeding:breeding_list",
-        "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
-        "breeding_age_hints": TIER_HINT,
         "breeder_mouse_choices": [],
         **_breeding_form_cage_context(),
     }
@@ -1046,8 +1043,6 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "submit_label": "Save Changes",
         "cancel_url": "breeding:breeding_detail",
         "cancel_kwargs": {"pk": breeding.pk},
-        "breeding_age_tier_map": tier_map_for_breeding_select_mice(),
-        "breeding_age_hints": TIER_HINT,
         "breeder_mouse_choices": [],
         **_breeding_form_cage_context(),
     }

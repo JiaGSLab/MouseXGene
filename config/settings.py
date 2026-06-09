@@ -21,6 +21,16 @@ def get_env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+
+
 # 🔐 基础配置
 SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
 
@@ -111,6 +121,8 @@ DATABASES = {
         "PASSWORD": get_env("POSTGRES_PASSWORD", "mousexgene_dev_password"),
         "HOST": _db_host if _db_host else get_env("POSTGRES_HOST", "db"),
         "PORT": _db_port if _db_port else get_env("POSTGRES_PORT", "5432"),
+        "CONN_MAX_AGE": get_env_int("DB_CONN_MAX_AGE", 60),
+        "CONN_HEALTH_CHECKS": get_env_bool("DB_CONN_HEALTH_CHECKS", True),
         "OPTIONS": {
             "options": get_env("POSTGRES_OPTIONS", "-c jit=off"),
         },
