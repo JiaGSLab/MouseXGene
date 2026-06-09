@@ -45,6 +45,10 @@ class Breeding(ActorStampedModel):
 
     class Meta:
         ordering = ("-start_date", "breeding_code")
+        indexes = [
+            models.Index(fields=["active", "start_date"], name="breeding_active_start"),
+            models.Index(fields=["status", "active"], name="breeding_status_active"),
+        ]
 
     def clean(self) -> None:
         if not self.cage_id:
@@ -155,6 +159,10 @@ class Litter(models.Model):
 
     class Meta:
         ordering = ("-birth_date", "litter_code")
+        indexes = [
+            models.Index(fields=["birth_date"], name="breeding_litter_birth"),
+            models.Index(fields=["wean_date"], name="breeding_litter_wean"),
+        ]
 
     def clean(self) -> None:
         for field_name in ("total_born", "alive_count", "dead_count", "male_count", "female_count"):

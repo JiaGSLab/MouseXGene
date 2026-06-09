@@ -357,6 +357,9 @@ class Cage(ActorStampedModel):
 
     class Meta:
         ordering = ("cage_id",)
+        indexes = [
+            models.Index(fields=["status", "cage_id"], name="colony_cage_status_id"),
+        ]
 
     def __str__(self) -> str:
         return self.cage_id
@@ -431,6 +434,10 @@ class Mouse(ActorStampedModel):
 
     class Meta:
         ordering = ("-birth_date", "mouse_uid")
+        indexes = [
+            models.Index(fields=["status", "birth_date"], name="colony_mouse_status_birth"),
+            models.Index(fields=["status", "mouse_uid"], name="colony_mouse_status_uid"),
+        ]
 
     def clean(self) -> None:
         if self.death_date and self.birth_date and self.death_date < self.birth_date:
