@@ -104,6 +104,7 @@
                             <small class="muted">{{ form.current_cage_lookup.help_text }}</small>
                         {% endif %}
                         <p class="muted small-print" id="mouse-cage-lookup-status" aria-live="polite"></p>
+                        <p class="muted small-print" id="mouse-cage-selected-summary" aria-live="polite"></p>
                         {% if form.current_cage_lookup.errors %}
                             <div class="field-error">
                                 {% for error in form.current_cage_lookup.errors %}
@@ -399,6 +400,16 @@
     const statusSelect = document.getElementById("id_status");
     const initialStatus = statusSelect?.dataset.initialStatus || "";
     formEl?.addEventListener("submit", (event) => {
+        const cageWarnings = window.MXGMouseCagePicker?.selectedWarnings?.({
+            sex: document.getElementById("id_sex")?.value || "",
+        }) || [];
+        if (cageWarnings.length) {
+            const warningText = cageWarnings.map((warning) => `- ${warning}`).join("\n");
+            if (!window.confirm(`Selected cage warning:\n${warningText}\n\nSave anyway?`)) {
+                event.preventDefault();
+                return;
+            }
+        }
         if (!statusSelect || initialStatus !== "active") return;
         if (statusSelect.value === "active") return;
         const label = statusSelect.options[statusSelect.selectedIndex]?.text || statusSelect.value;
@@ -423,6 +434,7 @@
     const syncFormFiltersBtn = document.getElementById("mouse-cage-sync-form-filters");
     const filterStatus = document.getElementById("mouse-cage-filter-status");
     const lookupStatus = document.getElementById("mouse-cage-lookup-status");
+    const selectedSummary = document.getElementById("mouse-cage-selected-summary");
     if (!cageSelect || !window.MXGPicker) return;
 
     let cages = [];
@@ -436,6 +448,48 @@
         };
     }
 
+    function selectedCage() {
+        return MXGPicker.findCage(cages, cageSelect.value);
+    }
+
+    function selectedWarnings(extra = {}) {
+        return MXGPicker.cageWarnings(selectedCage(), {
+            projectId: formProject?.value || "",
+            strainLineId: formStrain?.value || "",
+            sex: document.getElementById("id_sex")?.value || "",
+            ...extra,
+        });
+    }
+
+    function updateSelectedSummary() {
+        if (!selectedSummary) return;
+        const cage = selectedCage();
+        if (!cage) {
+            selectedSummary.textContent = "";
+            selectedSummary.className = "muted small-print";
+            return;
+        }
+        const warnings = selectedWarnings();
+        selectedSummary.textContent = warnings.length
+            ? `${MXGPicker.describeCage(cage)} Warning: ${warnings.join("; ")}.`
+            : MXGPicker.describeCage(cage);
+        selectedSummary.className = warnings.length ? "field-error small-print" : "muted small-print";
+    }
+
+    function ensureCageInOptions(cage) {
+        if (!cage) return;
+        if (!cages.some((item) => String(item.id) === String(cage.id))) {
+            cages = [cage, ...cages];
+            MXGPicker.renderCageSelect(cageSelect, cages, cage.id);
+        }
+    }
+
+    window.MXGMouseCagePicker = {
+        selectedCage,
+        selectedWarnings,
+        updateSummary: updateSelectedSummary,
+    };
+
     async function reloadCages(extra = {}) {
         if (filterStatus) filterStatus.textContent = "Loading cages...";
         try {
@@ -447,6 +501,7 @@
                 const strainLabel = strainFilter?.selectedOptions?.[0]?.text || "All strain lines";
                 filterStatus.textContent = `Showing ${cages.length} cage(s) for ${ownerLabel} / ${projectLabel} / ${strainLabel}.`;
             }
+            updateSelectedSummary();
         } catch (err) {
             if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
         }
@@ -460,6 +515,7 @@
         if (!query) {
             lookupStatus.textContent = "";
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         let matches = MXGPicker.lookupCages(cages, query);
@@ -478,20 +534,26 @@
             return;
         }
         if (matches.length === 1) {
+            ensureCageInOptions(matches[0]);
             cageSelect.value = String(matches[0].id);
             lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
-        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
+        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "..." : ""}. Enter a more specific cage ID.`;
         lookupStatus.className = "field-error";
+        updateSelectedSummary();
     }
 
     applyFilterBtn?.addEventListener("click", () => reloadCages());
     projectFilter?.addEventListener("change", reloadCagesDebounced);
     ownerFilter?.addEventListener("change", reloadCagesDebounced);
     strainFilter?.addEventListener("change", reloadCagesDebounced);
+    formProject?.addEventListener("change", updateSelectedSummary);
+    formStrain?.addEventListener("change", updateSelectedSummary);
+    document.getElementById("id_sex")?.addEventListener("change", updateSelectedSummary);
     syncFormFiltersBtn?.addEventListener("click", () => {
         if (projectFilter && formProject) projectFilter.value = formProject.value || "";
         if (strainFilter && formStrain) strainFilter.value = formStrain.value || "";
@@ -507,6 +569,7 @@
                 syncLookupToSelect();
             }
         }
+        updateSelectedSummary();
     });
     reloadCages();
     syncLookupToSelect();

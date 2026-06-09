@@ -103,6 +103,7 @@
                                 <small class="muted">{{ shared_form.current_cage_lookup.help_text }}</small>
                             {% endif %}
                             <p class="muted small-print" id="mouse-cage-lookup-status" aria-live="polite"></p>
+                            <p class="muted small-print" id="mouse-cage-selected-summary" aria-live="polite"></p>
                             {% if shared_form.current_cage_lookup.errors %}
                                 <div class="field-error">{% for error in shared_form.current_cage_lookup.errors %}<div>{{ error }}</div>{% endfor %}</div>
                             {% endif %}
@@ -135,6 +136,7 @@
                 <button type="button" class="button button-light" id="batch-add-row">Add row</button>
                 <button type="button" class="button button-light" id="batch-remove-row">Remove last row</button>
                 <span class="muted small-print" id="batch-row-status">{{ batch_row_count }} row(s)</span>
+                <span class="muted small-print" id="batch-uid-status" aria-live="polite"></span>
             </div>
             <div class="table-wrap">
                 <table class="data-table data-table--compact" id="batch-mouse-table">
@@ -202,7 +204,11 @@
     const rowCountInput = document.getElementById("id_batch_row_count");
     const rowsBody = document.getElementById("batch-mouse-rows");
     const rowStatus = document.getElementById("batch-row-status");
+    const uidStatus = document.getElementById("batch-uid-status");
+    const uidCheckUrl = "{{ mouse_uid_check_api_url|default:'/mice/api/uid-check/'|escapejs }}";
     const sexChoices = [["M", "Male"], ["F", "Female"], ["U", "Unknown"]];
+    const sexLabels = { M: "male", F: "female", U: "unknown" };
+    let existingUidKeys = new Set();
 
     function currentRowCount() {
         return rowsBody.querySelectorAll(".batch-mouse-row").length;
@@ -211,6 +217,120 @@
     function syncRowCountInput() {
         rowCountInput.value = String(currentRowCount());
         if (rowStatus) rowStatus.textContent = `${currentRowCount()} row(s)`;
+    }
+
+    function normalizeUid(value) {
+        return String(value || "").trim();
+    }
+
+    function collectUidRows() {
+        return [...rowsBody.querySelectorAll('[name^="batch_mouse_uid_"]')]
+            .map((input) => {
+                const uid = normalizeUid(input.value);
+                return { input, uid, key: uid.toLowerCase() };
+            })
+            .filter((row) => row.uid);
+    }
+
+    function collectUids() {
+        return collectUidRows().map((row) => row.uid);
+    }
+
+    function duplicateUidsInBatch() {
+        const counts = new Map();
+        for (const row of collectUidRows()) {
+            counts.set(row.key, (counts.get(row.key) || 0) + 1);
+        }
+        return collectUidRows()
+            .filter((row) => counts.get(row.key) > 1)
+            .map((row) => row.uid);
+    }
+
+    function activeSexCounts() {
+        const counts = { M: 0, F: 0, U: 0 };
+        rowsBody.querySelectorAll(".batch-mouse-row").forEach((row) => {
+            const uid = normalizeUid(row.querySelector('[name^="batch_mouse_uid_"]')?.value);
+            if (!uid) return;
+            const sex = row.querySelector('[name^="batch_sex_"]')?.value || "U";
+            counts[sex] = (counts[sex] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function activeSexes() {
+        return Object.entries(activeSexCounts())
+            .filter(([_sex, count]) => count > 0)
+            .map(([sex]) => sex);
+    }
+
+    function formatSexCounts() {
+        return Object.entries(activeSexCounts())
+            .filter(([_sex, count]) => count > 0)
+            .map(([sex, count]) => `${count} ${sexLabels[sex] || sex}`)
+            .join(", ");
+    }
+
+    function syncUidStatus({ checking = false } = {}) {
+        if (!uidStatus) return;
+        const duplicates = [...new Set(duplicateUidsInBatch())];
+        const existing = collectUidRows()
+            .filter((row) => existingUidKeys.has(row.key))
+            .map((row) => row.uid);
+        if (duplicates.length) {
+            uidStatus.textContent = `Duplicate in batch: ${duplicates.slice(0, 5).join(", ")}${duplicates.length > 5 ? "..." : ""}.`;
+            uidStatus.className = "field-error small-print";
+            return;
+        }
+        if (existing.length) {
+            uidStatus.textContent = `Already exists: ${existing.slice(0, 5).join(", ")}${existing.length > 5 ? "..." : ""}.`;
+            uidStatus.className = "field-error small-print";
+            return;
+        }
+        const count = collectUidRows().length;
+        if (checking) {
+            uidStatus.textContent = "Checking mouse UIDs...";
+            uidStatus.className = "muted small-print";
+        } else {
+            uidStatus.textContent = count ? `${count} UID${count === 1 ? "" : "s"} ready.` : "";
+            uidStatus.className = "muted small-print";
+        }
+    }
+
+    async function refreshUidCheck() {
+        const uids = collectUids();
+        existingUidKeys = new Set();
+        syncUidStatus({ checking: Boolean(uids.length) });
+        if (!uids.length) return;
+        const params = new URLSearchParams();
+        uids.forEach((uid) => params.append("uid", uid));
+        try {
+            const response = await fetch(`${uidCheckUrl}?${params.toString()}`, { headers: { Accept: "application/json" } });
+            if (!response.ok) throw new Error(`Request failed (${response.status})`);
+            const data = await response.json();
+            existingUidKeys = new Set((data.existing || []).map((row) => String(row.uid || "").toLowerCase()));
+        } catch (err) {
+            if (uidStatus) {
+                uidStatus.textContent = `UID check failed: ${err.message}`;
+                uidStatus.className = "field-error small-print";
+            }
+            return;
+        }
+        syncUidStatus();
+    }
+
+    const refreshUidCheckDebounced = window.MXGPicker
+        ? MXGPicker.debounce(refreshUidCheck, 350)
+        : refreshUidCheck;
+
+    function attachRowListeners(row) {
+        row.querySelector(".batch-sex-select")?.addEventListener("change", () => {
+            renderRows();
+            window.MXGMouseCagePicker?.updateSummary?.();
+        });
+        row.querySelector('[name^="batch_mouse_uid_"]')?.addEventListener("input", () => {
+            syncUidStatus();
+            refreshUidCheckDebounced();
+        });
     }
 
     function buildRow(index) {
@@ -224,7 +344,7 @@
             <td><input type="text" name="batch_ear_tag_${index}" id="id_batch_ear_tag_${index}" class="filter-control" maxlength="64"></td>
             <td><input type="text" name="batch_toe_tag_${index}" id="id_batch_toe_tag_${index}" class="filter-control" maxlength="64"></td>
         `;
-        tr.querySelector(".batch-sex-select")?.addEventListener("change", renderRows);
+        attachRowListeners(tr);
         return tr;
     }
 
@@ -247,19 +367,15 @@
         if (currentRowCount() >= MAX_ROWS) return;
         rowsBody.appendChild(buildRow(currentRowCount()));
         syncRowCountInput();
+        syncUidStatus();
     });
     document.getElementById("batch-remove-row")?.addEventListener("click", () => {
         if (currentRowCount() <= 1) return;
         rowsBody.lastElementChild?.remove();
         reindexRows();
+        refreshUidCheckDebounced();
     });
-    rowsBody.querySelectorAll(".batch-sex-select").forEach((el) => el.addEventListener("change", () => renderRows?.()));
-
-    function collectUids() {
-        return [...rowsBody.querySelectorAll('[name^="batch_mouse_uid_"]')]
-            .map((el) => (el.value || "").trim())
-            .filter(Boolean);
-    }
+    rowsBody.querySelectorAll(".batch-mouse-row").forEach(attachRowListeners);
 
     formEl?.addEventListener("submit", (event) => {
         syncRowCountInput();
@@ -272,11 +388,45 @@
             event.preventDefault();
             return;
         }
+        const duplicates = [...new Set(duplicateUidsInBatch())];
+        if (duplicates.length) {
+            window.alert(`Fix duplicate mouse UID(s) before saving: ${duplicates.join(", ")}`);
+            event.preventDefault();
+            return;
+        }
+        const existing = collectUidRows()
+            .filter((row) => existingUidKeys.has(row.key))
+            .map((row) => row.uid);
+        if (existing.length) {
+            window.alert(`These mouse UID(s) already exist and cannot be reused: ${existing.join(", ")}`);
+            event.preventDefault();
+            return;
+        }
         const preview = uids.slice(0, 8).join(", ");
-        const suffix = uids.length > 8 ? ` … (+${uids.length - 8} more)` : "";
-        const message = `Create ${uids.length} mouse(s) with shared litter information?\n\n${preview}${suffix}`;
+        const suffix = uids.length > 8 ? ` ... (+${uids.length - 8} more)` : "";
+        const cageSummary = window.MXGMouseCagePicker?.selectedDescription?.() || "";
+        const activeBatchSexes = activeSexes();
+        const cageWarnings = window.MXGMouseCagePicker?.selectedWarnings?.({ sexes: activeBatchSexes }) || [];
+        if (cageSummary && activeBatchSexes.includes("M") && activeBatchSexes.includes("F")) {
+            cageWarnings.unshift("batch includes male and female mice assigned to the same current cage");
+        }
+        const messageLines = [
+            `Create ${uids.length} mouse(s) with shared information?`,
+            "",
+            `${preview}${suffix}`,
+        ];
+        const sexSummary = formatSexCounts();
+        if (sexSummary) messageLines.push(`Sex: ${sexSummary}`);
+        if (cageSummary) messageLines.push(`Cage: ${cageSummary}`);
+        if (cageWarnings.length) {
+            messageLines.push("", "Cage warning:");
+            cageWarnings.forEach((warning) => messageLines.push(`- ${warning}`));
+            messageLines.push("Continue?");
+        }
+        const message = messageLines.join("\n");
         if (!window.confirm(message)) event.preventDefault();
     });
+    refreshUidCheckDebounced();
 
     let draftTimer = null;
     function saveLocalDraft() {
@@ -521,6 +671,7 @@
     const syncFormFiltersBtn = document.getElementById("mouse-cage-sync-form-filters");
     const filterStatus = document.getElementById("mouse-cage-filter-status");
     const lookupStatus = document.getElementById("mouse-cage-lookup-status");
+    const selectedSummary = document.getElementById("mouse-cage-selected-summary");
     if (!cageSelect || !window.MXGPicker) return;
 
     let cages = [];
@@ -534,6 +685,63 @@
         };
     }
 
+    function activeBatchSexes() {
+        const sexes = new Set();
+        document.querySelectorAll(".batch-mouse-row").forEach((row) => {
+            const uid = (row.querySelector('[name^="batch_mouse_uid_"]')?.value || "").trim();
+            if (!uid) return;
+            const sex = row.querySelector('[name^="batch_sex_"]')?.value || "";
+            if (sex) sexes.add(sex);
+        });
+        return [...sexes];
+    }
+
+    function selectedCage() {
+        return MXGPicker.findCage(cages, cageSelect.value);
+    }
+
+    function selectedWarnings(extra = {}) {
+        return MXGPicker.cageWarnings(selectedCage(), {
+            projectId: formProject?.value || "",
+            strainLineId: formStrain?.value || "",
+            sexes: activeBatchSexes(),
+            ...extra,
+        });
+    }
+
+    function updateSelectedSummary() {
+        if (!selectedSummary) return;
+        const cage = selectedCage();
+        if (!cage) {
+            selectedSummary.textContent = "";
+            selectedSummary.className = "muted small-print";
+            return;
+        }
+        const warnings = selectedWarnings();
+        selectedSummary.textContent = warnings.length
+            ? `${MXGPicker.describeCage(cage)} Warning: ${warnings.join("; ")}.`
+            : MXGPicker.describeCage(cage);
+        selectedSummary.className = warnings.length ? "field-error small-print" : "muted small-print";
+    }
+
+    function ensureCageInOptions(cage) {
+        if (!cage) return;
+        if (!cages.some((item) => String(item.id) === String(cage.id))) {
+            cages = [cage, ...cages];
+            MXGPicker.renderCageSelect(cageSelect, cages, cage.id);
+        }
+    }
+
+    window.MXGMouseCagePicker = {
+        selectedCage,
+        selectedDescription() {
+            const cage = selectedCage();
+            return cage ? MXGPicker.describeCage(cage) : "";
+        },
+        selectedWarnings,
+        updateSummary: updateSelectedSummary,
+    };
+
     async function reloadCages(extra = {}) {
         if (filterStatus) filterStatus.textContent = "Loading cages...";
         try {
@@ -542,6 +750,7 @@
             if (filterStatus) {
                 filterStatus.textContent = `Showing ${cages.length} cage(s).`;
             }
+            updateSelectedSummary();
         } catch (err) {
             if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
         }
@@ -555,6 +764,7 @@
         if (!query) {
             lookupStatus.textContent = "";
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         let matches = MXGPicker.lookupCages(cages, query);
@@ -573,20 +783,25 @@
             return;
         }
         if (matches.length === 1) {
+            ensureCageInOptions(matches[0]);
             cageSelect.value = String(matches[0].id);
             lookupStatus.textContent = `Matched: ${matches[0].cage_id}`;
             lookupStatus.className = "muted small-print";
+            updateSelectedSummary();
             return;
         }
         const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
-        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}.`;
+        lookupStatus.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "..." : ""}.`;
         lookupStatus.className = "field-error";
+        updateSelectedSummary();
     }
 
     applyFilterBtn?.addEventListener("click", () => reloadCages());
     projectFilter?.addEventListener("change", reloadCagesDebounced);
     ownerFilter?.addEventListener("change", reloadCagesDebounced);
     strainFilter?.addEventListener("change", reloadCagesDebounced);
+    formProject?.addEventListener("change", updateSelectedSummary);
+    formStrain?.addEventListener("change", updateSelectedSummary);
     syncFormFiltersBtn?.addEventListener("click", () => {
         if (projectFilter && formProject) projectFilter.value = formProject.value || "";
         if (strainFilter && formStrain) strainFilter.value = formStrain.value || "";
@@ -602,6 +817,7 @@
                 syncLookupToSelect();
             }
         }
+        updateSelectedSummary();
     });
     reloadCages();
     syncLookupToSelect();

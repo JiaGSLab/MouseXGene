@@ -37,11 +37,32 @@ def filter_active_cage_choices_payload(
     scan_limit = max(limit * 5, limit)
     for cage in cages[:scan_limit]:
         mice = list(cage.current_mice.all())
-        project_ids = sorted({m.project_id for m in mice if m.project_id})
+        project_pairs = sorted(
+            {
+                (m.project_id, m.project.name)
+                for m in mice
+                if m.project_id and getattr(m, "project", None)
+            },
+            key=lambda item: item[1].lower(),
+        )
+        strain_pairs = sorted(
+            {
+                (m.strain_line_id, m.strain_line.line_name)
+                for m in mice
+                if m.strain_line_id and getattr(m, "strain_line", None)
+            },
+            key=lambda item: item[1].lower(),
+        )
+        sex_values = sorted({m.sex for m in mice if m.sex})
+        sex_counts = {
+            sex: sum(1 for m in mice if m.sex == sex)
+            for sex in sex_values
+        }
+        project_ids = [pid for pid, _name in project_pairs]
         owner_ids = sorted(
             {m.project.owner_id for m in mice if getattr(m, "project_id", None) and m.project.owner_id}
         )
-        strain_line_ids = sorted({m.strain_line_id for m in mice if m.strain_line_id})
+        strain_line_ids = [sid for sid, _name in strain_pairs]
         if mice:
             if project_id and project_id not in project_ids:
                 continue
@@ -54,9 +75,15 @@ def filter_active_cage_choices_payload(
                 "id": cage.pk,
                 "cage_id": cage.cage_id,
                 "is_empty": not mice,
+                "mouse_count": len(mice),
+                "mouse_uids": [m.mouse_uid for m in mice[:8]],
+                "sexes": sex_values,
+                "sex_counts": sex_counts,
                 "project_ids": project_ids,
+                "project_names": [name for _pid, name in project_pairs],
                 "owner_ids": owner_ids,
                 "strain_line_ids": strain_line_ids,
+                "strain_line_names": [name for _sid, name in strain_pairs],
             }
         )
         if len(payload) >= limit:
@@ -78,4 +105,5 @@ def cage_filter_form_context() -> dict:
         "cage_picker_api_url": "/cages/api/picker/",
         "mouse_picker_api_url": "/mice/api/picker/",
         "mouse_strain_map_api_url": "/mice/api/strain-line-map/",
+        "mouse_uid_check_api_url": "/mice/api/uid-check/",
     }

@@ -659,6 +659,7 @@ def _litter_wean_page_context(
         "litter_age_display": _litter_age_display(litter),
         "target_cage_choices": [],
         "cage_picker_api_url": cage_ctx.get("cage_picker_api_url", "/cages/api/picker/"),
+        "mouse_uid_check_api_url": cage_ctx.get("mouse_uid_check_api_url", "/mice/api/uid-check/"),
         "wean_project_options": cage_ctx["cage_project_options"],
         "wean_owner_options": cage_ctx["cage_owner_options"],
         "cage_strain_line_options": cage_ctx["cage_strain_line_options"],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 
@@ -11,6 +12,7 @@ from core.models import Project, format_project_owner_label
 from users.permissions import authenticated_required
 
 from .cage_form_helpers import filter_active_cage_choices_payload
+from .id_uniqueness import normalize_identifier
 from .models import Mouse, StrainLine
 
 
@@ -105,6 +107,50 @@ def cage_picker_api(request: HttpRequest) -> JsonResponse:
         limit=PICKER_CAGE_LIMIT,
     )
     return JsonResponse({"cages": cages, "truncated": len(cages) >= PICKER_CAGE_LIMIT})
+
+
+@authenticated_required
+def mouse_uid_check_api(request: HttpRequest) -> JsonResponse:
+    """Check proposed mouse UIDs before saving batch entry forms."""
+    raw_uids = request.GET.getlist("uid")
+    packed = request.GET.get("uids") or ""
+    if packed:
+        raw_uids.extend(part for part in packed.replace("\n", ",").split(","))
+
+    requested: list[str] = []
+    seen_keys: set[str] = set()
+    for raw in raw_uids:
+        uid = normalize_identifier(raw)
+        if not uid:
+            continue
+        key = uid.casefold()
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        requested.append(uid)
+        if len(requested) >= 100:
+            break
+
+    keys = [uid.casefold() for uid in requested]
+    existing_rows = (
+        Mouse.objects.annotate(uid_lower=Lower("mouse_uid"))
+        .filter(uid_lower__in=keys)
+        .values("id", "mouse_uid", "status")
+        .order_by("mouse_uid")
+    )
+    return JsonResponse(
+        {
+            "existing": [
+                {
+                    "id": row["id"],
+                    "uid": row["mouse_uid"],
+                    "status": row["status"],
+                }
+                for row in existing_rows
+            ],
+            "checked": requested,
+        }
+    )
 
 
 @authenticated_required

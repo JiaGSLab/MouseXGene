@@ -169,19 +169,20 @@
         </div>
         <p class="muted" id="wean-pup-count-summary" aria-live="polite"></p>
         <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
-            <button type="button" class="button" id="wean-update-pup-entries-btn">Update pup entries</button>
+            <button type="button" class="button" id="wean-update-pup-entries-btn">Refresh pup entries</button>
             <span class="muted small-print" id="wean-pup-entries-sync-hint"></span>
         </div>
         {% if wean_counts_source == "pups" %}
-            <small class="muted">Pre-filled from litter pup rows. Change male/female counts, then click <strong>Update pup entries</strong> or use +/−.</small>
+            <small class="muted">Pre-filled from litter pup rows. Changing male/female counts refreshes pup entries automatically.</small>
         {% elif wean_counts_source == "litter" %}
-            <small class="muted">Pre-filled from litter record ({{ litter_recorded_male_count }} male / {{ litter_recorded_female_count }} female). Adjust counts and update entries if needed.</small>
+            <small class="muted">Pre-filled from litter record ({{ litter_recorded_male_count }} male / {{ litter_recorded_female_count }} female). Adjust counts if needed.</small>
         {% else %}
-            <small class="muted">Enter male and female pup counts, then click <strong>Update pup entries</strong> or use +/−.</small>
+            <small class="muted">Enter male and female pup counts; pup entry rows refresh automatically.</small>
         {% endif %}
 
         <h2>Pup Entries <span class="muted" id="wean-pup-entries-count">({{ pup_forms|length }})</span></h2>
         <p class="muted small-print">Each pup must be Male or Female. Male rows come first, then female rows. Sex determines which cage the mouse is placed into.</p>
+        <p class="muted small-print" id="wean-pup-uid-status" aria-live="polite"></p>
         <div id="wean-pup-entries">
         {% for pup_form in pup_forms %}
             <div class="card pup-card">
@@ -255,6 +256,7 @@
                         <small class="muted">{{ wean_form.male_cage_lookup.help_text }}</small>
                     {% endif %}
                     <p class="muted small-print" id="wean-male-cage-lookup-status" aria-live="polite"></p>
+                    <p class="muted small-print" id="wean-male-cage-selected-summary" aria-live="polite"></p>
                     {% if wean_form.male_cage_lookup.errors %}
                         <div class="field-error">
                             {% for error in wean_form.male_cage_lookup.errors %}
@@ -287,6 +289,7 @@
                         <small class="muted">{{ wean_form.female_cage_lookup.help_text }}</small>
                     {% endif %}
                     <p class="muted small-print" id="wean-female-cage-lookup-status" aria-live="polite"></p>
+                    <p class="muted small-print" id="wean-female-cage-selected-summary" aria-live="polite"></p>
                     {% if wean_form.female_cage_lookup.errors %}
                         <div class="field-error">
                             {% for error in wean_form.female_cage_lookup.errors %}
@@ -314,6 +317,7 @@
 <script>
 (() => {
     const cageApiUrl = "{{ cage_picker_api_url|default:'/cages/api/picker/'|escapejs }}";
+    const uidCheckUrl = "{{ mouse_uid_check_api_url|default:'/mice/api/uid-check/'|escapejs }}";
     let cages = [];
     const projectFilter = document.getElementById("id_wean_project_filter");
     const ownerFilter = document.getElementById("id_wean_owner_filter");
@@ -332,6 +336,8 @@
     const femaleCountLabel = document.getElementById("wean-female-count-label");
     const maleLookupStatus = document.getElementById("wean-male-cage-lookup-status");
     const femaleLookupStatus = document.getElementById("wean-female-cage-lookup-status");
+    const maleSelectedSummary = document.getElementById("wean-male-cage-selected-summary");
+    const femaleSelectedSummary = document.getElementById("wean-female-cage-selected-summary");
     const aliveMax = {% if pup_max_count %}{{ pup_max_count }}{% else %}null{% endif %};
     const malePupCountInput = document.getElementById("id_male_pup_count");
     const femalePupCountInput = document.getElementById("id_female_pup_count");
@@ -343,10 +349,30 @@
     const pupEntriesContainer = document.getElementById("wean-pup-entries");
     const pupEntriesCount = document.getElementById("wean-pup-entries-count");
     const pupEntriesSyncHint = document.getElementById("wean-pup-entries-sync-hint");
+    const pupUidStatus = document.getElementById("wean-pup-uid-status");
     const updatePupEntriesBtn = document.getElementById("wean-update-pup-entries-btn");
     const weanForm = document.getElementById("wean-litter-form");
     const submitBtn = document.getElementById("wean-submit-btn");
+    const projectAssignmentMode = document.getElementById("id_project_assignment_mode");
+    const strainAssignmentMode = document.getElementById("id_strain_assignment_mode");
+    const sireProjectId = "{% if breeding_sire and breeding_sire.project_id %}{{ breeding_sire.project_id }}{% endif %}";
+    const damProjectId = "{% if wean_primary_dam and wean_primary_dam.project_id %}{{ wean_primary_dam.project_id }}{% endif %}";
+    const sireStrainId = "{% if sire_strain_line %}{{ sire_strain_line.pk }}{% endif %}";
+    const damStrainId = "{% if dam_strain_line %}{{ dam_strain_line.pk }}{% endif %}";
     let entriesSynced = true;
+    let existingPupUidKeys = new Set();
+
+    function targetProjectId() {
+        if (projectAssignmentMode?.value === "sire") return sireProjectId;
+        if (projectAssignmentMode?.value === "dam") return damProjectId;
+        return "";
+    }
+
+    function targetStrainId() {
+        if (strainAssignmentMode?.value === "sire") return sireStrainId;
+        if (strainAssignmentMode?.value === "dam") return damStrainId;
+        return "";
+    }
 
     function readPupCounts() {
         let male = Number.parseInt(String(malePupCountInput?.value || "0"), 10);
@@ -369,6 +395,74 @@
         if (malePupCountInput) malePupCountInput.value = String(male);
         if (femalePupCountInput) femalePupCountInput.value = String(female);
     }
+
+    function collectPupUidRows() {
+        return [...(pupEntriesContainer?.querySelectorAll('[name$="-mouse_uid"]') || [])]
+            .map((input) => {
+                const uid = String(input.value || "").trim();
+                return { input, uid, key: uid.toLowerCase() };
+            })
+            .filter((row) => row.uid);
+    }
+
+    function duplicatePupUids() {
+        const counts = new Map();
+        for (const row of collectPupUidRows()) {
+            counts.set(row.key, (counts.get(row.key) || 0) + 1);
+        }
+        return collectPupUidRows()
+            .filter((row) => counts.get(row.key) > 1)
+            .map((row) => row.uid);
+    }
+
+    function syncPupUidStatus({ checking = false } = {}) {
+        if (!pupUidStatus) return;
+        const duplicates = [...new Set(duplicatePupUids())];
+        const existing = collectPupUidRows()
+            .filter((row) => existingPupUidKeys.has(row.key))
+            .map((row) => row.uid);
+        if (duplicates.length) {
+            pupUidStatus.textContent = `Duplicate pup UID: ${duplicates.slice(0, 5).join(", ")}${duplicates.length > 5 ? "..." : ""}.`;
+            pupUidStatus.className = "field-error small-print";
+            return;
+        }
+        if (existing.length) {
+            pupUidStatus.textContent = `Already exists: ${existing.slice(0, 5).join(", ")}${existing.length > 5 ? "..." : ""}.`;
+            pupUidStatus.className = "field-error small-print";
+            return;
+        }
+        const count = collectPupUidRows().length;
+        if (checking) {
+            pupUidStatus.textContent = "Checking pup UIDs...";
+        } else {
+            pupUidStatus.textContent = count ? `${count} pup UID${count === 1 ? "" : "s"} ready.` : "";
+        }
+        pupUidStatus.className = "muted small-print";
+    }
+
+    async function refreshPupUidCheck() {
+        const uids = collectPupUidRows().map((row) => row.uid);
+        existingPupUidKeys = new Set();
+        syncPupUidStatus({ checking: Boolean(uids.length) });
+        if (!uids.length) return;
+        const params = new URLSearchParams();
+        uids.forEach((uid) => params.append("uid", uid));
+        try {
+            const response = await fetch(`${uidCheckUrl}?${params.toString()}`, { headers: { Accept: "application/json" } });
+            if (!response.ok) throw new Error(`Request failed (${response.status})`);
+            const data = await response.json();
+            existingPupUidKeys = new Set((data.existing || []).map((row) => String(row.uid || "").toLowerCase()));
+        } catch (err) {
+            pupUidStatus.textContent = `UID check failed: ${err.message}`;
+            pupUidStatus.className = "field-error small-print";
+            return;
+        }
+        syncPupUidStatus();
+    }
+
+    const refreshPupUidCheckDebounced = window.MXGPicker
+        ? MXGPicker.debounce(refreshPupUidCheck, 350)
+        : refreshPupUidCheck;
 
     function collectPupEntryValues() {
         const rows = [];
@@ -477,16 +571,21 @@
             pupEntriesSyncHint.className = "muted small-print";
         }
         syncPupCountSummary();
+        refreshPupUidCheckDebounced();
     }
 
     function markPupEntriesStale() {
         entriesSynced = false;
         if (pupEntriesSyncHint) {
-            pupEntriesSyncHint.textContent = "Counts changed — click Update pup entries or use +/− to refresh rows.";
-            pupEntriesSyncHint.className = "field-error small-print";
+            pupEntriesSyncHint.textContent = "Refreshing pup entries...";
+            pupEntriesSyncHint.className = "muted small-print";
         }
         syncSexLayout();
     }
+
+    const rebuildPupEntriesDebounced = window.MXGPicker
+        ? MXGPicker.debounce(() => rebuildPupEntriesClient(), 250)
+        : rebuildPupEntriesClient;
 
     function syncPupCountSummary() {
         const { male, female } = readPupCounts();
@@ -501,12 +600,16 @@
         syncSexLayout();
     }
 
-    function clearCageBlock(selectEl, lookupInput, statusEl) {
+    function clearCageBlock(selectEl, lookupInput, statusEl, summaryEl) {
         if (selectEl) selectEl.value = "";
         if (lookupInput) lookupInput.value = "";
         if (statusEl) {
             statusEl.textContent = "";
             statusEl.className = "muted small-print";
+        }
+        if (summaryEl) {
+            summaryEl.textContent = "";
+            summaryEl.className = "muted small-print";
         }
     }
 
@@ -533,6 +636,7 @@
     function onPupCountInput() {
         syncPupCountSummary();
         markPupEntriesStale();
+        rebuildPupEntriesDebounced();
     }
 
     function currentCageFilters() {
@@ -542,12 +646,53 @@
         };
     }
 
+    function selectedCageFor(selectEl) {
+        return MXGPicker.findCage(cages, selectEl?.value || "");
+    }
+
+    function cageWarningsFor(selectEl, sex) {
+        return MXGPicker.cageWarnings(selectedCageFor(selectEl), {
+            projectId: targetProjectId(),
+            strainLineId: targetStrainId(),
+            sex,
+        });
+    }
+
+    function updateCageSummary(selectEl, summaryEl, sex) {
+        if (!summaryEl) return;
+        const cage = selectedCageFor(selectEl);
+        if (!cage) {
+            summaryEl.textContent = "";
+            summaryEl.className = "muted small-print";
+            return;
+        }
+        const warnings = cageWarningsFor(selectEl, sex);
+        summaryEl.textContent = warnings.length
+            ? `${MXGPicker.describeCage(cage)} Warning: ${warnings.join("; ")}.`
+            : MXGPicker.describeCage(cage);
+        summaryEl.className = warnings.length ? "field-error small-print" : "muted small-print";
+    }
+
+    function syncCageSummaries() {
+        updateCageSummary(maleCageSelect, maleSelectedSummary, "M");
+        updateCageSummary(femaleCageSelect, femaleSelectedSummary, "F");
+    }
+
+    function ensureCageInOptions(cage) {
+        if (!cage) return;
+        if (!cages.some((item) => String(item.id) === String(cage.id))) {
+            cages = [cage, ...cages];
+            renderCageOptions();
+        }
+    }
+
     async function reloadCages(extra = {}) {
         if (!window.MXGPicker) return;
         if (filterStatus) filterStatus.textContent = "Loading cages...";
         try {
             cages = await MXGPicker.loadCages(cageApiUrl, { ...currentCageFilters(), ...extra });
             renderCageOptions();
+            syncCageSummaries();
         } catch (err) {
             if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
         }
@@ -567,7 +712,7 @@
         for (const cage of rows) {
             const opt = document.createElement("option");
             opt.value = String(cage.id);
-            opt.textContent = cage.is_empty ? `${cage.cage_id} (empty)` : cage.cage_id;
+            opt.textContent = MXGPicker.formatCageOption ? MXGPicker.formatCageOption(cage) : cage.cage_id;
             if (String(cage.id) === String(current)) opt.selected = true;
             selectEl.appendChild(opt);
         }
@@ -608,19 +753,24 @@
 
         if (maleSection) maleSection.hidden = maleCount === 0;
         if (femaleSection) femaleSection.hidden = femaleCount === 0;
-        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus);
-        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus);
+        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus, maleSelectedSummary);
+        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus, femaleSelectedSummary);
         if (maleCountLabel) maleCountLabel.textContent = maleCount ? `(${maleCount})` : "";
         if (femaleCountLabel) femaleCountLabel.textContent = femaleCount ? `(${femaleCount})` : "";
 
         const total = maleCount + femaleCount;
-        const canSubmit = total > 0 && entriesMatchCounts;
+        const maleCageReady = maleCount === 0 || Boolean(maleCageSelect?.value || maleCageLookup?.value.trim());
+        const femaleCageReady = femaleCount === 0 || Boolean(femaleCageSelect?.value || femaleCageLookup?.value.trim());
+        const cagesReady = maleCageReady && femaleCageReady;
+        const canSubmit = total > 0 && entriesMatchCounts && cagesReady;
         if (submitBtn) {
             submitBtn.disabled = !canSubmit;
             if (!canSubmit && !entriesSynced) {
-                submitBtn.title = "Click Update pup entries after changing male/female counts.";
+                submitBtn.title = "Pup entries are refreshing.";
             } else if (!canSubmit && total === 0) {
                 submitBtn.title = "Enter at least one male or female pup count.";
+            } else if (!canSubmit && !cagesReady) {
+                submitBtn.title = "Choose a cage for each sex before weaning.";
             } else if (!canSubmit) {
                 submitBtn.title = "Assign Male or Female to every pup before weaning.";
             } else {
@@ -632,10 +782,13 @@
                 sexSummary.textContent = "Enter male and/or female pup counts to show cage assignment.";
                 sexSummary.className = "muted";
             } else if (!entriesSynced) {
-                sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ → click Update pup entries to refresh rows and cages.`;
-                sexSummary.className = "field-error";
+                sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ -> refreshing pup rows.`;
+                sexSummary.className = "muted";
             } else if (unknownCount > 0) {
                 sexSummary.textContent = "Unknown sex present. Please assign Male/Female before weaning.";
+                sexSummary.className = "field-error";
+            } else if (!cagesReady) {
+                sexSummary.textContent = "Choose a cage for each sex before saving.";
                 sexSummary.className = "field-error";
             } else if (maleCount > 0 && femaleCount > 0) {
                 sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ → requires 2 cages: male cage + female cage`;
@@ -648,6 +801,7 @@
                 sexSummary.className = "muted";
             }
         }
+        syncCageSummaries();
     }
 
     async function syncLookupToSelect(lookupInput, selectEl, statusEl) {
@@ -656,6 +810,7 @@
         if (!query) {
             statusEl.textContent = "";
             statusEl.className = "muted small-print";
+            syncSexLayout();
             return;
         }
         let matches = MXGPicker.lookupCages(cages, query);
@@ -674,14 +829,17 @@
             return;
         }
         if (matches.length === 1) {
+            ensureCageInOptions(matches[0]);
             if (selectEl) selectEl.value = String(matches[0].id);
             statusEl.textContent = `Matched: ${matches[0].cage_id}`;
             statusEl.className = "muted small-print";
+            syncSexLayout();
             return;
         }
         const codes = matches.slice(0, 5).map((c) => c.cage_id).join(", ");
-        statusEl.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "…" : ""}. Enter a more specific cage ID.`;
+        statusEl.textContent = `Multiple matches (${matches.length}): ${codes}${matches.length > 5 ? "..." : ""}. Enter a more specific cage ID.`;
         statusEl.className = "field-error";
+        syncSexLayout();
     }
 
     applyFilterBtn?.addEventListener("click", () => reloadCages());
@@ -697,6 +855,7 @@
                 syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
             }
         }
+        syncSexLayout();
     });
     femaleCageSelect?.addEventListener("change", () => {
         if (femaleCageLookup && femaleCageSelect.value) {
@@ -706,10 +865,51 @@
                 syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus);
             }
         }
+        syncSexLayout();
     });
     weanForm?.addEventListener("change", (event) => {
         if (event.target && event.target.name && event.target.name.endsWith("-sex")) {
             syncSexLayout();
+        }
+    });
+    pupEntriesContainer?.addEventListener("input", (event) => {
+        if (event.target && event.target.name && event.target.name.endsWith("-mouse_uid")) {
+            syncPupUidStatus();
+            refreshPupUidCheckDebounced();
+        }
+    });
+    weanForm?.addEventListener("submit", (event) => {
+        const { male, female } = readPupCounts();
+        if (!entriesSynced) {
+            event.preventDefault();
+            window.alert("Pup entries are still refreshing. Please try saving again in a moment.");
+            return;
+        }
+        const duplicateUids = [...new Set(duplicatePupUids())];
+        if (duplicateUids.length) {
+            event.preventDefault();
+            window.alert(`Fix duplicate pup UID(s) before saving: ${duplicateUids.join(", ")}`);
+            return;
+        }
+        const existingUids = collectPupUidRows()
+            .filter((row) => existingPupUidKeys.has(row.key))
+            .map((row) => row.uid);
+        if (existingUids.length) {
+            event.preventDefault();
+            window.alert(`These pup UID(s) already exist and cannot be reused: ${existingUids.join(", ")}`);
+            return;
+        }
+        const warnings = [];
+        if (male > 0 && female > 0 && maleCageSelect?.value && maleCageSelect.value === femaleCageSelect?.value) {
+            warnings.push("male and female pups are assigned to the same cage");
+        }
+        if (male > 0) warnings.push(...cageWarningsFor(maleCageSelect, "M").map((warning) => `male cage: ${warning}`));
+        if (female > 0) warnings.push(...cageWarningsFor(femaleCageSelect, "F").map((warning) => `female cage: ${warning}`));
+        if (warnings.length) {
+            const warningText = warnings.map((warning) => `- ${warning}`).join("\n");
+            if (!window.confirm(`Cage assignment warning:\n${warningText}\n\nCreate weaned pups anyway?`)) {
+                event.preventDefault();
+            }
         }
     });
 
@@ -728,8 +928,10 @@
     function syncStrainFields() {
         if (!strainMode || !newStrainRow) return;
         newStrainRow.hidden = strainMode.value !== "new";
+        syncCageSummaries();
     }
     strainMode?.addEventListener("change", syncStrainFields);
+    projectAssignmentMode?.addEventListener("change", syncCageSummaries);
 
     reloadCages();
     syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
@@ -743,6 +945,7 @@
             pupEntriesSyncHint.textContent = `${total} pup entr${total === 1 ? "y" : "ies"} (${male}♂ · ${female}♀).`;
         }
     }
+    refreshPupUidCheckDebounced();
 })();
 </script>
 {% endblock %}
