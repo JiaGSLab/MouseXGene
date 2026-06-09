@@ -437,6 +437,9 @@ class Mouse(ActorStampedModel):
         indexes = [
             models.Index(fields=["status", "birth_date"], name="colony_mouse_status_birth"),
             models.Index(fields=["status", "mouse_uid"], name="colony_mouse_status_uid"),
+            models.Index(fields=["status", "project"], name="colony_mouse_status_proj"),
+            models.Index(fields=["status", "strain_line"], name="colony_mouse_status_strain"),
+            models.Index(fields=["status", "current_cage"], name="colony_mouse_status_cage"),
         ]
 
     def clean(self) -> None:

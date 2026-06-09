@@ -166,14 +166,8 @@
 <script>
 (async () => {
     const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
+    const mouseStrainMapApiUrl = "{{ mouse_strain_map_api_url|default:'/mice/api/strain-line-map/'|escapejs }}";
     let mouseStrainMap = {};
-    if (window.MXGPicker) {
-        try {
-            mouseStrainMap = await MXGPicker.loadMouseStrainMap("{{ mouse_strain_map_api_url|default:'/mice/api/strain-line-map/'|escapejs }}");
-        } catch (err) {
-            console.warn("Failed to load mouse strain map", err);
-        }
-    }
     const defaultProjectEl = document.getElementById("strain-default-project-map");
     const strainDefaultProjectMap = defaultProjectEl
         ? JSON.parse(defaultProjectEl.textContent || "{}")
@@ -254,6 +248,22 @@
         return lociForStrainId(strainId);
     }
 
+    async function ensureParentStrainMap() {
+        if (!window.MXGPicker) return;
+        const ids = [sireSelect?.value || "", damSelect?.value || ""]
+            .filter(Boolean)
+            .filter((id) => !mouseStrainMap[id]);
+        if (!ids.length) return;
+        try {
+            Object.assign(
+                mouseStrainMap,
+                await MXGPicker.loadMouseStrainMap(mouseStrainMapApiUrl, { ids: ids.join(",") })
+            );
+        } catch (err) {
+            console.warn("Failed to load parent strain map", err);
+        }
+    }
+
     function optionsFor(item, sex) {
         const locusType = item.locus_type || "custom";
         const chromosomeType = item.chromosome_type || "autosomal";
@@ -273,7 +283,8 @@
         return { options: Y_LINKED_MALE_OPTIONS, disabled: false };
     }
 
-    function renderRows() {
+    async function renderRows() {
+        await ensureParentStrainMap();
         const strainId = strainSelect ? strainSelect.value : "";
         const sex = document.getElementById("id_sex")?.value || "U";
         const loci = dedupeLoci([
@@ -394,7 +405,7 @@
         sexSelect.addEventListener("change", renderRows);
     }
     applyDefaultProjectFromStrain();
-    renderRows();
+    await renderRows();
 
     const formEl = document.querySelector("form.form-layout");
     const statusSelect = document.getElementById("id_status");

@@ -12,7 +12,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db import transaction
-from django.db.models import Count, F, Max, OuterRef, Q, Subquery, IntegerField, Value
+from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from openpyxl import Workbook
@@ -168,25 +168,37 @@ def _build_import_overwrite_context(
 
 def _apply_cage_import_rows(rows: list[dict], *, acting_user) -> tuple[int, int]:
     create_rows, update_rows = _partition_import_rows(rows)
+    affected_cage_ids = [row["cage_id"] for row in rows]
     with transaction.atomic():
         if create_rows:
             Cage.objects.bulk_create(
-                [Cage(**{k: v for k, v in row.items() if k != "_update"}) for row in create_rows]
+                [
+                    Cage(
+                        **{k: v for k, v in row.items() if k != "_update"},
+                        created_by=acting_user,
+                        updated_by=acting_user,
+                    )
+                    for row in create_rows
+                ]
             )
-            Cage.objects.filter(cage_id__in=[row["cage_id"] for row in create_rows]).update(
-                created_by_id=acting_user.pk,
-                updated_by_id=acting_user.pk,
-            )
+        cages_by_id = Cage.objects.in_bulk([row["cage_id"] for row in update_rows], field_name="cage_id")
+        now = timezone.now()
+        cages_to_update: list[Cage] = []
         for row in update_rows:
-            cage = Cage.objects.get(cage_id=row["cage_id"])
+            cage = cages_by_id[row["cage_id"]]
             for field in CAGE_IMPORT_UPDATE_FIELDS:
                 setattr(cage, field, row[field])
-            cage.updated_by_id = acting_user.pk
-            cage.save(update_fields=[*CAGE_IMPORT_UPDATE_FIELDS, "updated_by_id", "updated_at"])
-    for row in create_rows + update_rows:
-        cage = Cage.objects.get(cage_id=row["cage_id"])
-        sync_cage_breeding_workflow(cage)
-        sync_cage_status_from_mice(cage)
+            cage.updated_by = acting_user
+            cage.updated_at = now
+            cages_to_update.append(cage)
+        if cages_to_update:
+            Cage.objects.bulk_update(
+                cages_to_update,
+                [*CAGE_IMPORT_UPDATE_FIELDS, "updated_by", "updated_at"],
+            )
+        for cage in Cage.objects.filter(cage_id__in=affected_cage_ids).order_by("cage_id"):
+            sync_cage_breeding_workflow(cage)
+            sync_cage_status_from_mice(cage)
     return len(create_rows), len(update_rows)
 
 
@@ -490,9 +502,10 @@ def _filtered_cages_queryset(request: HttpRequest):
             if include_inactive != "yes":
                 cages = cages.filter(status=Cage.Status.ACTIVE)
     if owner and not strain_line:
-        cages = cages.filter(current_mice__project__owner_id=owner)
+        owner_mice = Mouse.objects.filter(current_cage_id=OuterRef("pk"), project__owner_id=owner)
         if include_inactive != "yes":
-            cages = cages.filter(current_mice__status=Mouse.Status.ACTIVE)
+            owner_mice = owner_mice.filter(status=Mouse.Status.ACTIVE)
+        cages = cages.filter(Exists(owner_mice))
     if q:
         cages = cages.filter(cage_id__icontains=q)
     if room:
@@ -869,17 +882,16 @@ def _strain_default_project_map() -> dict[str, str]:
     }
     single_project_lines = (
         StrainLine.objects.filter(is_active=True, default_project_id__isnull=True)
-        .annotate(project_count=Count("mice__project", distinct=True))
-        .filter(project_count=1)
-    )
-    for line in single_project_lines:
-        project_id = (
-            Mouse.objects.filter(strain_line=line)
-            .values_list("project_id", flat=True)
-            .first()
+        .annotate(
+            project_count=Count("mice__project", distinct=True),
+            inferred_project_id=Min("mice__project_id"),
         )
+        .filter(project_count=1)
+        .values_list("pk", "inferred_project_id")
+    )
+    for line_id, project_id in single_project_lines:
         if project_id:
-            out[str(line.pk)] = str(project_id)
+            out[str(line_id)] = str(project_id)
     return out
 
 

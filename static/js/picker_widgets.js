@@ -78,8 +78,8 @@
             const data = await fetchJson(`${apiUrl}${buildQuery(filters)}`);
             return data.mice || [];
         },
-        async loadMouseStrainMap(apiUrl) {
-            return fetchJson(apiUrl);
+        async loadMouseStrainMap(apiUrl, filters = {}) {
+            return fetchJson(`${apiUrl}${buildQuery(filters)}`);
         },
         renderCageSelect(cageSelect, cages, selectedId) {
             const current = cageSelect.value || selectedId || "";

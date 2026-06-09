@@ -28,7 +28,7 @@ class MouseStrainLineLockTests(TestCase):
             project=self.project,
         )
 
-    def test_non_admin_form_keeps_existing_strain_line(self):
+    def test_non_admin_form_can_change_existing_strain_line(self):
         form = MouseForm(
             data={
                 "mouse_uid": self.mouse.mouse_uid,
@@ -41,16 +41,17 @@ class MouseStrainLineLockTests(TestCase):
             user=self.member,
         )
         self.assertTrue(form.is_valid(), form.errors)
-        self.assertEqual(form.cleaned_data["strain_line"].pk, self.strain_a.pk)
+        self.assertEqual(form.cleaned_data["strain_line"].pk, self.strain_b.pk)
 
-    def test_edit_page_disables_strain_line_for_non_admin(self):
+    def test_edit_page_allows_strain_line_for_non_admin(self):
         client = Client()
         client.login(username="strainmember", password="x")
         response = client.get(reverse("mice:mouse_edit", args=[self.mouse.pk]))
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        self.assertIn("Only lab admins can change strain line after it is set.", html)
+        self.assertNotIn("Only lab admins can change strain line after it is set.", html)
         self.assertIn('id="id_strain_line"', html)
+        self.assertIn(f'<option value="{self.strain_b.pk}">Strain-B</option>', html)
 
     def test_edit_page_includes_status_initial_attribute(self):
         client = Client()

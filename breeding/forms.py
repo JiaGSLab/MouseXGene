@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django import forms
 from django.forms import formset_factory, inlineformset_factory
-from django.db import ProgrammingError, OperationalError
+from django.db import IntegrityError, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -10,6 +10,7 @@ from colony.models import Cage, Mouse
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
 
 CAGE_LOOKUP_MATCH_LIMIT = 20
+BREEDING_CODE_RETRY_LIMIT = 5
 
 
 def resolve_cage_from_lookup(lookup: str) -> tuple[Cage | None, str | None]:
@@ -86,6 +87,7 @@ class BreedingForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._auto_generated_breeding_code = False
         self.fields["breeding_code"].help_text = "Example: BR-2026-001 or Lyz2xTet2-01."
         self.fields["breeding_code"].required = False
         self.fields["breeding_code"].widget.attrs.update(
@@ -188,6 +190,9 @@ class BreedingForm(forms.ModelForm):
 
         if not (cleaned_data.get("breeding_code") or "").strip():
             cleaned_data["breeding_code"] = self._generate_breeding_code()
+            self._auto_generated_breeding_code = True
+        else:
+            self._auto_generated_breeding_code = False
 
         male = cleaned_data.get("male")
         female_1 = cleaned_data.get("female_1")
@@ -267,9 +272,29 @@ class BreedingForm(forms.ModelForm):
     def save(self, commit=True):
         if not (self.cleaned_data.get("breeding_code") or "").strip():
             self.cleaned_data["breeding_code"] = self._generate_breeding_code()
-        breeding = super().save(commit=commit)
+            self._auto_generated_breeding_code = True
+        self.instance.breeding_code = self.cleaned_data["breeding_code"]
         if not commit:
+            breeding = super().save(commit=False)
             return breeding
+
+        last_error: IntegrityError | None = None
+        for _attempt in range(BREEDING_CODE_RETRY_LIMIT):
+            try:
+                with transaction.atomic():
+                    breeding = super().save(commit=True)
+                break
+            except IntegrityError as exc:
+                if not self._auto_generated_breeding_code:
+                    raise
+                last_error = exc
+                self.cleaned_data["breeding_code"] = self._generate_breeding_code()
+                self.instance.breeding_code = self.cleaned_data["breeding_code"]
+        else:
+            if last_error is not None:
+                raise last_error
+            raise IntegrityError("Failed to allocate a breeding code.")
+
         selected = list(self.cleaned_data.get("extra_females") or [])
         selected_ids = {m.id for m in selected}
         BreedingExtraFemale.objects.filter(breeding=breeding).exclude(mouse_id__in=selected_ids).delete()

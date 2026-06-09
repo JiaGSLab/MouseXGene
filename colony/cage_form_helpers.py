@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 
 from core.models import Project
 from core.owner_filters import project_owner_wean_options
 
-from .models import Cage, StrainLine
+from .models import Cage, Mouse, StrainLine
 
 
 def active_cage_choices_payload() -> list[dict]:
@@ -22,20 +22,31 @@ def filter_active_cage_choices_payload(
     q: str = "",
     limit: int = 400,
 ) -> list[dict]:
-    cages = (
-        Cage.objects.filter(status=Cage.Status.ACTIVE)
-        .prefetch_related(
-            "current_mice__project",
-            "current_mice__project__owner",
-            "current_mice__strain_line",
-        )
-        .order_by("cage_id")
+    mice_for_cage = Mouse.objects.filter(current_cage_id=OuterRef("pk"))
+    cages = Cage.objects.filter(status=Cage.Status.ACTIVE).annotate(
+        _has_current_mice=Exists(mice_for_cage),
     )
     if q:
         cages = cages.filter(cage_id__icontains=q)
+    if project_id:
+        cages = cages.annotate(
+            _matches_project=Exists(mice_for_cage.filter(project_id=project_id)),
+        ).filter(Q(_has_current_mice=False) | Q(_matches_project=True))
+    if owner_id:
+        cages = cages.annotate(
+            _matches_owner=Exists(mice_for_cage.filter(project__owner_id=owner_id)),
+        ).filter(Q(_has_current_mice=False) | Q(_matches_owner=True))
+    if strain_line_id:
+        cages = cages.annotate(
+            _matches_strain=Exists(mice_for_cage.filter(strain_line_id=strain_line_id)),
+        ).filter(Q(_has_current_mice=False) | Q(_matches_strain=True))
+    cages = cages.prefetch_related(
+        "current_mice__project",
+        "current_mice__project__owner",
+        "current_mice__strain_line",
+    ).order_by("cage_id")
     payload: list[dict] = []
-    scan_limit = max(limit * 5, limit)
-    for cage in cages[:scan_limit]:
+    for cage in cages[:limit]:
         mice = list(cage.current_mice.all())
         project_pairs = sorted(
             {
@@ -63,13 +74,6 @@ def filter_active_cage_choices_payload(
             {m.project.owner_id for m in mice if getattr(m, "project_id", None) and m.project.owner_id}
         )
         strain_line_ids = [sid for sid, _name in strain_pairs]
-        if mice:
-            if project_id and project_id not in project_ids:
-                continue
-            if owner_id and owner_id not in owner_ids:
-                continue
-            if strain_line_id and strain_line_id not in strain_line_ids:
-                continue
         payload.append(
             {
                 "id": cage.pk,

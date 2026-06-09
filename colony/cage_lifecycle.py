@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from breeding.models import Breeding, BreedingExtraFemale
@@ -12,6 +12,7 @@ from breeding.models import Breeding, BreedingExtraFemale
 from .models import Cage, Mouse
 
 logger = logging.getLogger(__name__)
+BREEDING_CODE_RETRY_LIMIT = 5
 
 
 def _generate_breeding_code() -> str:
@@ -22,6 +23,39 @@ def _generate_breeding_code() -> str:
         if not Breeding.objects.filter(breeding_code=candidate).exists():
             return candidate
         n += 1
+
+
+def _create_breeding_with_code_retry(
+    *,
+    cage: Cage,
+    breeding_type: str,
+    sire: Mouse,
+    dams: list[Mouse],
+) -> Breeding:
+    last_error: IntegrityError | None = None
+    for _attempt in range(BREEDING_CODE_RETRY_LIMIT):
+        breeding = Breeding(
+            breeding_code=_generate_breeding_code(),
+            cage=cage,
+            breeding_type=breeding_type,
+            male=sire,
+            female_1=dams[0],
+            female_2=dams[1] if len(dams) > 1 else None,
+            start_date=timezone.localdate(),
+            status=Breeding.Status.SETUP,
+            active=True,
+            notes="Auto-created when cage purpose is breeding.",
+        )
+        try:
+            with transaction.atomic():
+                breeding.full_clean(validate_unique=False)
+                breeding.save()
+            return breeding
+        except IntegrityError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise IntegrityError("Failed to allocate a breeding code.")
 
 
 def mark_cage_as_breeding(cage: Cage | None) -> None:
@@ -95,20 +129,12 @@ def ensure_breeding_for_cage(cage: Cage | None) -> Breeding | None:
 
     with transaction.atomic():
         if existing is None:
-            breeding = Breeding(
-                breeding_code=_generate_breeding_code(),
+            breeding = _create_breeding_with_code_retry(
                 cage=cage,
                 breeding_type=breeding_type,
-                male=sire,
-                female_1=dams[0],
-                female_2=dams[1] if len(dams) > 1 else None,
-                start_date=timezone.localdate(),
-                status=Breeding.Status.SETUP,
-                active=True,
-                notes="Auto-created when cage purpose is breeding.",
+                sire=sire,
+                dams=dams,
             )
-            breeding.full_clean()
-            breeding.save()
         else:
             breeding = existing
             breeding.breeding_type = breeding_type

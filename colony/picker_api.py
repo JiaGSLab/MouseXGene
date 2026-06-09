@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 
-from core.models import Project, format_project_owner_label
+from core.models import format_project_owner_label
 from users.permissions import authenticated_required
 
 from .cage_form_helpers import filter_active_cage_choices_payload
 from .id_uniqueness import normalize_identifier
-from .models import Mouse, StrainLine
+from .models import Mouse
 
 
 PICKER_MOUSE_LIMIT = 400
@@ -27,6 +26,31 @@ def _parse_int_param(value: str | None) -> int | None:
     return int(raw)
 
 
+def _truthy_param(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_int_list_params(request: HttpRequest, *, limit: int = 500) -> list[int]:
+    raw_values = list(request.GET.getlist("id"))
+    packed = request.GET.get("ids") or ""
+    if packed:
+        raw_values.extend(part for part in packed.replace("\n", ",").split(","))
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_values:
+        text = str(raw or "").strip()
+        if not text.isdigit():
+            continue
+        value = int(text)
+        if value in seen:
+            continue
+        seen.add(value)
+        ids.append(value)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
 @authenticated_required
 def mouse_picker_api(request: HttpRequest) -> JsonResponse:
     owner_id = _parse_int_param(request.GET.get("owner_id") or request.GET.get("owner"))
@@ -35,6 +59,7 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
     q = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip().upper()
     exclude_breeding_id = _parse_int_param(request.GET.get("exclude_breeding_id"))
+    include_inactive = _truthy_param(request.GET.get("include_inactive"))
 
     mice = Mouse.objects.select_related(
         "project",
@@ -42,6 +67,8 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
         "project__owner__profile",
         "strain_line",
     ).order_by("mouse_uid")
+    if not include_inactive:
+        mice = mice.filter(status=Mouse.Status.ACTIVE)
     if owner_id:
         mice = mice.filter(project__owner_id=owner_id)
     if project_id:
@@ -155,6 +182,12 @@ def mouse_uid_check_api(request: HttpRequest) -> JsonResponse:
 
 @authenticated_required
 def mouse_strain_line_map_api(request: HttpRequest) -> JsonResponse:
-    """Active mice id -> strain_line_id for genotype template JS (bounded payload)."""
-    rows = Mouse.objects.filter(strain_line_id__isnull=False).values_list("pk", "strain_line_id")[:5000]
+    """Mouse id -> strain_line_id for selected parents in genotype template JS."""
+    ids = _parse_int_list_params(request, limit=200)
+    rows_qs = Mouse.objects.filter(strain_line_id__isnull=False)
+    if ids:
+        rows_qs = rows_qs.filter(pk__in=ids)
+    rows = rows_qs.values_list("pk", "strain_line_id")
+    if not ids:
+        rows = rows[:5000]
     return JsonResponse({str(pk): str(strain_id) for pk, strain_id in rows})

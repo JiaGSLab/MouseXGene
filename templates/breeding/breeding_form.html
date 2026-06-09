@@ -235,7 +235,10 @@
             project_id: projectFilter.value,
             strain_line_id: strainFilter.value,
         };
-        if (excludeBreedingId) filters.exclude_breeding_id = excludeBreedingId;
+        if (excludeBreedingId) {
+            filters.exclude_breeding_id = excludeBreedingId;
+            filters.include_inactive = "1";
+        }
         return filters;
     }
     function ensureHiddenOption(selectEl, mouse) {

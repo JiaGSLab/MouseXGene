@@ -48,6 +48,9 @@ class Breeding(ActorStampedModel):
         indexes = [
             models.Index(fields=["active", "start_date"], name="breeding_active_start"),
             models.Index(fields=["status", "active"], name="breeding_status_active"),
+            models.Index(fields=["active", "male"], name="breeding_active_male"),
+            models.Index(fields=["active", "female_1"], name="breeding_active_f1"),
+            models.Index(fields=["active", "female_2"], name="breeding_active_f2"),
         ]
 
     def clean(self) -> None:
