@@ -7,6 +7,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from colony.models import Cage, Mouse
+from core.models import format_project_owner_label
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
 
 CAGE_LOOKUP_MATCH_LIMIT = 20
@@ -219,7 +220,29 @@ class BreedingForm(forms.ModelForm):
         }
         warning_messages: list[str] = []
         today = timezone.localdate()
-        for mouse in self._selected_mice():
+        selected_mice = self._selected_mice()
+        project_labels: dict[int, str] = {}
+        owner_labels: dict[int, str] = {}
+        for mouse in selected_mice:
+            if mouse.project_id:
+                project_labels.setdefault(mouse.project_id, mouse.project.name)
+                if mouse.project.owner_id:
+                    owner = mouse.project.owner
+                    owner_labels.setdefault(
+                        owner.pk,
+                        (format_project_owner_label(owner) or owner.get_username() or str(owner.pk)).strip(),
+                    )
+        if len(project_labels) > 1:
+            warning_messages.append(
+                "Selected breeders come from multiple projects: "
+                f"{', '.join(project_labels.values())}. Saving is allowed."
+            )
+        if len(owner_labels) > 1:
+            warning_messages.append(
+                "Selected breeders come from multiple users: "
+                f"{', '.join(owner_labels.values())}. Saving is allowed."
+            )
+        for mouse in selected_mice:
             age_days = (today - mouse.birth_date).days if mouse.birth_date else None
             if mouse.status in status_warn_set:
                 warning_messages.append(

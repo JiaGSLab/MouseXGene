@@ -2,7 +2,13 @@
     function buildQuery(params) {
         const q = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => {
-            if (value !== undefined && value !== null && String(value).trim() !== "") {
+            if (Array.isArray(value)) {
+                value.forEach((item) => {
+                    if (item !== undefined && item !== null && String(item).trim() !== "") {
+                        q.append(key, String(item));
+                    }
+                });
+            } else if (value !== undefined && value !== null && String(value).trim() !== "") {
                 q.set(key, String(value));
             }
         });

@@ -91,3 +91,38 @@ class BreedingCageLookupTests(TestCase):
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["cage"], self.cage_b)
+
+    def test_form_warns_but_allows_cross_project_breeders(self):
+        user_a = get_user_model().objects.create_user(username="cross_project_a", first_name="Alice")
+        user_b = get_user_model().objects.create_user(username="cross_project_b", first_name="Bob")
+        strain = StrainLine.objects.create(line_name="CrossProjectStrain", name="CrossProjectStrain")
+        project_a = Project.objects.create(name="Cross Project A", owner=user_a)
+        project_b = Project.objects.create(name="Cross Project B", owner=user_b)
+        sire = Mouse.objects.create(
+            mouse_uid="M-CROSS-SIRE",
+            sex=Mouse.Sex.MALE,
+            project=project_a,
+            strain_line=strain,
+        )
+        dam = Mouse.objects.create(
+            mouse_uid="M-CROSS-DAM",
+            sex=Mouse.Sex.FEMALE,
+            project=project_b,
+            strain_line=strain,
+        )
+
+        form = BreedingForm(
+            data={
+                "sire": sire.pk,
+                "dams": [dam.pk],
+                "cage": self.cage_a.pk,
+                "breeding_type": "pair",
+                "start_date": "2026-01-01",
+                "status": "setup",
+                "active": True,
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(any("multiple projects" in msg for msg in form.warning_messages))
+        self.assertTrue(any("multiple users" in msg for msg in form.warning_messages))

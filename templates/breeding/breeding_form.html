@@ -31,8 +31,7 @@
             <div class="filter-grid">
                 <div class="form-row">
                     <label for="id_mouse_owner_filter">Filter by user</label>
-                    <select id="id_mouse_owner_filter" class="filter-control">
-                        <option value="">All users</option>
+                    <select id="id_mouse_owner_filter" class="filter-control" multiple size="4" data-empty-label="All users">
                         {% for owner in mouse_owner_options %}
                             <option value="{{ owner.id }}">{{ owner.name }}</option>
                         {% endfor %}
@@ -40,8 +39,7 @@
                 </div>
                 <div class="form-row">
                     <label for="id_mouse_project_filter">Filter by project</label>
-                    <select id="id_mouse_project_filter" class="filter-control">
-                        <option value="">All projects</option>
+                    <select id="id_mouse_project_filter" class="filter-control" multiple size="4" data-empty-label="All projects">
                         {% for project in cage_project_options %}
                             <option value="{{ project.id }}">{{ project.name }}</option>
                         {% endfor %}
@@ -68,6 +66,8 @@
                             <th>Sire</th>
                             <th>Dam</th>
                             <th>Mouse UID</th>
+                            <th>Project</th>
+                            <th>Owner</th>
                             <th>Sex</th>
                             <th>Age (days)</th>
                             <th>Genotype</th>
@@ -227,14 +227,134 @@
     let selectedDamIds = new Set(Array.from(damsSelect.selectedOptions || []).map((o) => o.value));
     const mouseById = () => Object.fromEntries(mice.map((m) => [String(m.id), m]));
 
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+    function selectedValues(select) {
+        return Array.from(select?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+    }
+    function selectedMouseIds() {
+        return [...new Set([selectedSireId, ...selectedDamIds].filter(Boolean))];
+    }
+    function summarizeOptions(labels, fallback) {
+        if (!labels.length) return fallback;
+        if (labels.length <= 2) return labels.join(", ");
+        return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
+    }
+    function bindMultiFilter(select, fallbackLabel) {
+        if (!select) return;
+        const root = document.createElement("div");
+        root.className = "multi-select";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "multi-select__button";
+        button.setAttribute("aria-expanded", "false");
+        const summary = document.createElement("span");
+        const caret = document.createElement("span");
+        caret.className = "multi-select__caret";
+        caret.setAttribute("aria-hidden", "true");
+        button.appendChild(summary);
+        button.appendChild(caret);
+
+        const panel = document.createElement("div");
+        panel.className = "multi-select__panel";
+        panel.hidden = true;
+        const search = document.createElement("input");
+        search.type = "search";
+        search.className = "multi-select__search";
+        search.placeholder = "Search";
+        search.autocomplete = "off";
+        const optionsWrap = document.createElement("div");
+        optionsWrap.className = "multi-select__options";
+        const empty = document.createElement("p");
+        empty.className = "multi-select__empty muted small-print";
+        empty.textContent = "No matching options.";
+        empty.hidden = true;
+        panel.appendChild(search);
+        panel.appendChild(optionsWrap);
+        panel.appendChild(empty);
+        root.appendChild(button);
+        root.appendChild(panel);
+        select.insertAdjacentElement("afterend", root);
+
+        const rows = Array.from(select.options).map((option) => {
+            const id = `${select.id}-option-${option.value}`;
+            const label = document.createElement("label");
+            label.className = "multi-select__option";
+            label.setAttribute("for", id);
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.id = id;
+            checkbox.checked = option.selected;
+            const text = document.createElement("span");
+            text.textContent = option.textContent;
+            checkbox.addEventListener("change", () => {
+                option.selected = checkbox.checked;
+                syncSummary();
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            optionsWrap.appendChild(label);
+            return { option, checkbox, label, text: option.textContent.toLowerCase() };
+        });
+
+        function syncSummary() {
+            rows.forEach((row) => {
+                row.checkbox.checked = row.option.selected;
+            });
+            const labels = rows.filter((row) => row.option.selected).map((row) => row.option.textContent.trim());
+            summary.textContent = summarizeOptions(labels, fallbackLabel);
+        }
+        function filterRows() {
+            const query = search.value.trim().toLowerCase();
+            let visibleCount = 0;
+            rows.forEach((row) => {
+                const visible = !query || row.text.includes(query);
+                row.label.hidden = !visible;
+                if (visible) visibleCount += 1;
+            });
+            empty.hidden = visibleCount > 0;
+        }
+        function setOpen(open) {
+            panel.hidden = !open;
+            button.setAttribute("aria-expanded", String(open));
+            if (open) {
+                search.focus();
+                search.select();
+            }
+        }
+
+        select.classList.add("is-js-hidden");
+        select.setAttribute("aria-hidden", "true");
+        select.tabIndex = -1;
+        syncSummary();
+        button.addEventListener("click", () => setOpen(panel.hidden));
+        search.addEventListener("input", filterRows);
+        root.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                setOpen(false);
+                button.focus();
+            }
+        });
+        document.addEventListener("click", (event) => {
+            if (!root.contains(event.target)) setOpen(false);
+        });
+    }
     function sexLabel(sex) {
         return sex === "M" ? "Male" : (sex === "F" ? "Female" : "Unknown");
     }
     function pickerFilters() {
         const filters = {
-            owner_id: ownerFilter.value,
-            project_id: projectFilter.value,
+            owner_ids: selectedValues(ownerFilter),
+            project_ids: selectedValues(projectFilter),
             strain_line_id: strainFilter.value,
+            selected_ids: selectedMouseIds().join(","),
         };
         if (excludeBreedingId) {
             filters.exclude_breeding_id = excludeBreedingId;
@@ -272,7 +392,7 @@
     }
     function renderBreederTable() {
         if (!mice.length) {
-            tableBody.innerHTML = '<tr><td colspan="7" class="muted">No mice match current filters.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="9" class="muted">No mice match current filters.</td></tr>';
             return;
         }
         const rows = mice.map((m) => {
@@ -290,24 +410,26 @@
                 <tr data-mouse-id="${id}">
                     <td>${sireCell}</td>
                     <td>${damsCell}</td>
-                    <td>${m.uid || "—"}</td>
+                    <td>${escapeHtml(m.uid || "—")}</td>
+                    <td>${escapeHtml(m.project_name || "—")}</td>
+                    <td>${escapeHtml(m.project_owner_name || "—")}</td>
                     <td>${sexLabel(m.sex)}</td>
                     <td>${age}</td>
-                    <td>${genotype}</td>
-                    <td>${status}</td>
+                    <td>${escapeHtml(genotype)}</td>
+                    <td>${escapeHtml(status)}</td>
                 </tr>
             `;
         });
         tableBody.innerHTML = rows.join("");
     }
     async function reloadMice() {
-        tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading mice...</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="9" class="muted">Loading mice...</td></tr>';
         try {
             mice = await MXGPicker.loadMice(mouseApiUrl, pickerFilters());
             renderBreederTable();
             syncHiddenSelects();
         } catch (err) {
-            tableBody.innerHTML = `<tr><td colspan="7" class="field-error">Failed to load mice: ${err.message}</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="9" class="field-error">Failed to load mice: ${escapeHtml(err.message)}</td></tr>`;
         }
     }
     function onTableChange(event) {
@@ -328,6 +450,8 @@
         }
         syncHiddenSelects();
     }
+    bindMultiFilter(ownerFilter, ownerFilter.dataset.emptyLabel || "All users");
+    bindMultiFilter(projectFilter, projectFilter.dataset.emptyLabel || "All projects");
     tableBody.addEventListener("change", onTableChange);
     ownerFilter.addEventListener("change", reloadMice);
     projectFilter.addEventListener("change", reloadMice);

@@ -26,6 +26,27 @@ def _parse_int_param(value: str | None) -> int | None:
     return int(raw)
 
 
+def _parse_int_list_param(request: HttpRequest, *names: str, limit: int = 500) -> list[int]:
+    raw_values: list[str] = []
+    for name in names:
+        raw_values.extend(request.GET.getlist(name))
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_values:
+        for part in str(raw or "").replace("\n", ",").split(","):
+            text = part.strip()
+            if not text.isdigit():
+                continue
+            value = int(text)
+            if value in seen:
+                continue
+            seen.add(value)
+            ids.append(value)
+            if len(ids) >= limit:
+                return ids
+    return ids
+
+
 def _truthy_param(value: str | None) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -53,26 +74,28 @@ def _parse_int_list_params(request: HttpRequest, *, limit: int = 500) -> list[in
 
 @authenticated_required
 def mouse_picker_api(request: HttpRequest) -> JsonResponse:
-    owner_id = _parse_int_param(request.GET.get("owner_id") or request.GET.get("owner"))
-    project_id = _parse_int_param(request.GET.get("project_id") or request.GET.get("project"))
+    owner_ids = _parse_int_list_param(request, "owner_ids", "owner_id", "owner")
+    project_ids = _parse_int_list_param(request, "project_ids", "project_id", "project")
     strain_line_id = _parse_int_param(request.GET.get("strain_line_id") or request.GET.get("strain_line"))
+    selected_ids = _parse_int_list_param(request, "selected_ids", "selected_id")
     q = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip().upper()
     exclude_breeding_id = _parse_int_param(request.GET.get("exclude_breeding_id"))
     include_inactive = _truthy_param(request.GET.get("include_inactive"))
 
-    mice = Mouse.objects.select_related(
+    base_mice = Mouse.objects.select_related(
         "project",
         "project__owner",
         "project__owner__profile",
         "strain_line",
-    ).order_by("mouse_uid")
+    )
+    mice = base_mice
     if not include_inactive:
         mice = mice.filter(status=Mouse.Status.ACTIVE)
-    if owner_id:
-        mice = mice.filter(project__owner_id=owner_id)
-    if project_id:
-        mice = mice.filter(project_id=project_id)
+    if owner_ids:
+        mice = mice.filter(project__owner_id__in=owner_ids)
+    if project_ids:
+        mice = mice.filter(project_id__in=project_ids)
     if strain_line_id:
         mice = mice.filter(strain_line_id=strain_line_id)
     if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}:
@@ -83,6 +106,9 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
             | Q(ear_tag__icontains=q)
             | Q(toe_tag__icontains=q)
         )
+    if selected_ids:
+        mice = (mice | base_mice.filter(pk__in=selected_ids)).distinct()
+    mice = mice.order_by("mouse_uid")
     mice = list(mice[:PICKER_MOUSE_LIMIT])
     mouse_ids = [m.pk for m in mice]
 
