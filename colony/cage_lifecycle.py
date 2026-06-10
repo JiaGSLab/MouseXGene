@@ -133,12 +133,15 @@ def remove_terminal_mouse_from_current_cage(
 
     affected_cages: dict[int, Cage] = {}
     with transaction.atomic():
-        locked_mouse = Mouse.objects.select_for_update().select_related("current_cage").get(pk=mouse.pk)
+        locked_mouse = Mouse.objects.select_for_update().get(pk=mouse.pk)
         if locked_mouse.status not in TERMINAL_MOUSE_STATUSES:
             return ()
 
-        if locked_mouse.current_cage_id and locked_mouse.current_cage is not None:
-            affected_cages[locked_mouse.current_cage_id] = locked_mouse.current_cage
+        current_cage = None
+        if locked_mouse.current_cage_id:
+            current_cage = Cage.objects.filter(pk=locked_mouse.current_cage_id).first()
+            if current_cage is not None:
+                affected_cages[current_cage.pk] = current_cage
 
         current_memberships = list(
             CageMembership.objects.select_for_update()
@@ -164,13 +167,13 @@ def remove_terminal_mouse_from_current_cage(
             membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
 
         if (
-            locked_mouse.current_cage_id
+            current_cage is not None
             and locked_mouse.current_cage_id not in current_membership_cage_ids
-            and not CageMembership.objects.filter(mouse=locked_mouse, cage=locked_mouse.current_cage).exists()
+            and not CageMembership.objects.filter(mouse=locked_mouse, cage=current_cage).exists()
         ):
             CageMembership.objects.create(
                 mouse=locked_mouse,
-                cage=locked_mouse.current_cage,
+                cage=current_cage,
                 start_date=resolved_exit_date,
                 end_date=resolved_exit_date,
                 is_current=False,
