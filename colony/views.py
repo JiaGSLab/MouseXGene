@@ -64,7 +64,9 @@ from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
 from colony.mouse_age import mouse_list_age_band
 from colony.cage_lifecycle import (
+    TERMINAL_MOUSE_STATUSES,
     breeding_setup_message,
+    remove_terminal_mouse_from_current_cage,
     sync_cage_breeding_workflow,
     sync_cage_status_from_mice,
 )
@@ -3681,14 +3683,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 ensure_can_edit_project_data(request.user, old_project)
             target_status = form.cleaned_data.get("status")
             if target_status != previous_status:
-                terminal = {
-                    Mouse.Status.ARCHIVED,
-                    Mouse.Status.DEAD,
-                    Mouse.Status.CULLED,
-                    Mouse.Status.TRANSFERRED,
-                    Mouse.Status.EUTHANIZED,
-                }
-                if target_status in terminal or previous_status in terminal:
+                if target_status in TERMINAL_MOUSE_STATUSES or previous_status in TERMINAL_MOUSE_STATUSES:
                     ensure_can_archive_or_change_terminal_status(request.user, new_project)
             new_strain = form.cleaned_data.get("strain_line")
             strain_changed = bool(original_strain_id and new_strain and original_strain_id != new_strain.id)
@@ -3735,6 +3730,10 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 return redirect("mice:mouse_detail", pk=mouse.pk)
             msg = summarize_modelform_changes(form)
             mouse = form.save()
+            terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+                mouse,
+                reason=f"Mouse status changed to {mouse.get_status_display()} via Edit Mouse.",
+            )
             template_loci = _resolved_template_loci_for_context(
                 strain_line=mouse.strain_line,
                 sire=mouse.sire,
@@ -3781,6 +3780,11 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 )
             if filled:
                 messages.info(request, f"Applied {filled} genotype row(s) from mouse form.")
+            if terminal_cage_ids:
+                messages.info(
+                    request,
+                    f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.",
+                )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(instance=mouse, user=request.user)
@@ -3884,6 +3888,10 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
     if not mouse.death_reason:
         mouse.death_reason = "Marked as ended via workflow action."
     mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+    terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+        mouse,
+        reason="Mouse marked as euthanized via End Mouse workflow.",
+    )
 
     log_audit_event(
         user=request.user,
@@ -3891,6 +3899,8 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
         obj=mouse,
         message=f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status}.",
     )
+    if terminal_cage_ids:
+        messages.info(request, f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.")
     messages.success(request, f"Mouse {mouse.mouse_uid} marked as euthanized.")
     return redirect("mice:mouse_detail", pk=mouse.pk)
 

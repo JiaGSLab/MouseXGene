@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from breeding.models import Breeding, BreedingExtraFemale
 
-from .models import Cage, Mouse
+from .models import Cage, CageMembership, Mouse
 
 logger = logging.getLogger(__name__)
 BREEDING_CODE_RETRY_LIMIT = 5
+TERMINAL_MOUSE_STATUSES = frozenset(
+    {
+        Mouse.Status.ARCHIVED,
+        Mouse.Status.DEAD,
+        Mouse.Status.CULLED,
+        Mouse.Status.TRANSFERRED,
+        Mouse.Status.EUTHANIZED,
+    }
+)
 
 
 def _generate_breeding_code() -> str:
@@ -87,6 +97,96 @@ def sync_cage_status_from_mice(cage: Cage | None) -> bool:
     cage.status = Cage.Status.CLOSED
     cage.save(update_fields=["status", "updated_at"])
     return True
+
+
+def _terminal_mouse_exit_date(mouse: Mouse, fallback: date | None = None) -> date:
+    return mouse.euthanasia_date or mouse.death_date or fallback or timezone.localdate()
+
+
+def _sync_cage_after_terminal_mouse_exit(cage: Cage | None) -> bool:
+    if cage is None:
+        return False
+    if sync_cage_status_from_mice(cage):
+        return True
+    if cage.status != Cage.Status.ACTIVE:
+        return False
+    if cage.current_mice.exists():
+        return False
+    cage.status = Cage.Status.CLOSED
+    cage.save(update_fields=["status", "updated_at"])
+    return True
+
+
+def remove_terminal_mouse_from_current_cage(
+    mouse: Mouse,
+    *,
+    exit_date: date | None = None,
+    reason: str = "",
+) -> tuple[str, ...]:
+    """
+    Terminal mice should keep historical cage memberships but stop occupying a current cage.
+
+    Returns the affected cage IDs for user-facing messages and audit logs.
+    """
+    if mouse.status not in TERMINAL_MOUSE_STATUSES:
+        return ()
+
+    affected_cages: dict[int, Cage] = {}
+    with transaction.atomic():
+        locked_mouse = Mouse.objects.select_for_update().select_related("current_cage").get(pk=mouse.pk)
+        if locked_mouse.status not in TERMINAL_MOUSE_STATUSES:
+            return ()
+
+        if locked_mouse.current_cage_id and locked_mouse.current_cage is not None:
+            affected_cages[locked_mouse.current_cage_id] = locked_mouse.current_cage
+
+        current_memberships = list(
+            CageMembership.objects.select_for_update()
+            .filter(mouse=locked_mouse, is_current=True)
+            .select_related("cage")
+        )
+        for membership in current_memberships:
+            affected_cages[membership.cage_id] = membership.cage
+
+        if not affected_cages and not current_memberships:
+            return ()
+
+        resolved_exit_date = _terminal_mouse_exit_date(locked_mouse, fallback=exit_date)
+        membership_reason = (reason or f"Mouse status changed to {locked_mouse.get_status_display()}.")[:128]
+        current_membership_cage_ids = {membership.cage_id for membership in current_memberships}
+        for membership in current_memberships:
+            membership_end_date = resolved_exit_date
+            if membership.start_date and membership_end_date < membership.start_date:
+                membership_end_date = membership.start_date
+            membership.end_date = membership_end_date
+            membership.is_current = False
+            membership.reason = membership_reason
+            membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+
+        if (
+            locked_mouse.current_cage_id
+            and locked_mouse.current_cage_id not in current_membership_cage_ids
+            and not CageMembership.objects.filter(mouse=locked_mouse, cage=locked_mouse.current_cage).exists()
+        ):
+            CageMembership.objects.create(
+                mouse=locked_mouse,
+                cage=locked_mouse.current_cage,
+                start_date=resolved_exit_date,
+                end_date=resolved_exit_date,
+                is_current=False,
+                reason=membership_reason,
+            )
+
+        if locked_mouse.current_cage_id:
+            locked_mouse.current_cage = None
+            locked_mouse.save(update_fields=["current_cage", "updated_at"])
+            mouse.current_cage = None
+            mouse.current_cage_id = None
+
+        for cage in affected_cages.values():
+            _sync_cage_after_terminal_mouse_exit(cage)
+
+    return tuple(sorted(cage.cage_id for cage in affected_cages.values()))
 
 
 def sync_cage_status_for_cage_id(cage_id: int | None) -> bool:
