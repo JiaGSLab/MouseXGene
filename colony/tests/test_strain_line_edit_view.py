@@ -73,6 +73,13 @@ class StrainLineEditViewTests(TestCase):
         self.assertEqual(list(self.line.projects.values_list("pk", flat=True)), [self.project.pk])
         self.assertEqual(self.line.expected_loci_list(), ["LocusA", "LocusB"])
 
+    def test_edit_view_uses_project_dropdown_multiselect(self):
+        response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="strain-project-dropdown"')
+        self.assertContains(response, 'id="strain-project-summary"')
+        self.assertNotContains(response, 'size="8"')
+
     def test_edit_view_detail_shows_saved_changes(self):
         url = reverse("colony:strain_line_edit", args=[self.line.pk])
         self.client.post(url, self._post_data())

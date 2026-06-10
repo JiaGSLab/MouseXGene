@@ -511,7 +511,7 @@ class StrainLineForm(forms.ModelForm):
         ]
         widgets = {
             "owner": forms.Select(attrs={"class": "filter-control"}),
-            "projects": forms.SelectMultiple(attrs={"class": "filter-control", "size": 8}),
+            "projects": forms.SelectMultiple(attrs={"class": "filter-control strain-project-select"}),
             "species": forms.Select(attrs={"class": "filter-control"}),
             "source": forms.TextInput(attrs={"class": "filter-control"}),
             "expected_loci_template": forms.Textarea(attrs={"rows": 3}),

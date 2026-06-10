@@ -57,7 +57,32 @@
 
         <div class="form-row">
             <label for="{{ form.projects.id_for_label }}">{{ form.projects.label }}</label>
-            {{ form.projects }}
+            <div class="strain-project-field">
+                {{ form.projects }}
+                <div class="multi-select" id="strain-project-dropdown" data-project-multiselect hidden>
+                    <button
+                        type="button"
+                        class="multi-select__button"
+                        id="strain-project-toggle"
+                        aria-expanded="false"
+                        aria-controls="strain-project-panel"
+                    >
+                        <span id="strain-project-summary">No projects selected</span>
+                        <span class="multi-select__caret" aria-hidden="true"></span>
+                    </button>
+                    <div class="multi-select__panel" id="strain-project-panel" hidden>
+                        <input
+                            type="search"
+                            class="multi-select__search"
+                            id="strain-project-search"
+                            placeholder="Search projects"
+                            autocomplete="off"
+                        >
+                        <div class="multi-select__options" id="strain-project-options"></div>
+                        <p class="multi-select__empty muted small-print" id="strain-project-empty" hidden>No matching projects.</p>
+                    </div>
+                </div>
+            </div>
             {% if form.projects.help_text %}
                 <small class="muted">{{ form.projects.help_text }}</small>
             {% endif %}
@@ -192,6 +217,106 @@
 (() => {
     const CUSTOM = "__custom__";
 
+    function bindProjectMultiSelect() {
+        const select = document.getElementById("{{ form.projects.id_for_label }}");
+        const root = document.getElementById("strain-project-dropdown");
+        const button = document.getElementById("strain-project-toggle");
+        const panel = document.getElementById("strain-project-panel");
+        const optionsWrap = document.getElementById("strain-project-options");
+        const search = document.getElementById("strain-project-search");
+        const summary = document.getElementById("strain-project-summary");
+        const empty = document.getElementById("strain-project-empty");
+        if (!select || !root || !button || !panel || !optionsWrap || !summary) return;
+
+        const optionRows = Array.from(select.options).map((option) => {
+            const id = `strain-project-option-${option.value || option.index}`;
+            const label = document.createElement("label");
+            label.className = "multi-select__option";
+            label.setAttribute("for", id);
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.id = id;
+            checkbox.checked = option.selected;
+            checkbox.addEventListener("change", () => {
+                option.selected = checkbox.checked;
+                syncSummary();
+            });
+
+            const text = document.createElement("span");
+            text.textContent = option.textContent;
+
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            optionsWrap.appendChild(label);
+            return { option, checkbox, label, text: option.textContent.toLowerCase() };
+        });
+
+        function syncSummary() {
+            const selected = optionRows.filter((row) => row.option.selected);
+            if (!selected.length) {
+                summary.textContent = "No projects selected";
+            } else if (selected.length === 1) {
+                summary.textContent = selected[0].option.textContent;
+            } else {
+                summary.textContent = `${selected.length} projects selected`;
+            }
+        }
+
+        function syncFromSelect() {
+            optionRows.forEach((row) => {
+                row.checkbox.checked = row.option.selected;
+            });
+            syncSummary();
+        }
+
+        function filterOptions() {
+            const query = (search?.value || "").trim().toLowerCase();
+            let visibleCount = 0;
+            optionRows.forEach((row) => {
+                const isVisible = !query || row.text.includes(query);
+                row.label.hidden = !isVisible;
+                if (isVisible) visibleCount += 1;
+            });
+            if (empty) empty.hidden = visibleCount > 0;
+        }
+
+        function setOpen(isOpen) {
+            panel.hidden = !isOpen;
+            button.setAttribute("aria-expanded", String(isOpen));
+            if (isOpen && search) {
+                search.focus();
+                search.select();
+            }
+        }
+
+        root.hidden = false;
+        select.classList.add("is-js-hidden");
+        select.setAttribute("aria-hidden", "true");
+        select.tabIndex = -1;
+        syncSummary();
+
+        button.addEventListener("click", () => setOpen(panel.hidden));
+        search?.addEventListener("input", filterOptions);
+        document.addEventListener("click", (event) => {
+            if (!root.contains(event.target)) {
+                setOpen(false);
+            }
+        });
+        root.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                setOpen(false);
+                button.focus();
+            }
+        });
+        select.form?.addEventListener("reset", () => {
+            window.setTimeout(() => {
+                syncFromSelect();
+                filterOptions();
+            }, 0);
+        });
+    }
+
     function bindCustomToggle(selectId, rowId) {
         const select = document.getElementById(selectId);
         const row = document.getElementById(rowId);
@@ -204,6 +329,7 @@
     }
     bindCustomToggle("id_category", "category-custom-row");
     bindCustomToggle("id_background", "background-custom-row");
+    bindProjectMultiSelect();
 
     const hidden = document.getElementById("{{ form.expected_loci_template.id_for_label }}");
     const hiddenConfig = document.getElementById("id_expected_loci_config");

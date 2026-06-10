@@ -810,6 +810,109 @@ body.col-resize-active * {
     resize: vertical;
 }
 
+.is-js-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+}
+
+.multi-select {
+    position: relative;
+    width: 100%;
+}
+
+.multi-select__button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    min-height: 38px;
+    padding: 9px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    color: #111827;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.multi-select__button:hover,
+.multi-select__button:focus {
+    border-color: #93c5fd;
+    outline: none;
+}
+
+.multi-select__button span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.multi-select__caret {
+    flex: 0 0 auto;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #6b7280;
+}
+
+.multi-select__panel {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.multi-select__search {
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.multi-select__options {
+    display: grid;
+    gap: 2px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.multi-select__option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    color: #111827;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.multi-select__option:hover {
+    background: #eef6ff;
+}
+
+.multi-select__option input {
+    width: auto;
+    margin: 0;
+}
+
+.multi-select__empty {
+    margin: 8px 4px 0;
+}
+
 .formset-card {
     margin-bottom: 10px;
 }
