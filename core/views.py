@@ -376,7 +376,7 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
     memberships = list(project.memberships.select_related("user", "user__profile").order_by("user__username"))
     can_manage = is_admin(request.user) or can_manage_project_settings(request.user, project)
     strain_lines = list(
-        StrainLine.objects.filter(mice__project=project)
+        StrainLine.objects.filter(Q(projects=project) | Q(mice__project=project))
         .select_related("owner", "owner__profile", "created_by", "created_by__profile")
         .annotate(
             project_mice_count=Count("mice", filter=Q(mice__project=project), distinct=True),

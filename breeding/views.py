@@ -728,7 +728,7 @@ def resolve_wean_strain_line(
     user,
     litter_display: str,
     breeding_code: str,
-    default_project=None,
+    project=None,
 ) -> tuple[StrainLine | None, str | None]:
     if mode == WeanLitterForm.StrainAssignmentMode.SIRE:
         if not sire or not sire.strain_line_id:
@@ -747,9 +747,10 @@ def resolve_wean_strain_line(
         line_name=name,
         name=name,
         owner=user,
-        default_project=default_project,
         notes=f"Created during litter wean for {litter_display} ({breeding_code}).",
     )
+    if project is not None:
+        line.projects.add(project)
     return line, None
 
 
@@ -1802,7 +1803,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         user=request.user,
                         litter_display=litter.litter_id_display,
                         breeding_code=breeding.breeding_code,
-                        default_project=inherited_project,
+                        project=inherited_project,
                     )
                     if strain_err:
                         wean_form.add_error("strain_assignment_mode", strain_err)

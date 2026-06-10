@@ -73,13 +73,11 @@ class StrainLine(ActorStampedModel):
         on_delete=models.PROTECT,
         related_name="owned_strain_lines",
     )
-    default_project = models.ForeignKey(
+    projects = models.ManyToManyField(
         "core.Project",
-        null=True,
         blank=True,
-        on_delete=models.SET_NULL,
-        related_name="default_for_strain_lines",
-        help_text="Optional default project when creating mice on this strain line.",
+        related_name="strain_lines",
+        help_text="Projects this strain line belongs to or can be used in.",
     )
 
     class Meta:
@@ -725,3 +723,11 @@ def _sync_cages_after_mouse_save(sender, instance: Mouse, **kwargs) -> None:
         current_cage_id=instance.current_cage_id,
         previous_cage_id=getattr(instance, "_mxg_previous_cage_id", None),
     )
+
+
+@receiver(post_save, sender=Mouse)
+def _sync_strain_line_projects_after_mouse_save(sender, instance: Mouse, **kwargs) -> None:
+    if kwargs.get("raw"):
+        return
+    if instance.strain_line_id and instance.project_id:
+        instance.strain_line.projects.add(instance.project_id)

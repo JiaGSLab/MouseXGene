@@ -56,14 +56,14 @@
         </div>
 
         <div class="form-row">
-            <label for="{{ form.default_project.id_for_label }}">{{ form.default_project.label }}</label>
-            {{ form.default_project }}
-            {% if form.default_project.help_text %}
-                <small class="muted">{{ form.default_project.help_text }}</small>
+            <label for="{{ form.projects.id_for_label }}">{{ form.projects.label }}</label>
+            {{ form.projects }}
+            {% if form.projects.help_text %}
+                <small class="muted">{{ form.projects.help_text }}</small>
             {% endif %}
-            {% if form.default_project.errors %}
+            {% if form.projects.errors %}
                 <div class="field-error">
-                    {% for error in form.default_project.errors %}
+                    {% for error in form.projects.errors %}
                         <div>{{ error }}</div>
                     {% endfor %}
                 </div>

@@ -13,7 +13,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db import transaction
-from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery, IntegerField, Value
+from django.db.models import Count, Exists, F, Max, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from openpyxl import Workbook
@@ -936,34 +936,17 @@ def _strain_template_loci_map() -> dict[str, list[dict[str, str]]]:
     return out
 
 
-def _strain_default_project_map() -> dict[str, str]:
-    out: dict[str, str] = {
-        str(line.pk): str(line.default_project_id)
-        for line in StrainLine.objects.filter(is_active=True, default_project_id__isnull=False)
-    }
-    single_project_lines = (
-        StrainLine.objects.filter(is_active=True, default_project_id__isnull=True)
-        .annotate(
-            project_count=Count("mice__project", distinct=True),
-            inferred_project_id=Min("mice__project_id"),
-        )
-        .filter(project_count=1)
-        .values_list("pk", "inferred_project_id")
-    )
-    for line_id, project_id in single_project_lines:
-        if project_id:
-            out[str(line_id)] = str(project_id)
+def _strain_single_project_map() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in StrainLine.objects.filter(is_active=True).prefetch_related("projects"):
+        project_ids = [project.pk for project in line.projects.all()]
+        if len(project_ids) == 1:
+            out[str(line.pk)] = str(project_ids[0])
     return out
 
 
-def _effective_default_project_id(line: StrainLine) -> int | None:
-    if line.default_project_id:
-        return line.default_project_id
-    project_ids = list(
-        Mouse.objects.filter(strain_line=line)
-        .values_list("project_id", flat=True)
-        .distinct()
-    )
+def _single_strain_project_id(line: StrainLine) -> int | None:
+    project_ids = list(line.projects.values_list("pk", flat=True).distinct())
     if len(project_ids) == 1:
         return project_ids[0]
     return None
@@ -2291,8 +2274,10 @@ def _strain_line_usage_annotations() -> dict:
 @authenticated_required
 def strain_line_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
-    lines = StrainLine.objects.select_related("owner", "owner__profile", "created_by", "created_by__profile").annotate(
-        pdf_count=Count("documents")
+    lines = (
+        StrainLine.objects.select_related("owner", "owner__profile", "created_by", "created_by__profile")
+        .prefetch_related("projects")
+        .annotate(pdf_count=Count("documents", distinct=True))
     )
     if q:
         lines = lines.filter(
@@ -2306,7 +2291,8 @@ def strain_line_list(request: HttpRequest) -> HttpResponse:
             | Q(owner__first_name__icontains=q)
             | Q(owner__last_name__icontains=q)
             | Q(owner__profile__display_name__icontains=q)
-        )
+            | Q(projects__name__icontains=q)
+        ).distinct()
     sort_key = (request.GET.get("sort") or "").strip()
     if sort_key in {"active_mice", "active_cages", "active_breedings", "active_litters"}:
         lines = lines.annotate(**_strain_line_usage_annotations())
@@ -2335,14 +2321,12 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .select_related(
             "owner",
             "owner__profile",
-            "default_project",
-            "default_project__owner",
-            "default_project__owner__profile",
             "created_by",
             "created_by__profile",
             "updated_by",
             "updated_by__profile",
-        ),
+        )
+        .prefetch_related("projects", "projects__owner", "projects__owner__profile"),
         pk=pk,
     )
     documents = list(
@@ -2351,7 +2335,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
     audit_entries = audit_entries_for_object("StrainLine", line.pk)
     actors = merge_actor_labels(line, audit_entries)
     related_projects = list(
-        Project.objects.filter(mice__strain_line=line)
+        Project.objects.filter(Q(strain_lines=line) | Q(mice__strain_line=line))
         .select_related("owner", "owner__profile")
         .annotate(
             strain_active_mice_count=Count(
@@ -3629,14 +3613,14 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
             if strain_id.isdigit():
                 line = (
                     StrainLine.objects.filter(pk=int(strain_id))
-                    .select_related("default_project")
+                    .prefetch_related("projects")
                     .first()
                 )
                 if line:
                     shared_initial["strain_line"] = line.pk
-                    default_project_id = _effective_default_project_id(line)
-                    if default_project_id:
-                        shared_initial["project"] = default_project_id
+                    project_id = _single_strain_project_id(line)
+                    if project_id:
+                        shared_initial["project"] = project_id
         shared_form = MouseBatchSharedForm(user=request.user, initial=shared_initial)
         entry_forms = _batch_entry_forms_from_request(request, batch_rows)
         if draft_loaded:
@@ -3649,8 +3633,8 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
         "page_title": "Create Mice",
         "cancel_url": "mice:mouse_list",
         "strain_template_loci_map": _strain_template_loci_map(),
-        "strain_default_project_map": _strain_default_project_map(),
-        "apply_strain_default_project": True,
+        "strain_project_map": _strain_single_project_map(),
+        "apply_strain_project": True,
         "existing_genotype_map": {},
         "posted_genotype_rows": posted_genotype_rows,
         "has_saved_draft": bool(draft),
@@ -3796,7 +3780,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "cancel_url": "mice:mouse_detail",
         "cancel_kwargs": {"pk": mouse.pk},
         "strain_template_loci_map": _strain_template_loci_map(),
-        "apply_strain_default_project": False,
+        "apply_strain_project": False,
         "existing_genotype_map": {
             (c.locus_name or "").strip(): (c.zygosity or "")
             for c in mouse.genotype_components.all()

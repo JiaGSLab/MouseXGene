@@ -5,6 +5,7 @@
             <tr>
                 {% sort_th "name" "Name" %}
                 {% sort_th "owner" "Owner" %}
+                <th scope="col">Projects</th>
                 {% sort_th "loci" "Included loci" %}
                 {% sort_th "pdf_count" "PDFs" extra_class="col-num-right" %}
                 {% sort_th "active_mice" "Mice" extra_class="col-num-right" %}
@@ -24,6 +25,17 @@
                         </a>
                     </td>
                     <td>{{ line.owner_display }}</td>
+                    <td>
+                        {% with projects=line.projects.all %}
+                            {% if projects %}
+                                {% for project in projects %}
+                                    <a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a>{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            {% else %}
+                                <span class="cell-empty">—</span>
+                            {% endif %}
+                        {% endwith %}
+                    </td>
                     <td>
                         {% with loci=line.expected_loci_list %}
                             {% if loci %}
@@ -63,7 +75,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td class="empty-row" colspan="10">{{ empty_message }}</td>
+                    <td class="empty-row" colspan="11">{{ empty_message }}</td>
                 </tr>
             {% endfor %}
         </tbody>

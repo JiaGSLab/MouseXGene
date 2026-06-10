@@ -500,7 +500,7 @@ class StrainLineForm(forms.ModelForm):
         fields = [
             "name",
             "owner",
-            "default_project",
+            "projects",
             "species",
             "source",
             "category",
@@ -511,7 +511,7 @@ class StrainLineForm(forms.ModelForm):
         ]
         widgets = {
             "owner": forms.Select(attrs={"class": "filter-control"}),
-            "default_project": forms.Select(attrs={"class": "filter-control"}),
+            "projects": forms.SelectMultiple(attrs={"class": "filter-control", "size": 8}),
             "species": forms.Select(attrs={"class": "filter-control"}),
             "source": forms.TextInput(attrs={"class": "filter-control"}),
             "expected_loci_template": forms.Textarea(attrs={"rows": 3}),
@@ -520,9 +520,9 @@ class StrainLineForm(forms.ModelForm):
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
             "owner": "Lab contact (shown on Strain Lines list). Defaults to the creating user; you can change it here.",
-            "default_project": (
-                "Optional. When set, New Mouse pre-selects this project when this strain line is chosen. "
-                "You can still change project per mouse."
+            "projects": (
+                "Projects this strain line belongs to or can be used in. New Mouse auto-selects the project "
+                "only when exactly one project is linked."
             ),
             "species": "Species for this strain line record.",
             "source": "Optional source or vendor reference.",
@@ -536,7 +536,7 @@ class StrainLineForm(forms.ModelForm):
         labels = {
             "name": "Strain line name",
             "owner": "Owner",
-            "default_project": "Default project (optional)",
+            "projects": "Projects",
             "expected_loci_template": "Included loci",
         }
 
@@ -580,9 +580,11 @@ class StrainLineForm(forms.ModelForm):
         self.fields["owner"].label_from_instance = (
             lambda u: (format_project_owner_label(u) or u.get_username() or "").strip() or str(u.pk)
         )
-        self.fields["default_project"].queryset = Project.objects.filter(is_active=True).order_by("name")
-        self.fields["default_project"].required = False
-        self.fields["default_project"].empty_label = "— None (choose per mouse) —"
+        project_qs = Project.objects.filter(is_active=True)
+        if self.instance and self.instance.pk:
+            project_qs = (project_qs | self.instance.projects.all()).distinct()
+        self.fields["projects"].queryset = project_qs.order_by("name")
+        self.fields["projects"].required = False
         self.fields["expected_loci_template"].required = False
         entries: list[dict[str, str]] = []
         if self.instance and self.instance.pk:
@@ -698,6 +700,16 @@ class StrainLineForm(forms.ModelForm):
             obj.owner = self._actor_user
         if commit:
             obj.save()
+            self.save_m2m()
+            used_project_ids = [
+                project_id
+                for project_id in Mouse.objects.filter(strain_line=obj)
+                .exclude(project_id__isnull=True)
+                .values_list("project_id", flat=True)
+                .distinct()
+            ]
+            if used_project_ids:
+                obj.projects.add(*used_project_ids)
             if not obj.owner_id and getattr(obj, "created_by_id", None):
                 StrainLine.objects.filter(pk=obj.pk).update(owner_id=obj.created_by_id)
                 obj.owner_id = obj.created_by_id

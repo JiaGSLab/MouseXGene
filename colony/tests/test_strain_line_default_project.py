@@ -10,7 +10,7 @@ from core.models import Project, ProjectMembership
 from users.models import UserProfile
 
 
-class StrainLineDefaultProjectTests(TestCase):
+class StrainLineProjectsTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="strainproj", password="x")
         UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
@@ -31,10 +31,10 @@ class StrainLineDefaultProjectTests(TestCase):
         )
         self.cage = Cage.objects.create(cage_id="DP-C1")
 
-    def test_strain_line_form_saves_default_project(self):
+    def test_strain_line_form_saves_projects(self):
         data = {
             "name": "DP-Line",
-            "default_project": str(self.project_a.pk),
+            "projects": [str(self.project_a.pk)],
             "species": "mouse",
             "source": "",
             "category": StrainLine.Category.COMPOUND_STRAIN,
@@ -55,7 +55,7 @@ class StrainLineDefaultProjectTests(TestCase):
         form = StrainLineForm(data, instance=self.strain, user=self.user)
         self.assertTrue(form.is_valid(), form.errors)
         saved = form.save()
-        self.assertEqual(saved.default_project_id, self.project_a.pk)
+        self.assertEqual(list(saved.projects.values_list("pk", flat=True)), [self.project_a.pk])
 
     def test_strain_line_detail_lists_related_projects(self):
         Mouse.objects.create(
@@ -76,7 +76,14 @@ class StrainLineDefaultProjectTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alpha Project")
         self.assertContains(response, "Beta Project")
-        self.assertNotContains(response, "Default for New Mouse")
+        self.assertNotContains(response, "Default project")
+
+    def test_project_detail_lists_linked_strain_line_without_mice(self):
+        self.strain.projects.add(self.project_a)
+        response = self.client.get(reverse("project_detail", args=[self.project_a.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "DP-Line")
+        self.assertContains(response, "0")
 
     def test_mouse_create_infers_project_when_strain_has_single_project(self):
         Mouse.objects.create(
@@ -92,13 +99,12 @@ class StrainLineDefaultProjectTests(TestCase):
         self.assertContains(response, f'value="{self.project_a.pk}" selected')
         self.assertContains(response, f'"{self.strain.pk}": "{self.project_a.pk}"')
 
-    def test_mouse_create_prefills_project_from_strain_line(self):
-        self.strain.default_project = self.project_b
-        self.strain.save(update_fields=["default_project"])
+    def test_mouse_create_prefills_project_from_single_strain_project(self):
+        self.strain.projects.set([self.project_b])
         url = reverse("mice:mouse_create") + f"?strain_line_id={self.strain.pk}"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f'value="{self.strain.pk}" selected')
         self.assertContains(response, f'value="{self.project_b.pk}" selected')
-        self.assertContains(response, "strain-default-project-map")
+        self.assertContains(response, "strain-project-map")
         self.assertContains(response, f'"{self.strain.pk}": "{self.project_b.pk}"')

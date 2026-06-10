@@ -235,7 +235,7 @@ class LitterWeanPageTests(TestCase):
         new_line = StrainLine.objects.get(line_name="OffspringStrain2026")
         pup = Mouse.objects.get(mouse_uid="M-WEAN-PUP-NEW-STRAIN")
         self.assertEqual(pup.strain_line_id, new_line.pk)
-        self.assertEqual(new_line.default_project_id, self.project.pk)
+        self.assertIn(self.project.pk, new_line.projects.values_list("pk", flat=True))
         self.assertEqual(pup.current_cage_id, self.female_cage.pk)
 
     def test_wean_rejects_duplicate_new_strain_line_name(self):

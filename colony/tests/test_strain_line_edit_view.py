@@ -50,7 +50,7 @@ class StrainLineEditViewTests(TestCase):
             "source": "Vendor X",
             "category": StrainLine.Category.CRE_DRIVER,
             "background": StrainLine.BackgroundPreset.BALB_C,
-            "default_project": str(self.project.pk),
+            "projects": [str(self.project.pk)],
             "expected_loci_template": "\n".join(item["locus_name"] for item in config),
             "expected_loci_config": json.dumps(config),
             "is_active": "on",
@@ -70,7 +70,7 @@ class StrainLineEditViewTests(TestCase):
         self.assertEqual(self.line.source, "Vendor X")
         self.assertEqual(self.line.category, StrainLine.Category.CRE_DRIVER)
         self.assertEqual(self.line.background, StrainLine.BackgroundPreset.BALB_C)
-        self.assertEqual(self.line.default_project_id, self.project.pk)
+        self.assertEqual(list(self.line.projects.values_list("pk", flat=True)), [self.project.pk])
         self.assertEqual(self.line.expected_loci_list(), ["LocusA", "LocusB"])
 
     def test_edit_view_detail_shows_saved_changes(self):

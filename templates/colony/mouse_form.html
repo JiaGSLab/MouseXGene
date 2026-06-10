@@ -162,7 +162,7 @@
 </section>
 
 {{ strain_template_loci_map|json_script:"strain-template-loci-map" }}
-{% if strain_default_project_map %}{{ strain_default_project_map|json_script:"strain-default-project-map" }}{% endif %}
+{% if strain_project_map %}{{ strain_project_map|json_script:"strain-project-map" }}{% endif %}
 {{ existing_genotype_map|json_script:"existing-genotype-map" }}
 {{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
 {% include "colony/_mouse_parent_picker_script.html" %}
@@ -171,11 +171,11 @@
     const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
     const mouseStrainMapApiUrl = "{{ mouse_strain_map_api_url|default:'/mice/api/strain-line-map/'|escapejs }}";
     let mouseStrainMap = {};
-    const defaultProjectEl = document.getElementById("strain-default-project-map");
-    const strainDefaultProjectMap = defaultProjectEl
-        ? JSON.parse(defaultProjectEl.textContent || "{}")
+    const strainProjectEl = document.getElementById("strain-project-map");
+    const strainProjectMap = strainProjectEl
+        ? JSON.parse(strainProjectEl.textContent || "{}")
         : {};
-    const applyStrainDefaultProject = {{ apply_strain_default_project|yesno:"true,false" }};
+    const applyStrainProject = {{ apply_strain_project|yesno:"true,false" }};
     const existingMap = JSON.parse(document.getElementById("existing-genotype-map").textContent || "{}");
     const postedRows = JSON.parse(document.getElementById("posted-genotype-rows").textContent || "[]");
     const strainSelect = document.getElementById("id_strain_line");
@@ -383,9 +383,9 @@
         rowCountInput.value = String(loci.length);
     }
 
-    function applyDefaultProjectFromStrain() {
-        if (!applyStrainDefaultProject || !strainSelect || !projectSelect) return;
-        const projectId = strainDefaultProjectMap[strainSelect.value];
+    function applyProjectFromStrain() {
+        if (!applyStrainProject || !strainSelect || !projectSelect) return;
+        const projectId = strainProjectMap[strainSelect.value];
         if (projectId) {
             projectSelect.value = projectId;
         }
@@ -393,7 +393,7 @@
 
     if (strainSelect) {
         strainSelect.addEventListener("change", () => {
-            applyDefaultProjectFromStrain();
+            applyProjectFromStrain();
             renderRows();
         });
     }
@@ -407,7 +407,7 @@
     if (sexSelect) {
         sexSelect.addEventListener("change", renderRows);
     }
-    applyDefaultProjectFromStrain();
+    applyProjectFromStrain();
     await renderRows();
 
     const formEl = document.querySelector("form.form-layout");
