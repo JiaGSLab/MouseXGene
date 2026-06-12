@@ -4,335 +4,590 @@
 
 {% block content %}
 <section class="page-header">
-    <h1>Guide</h1>
-    <p class="muted">面向一线使用者的 MouseXGene 实操指南：今天该点哪个页面、先填什么、为什么要这样做。</p>
-</section>
-
-<section class="card guide-card">
-    <h2>1. 先理解：你每天在系统里做什么</h2>
-    <p>
-        把它想成一条实验链路：先有 <strong>Project</strong>（属于哪个课题）、再有 <strong>Strain Line</strong>（品系定义）、
-        再到 <strong>Cage</strong>（笼位）、<strong>Mouse</strong>（个体）、<strong>Genotype</strong>（基因型）、
-        最后是 <strong>Breeding</strong> 与 <strong>Litter</strong>（繁殖过程与后代批次）。
-        系统的核心价值是：<strong>能追溯、能筛选、能导出</strong>，并把每次关键修改记录在履历里。
-    </p>
-</section>
-
-<section class="card guide-card">
-    <h2>2. 首页（Dashboard）怎么用</h2>
-    <ul class="guide-list">
-        <li><strong>先看统计</strong>：Total/Active Mice 与 Cages 用于确认库存与在用状态。</li>
-        <li><strong>再看告警</strong>：缺基因型、缺出生日期、繁殖流程异常等，优先补齐“会影响后续判断”的数据。</li>
-        <li><strong>最后执行动作</strong>：Quick Actions 进入新建、导入、导出；“More actions”放低频操作。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>3. 列表页通用操作（Mice / Cages / 等）</h2>
-    <ul class="guide-list">
-        <li><strong>先筛选再操作</strong>：先缩小范围（q、status、project 等），再编辑/导出，避免误改。</li>
-        <li><strong>More filters</strong>：放次要条件；主筛选区放高频条件，降低误点。</li>
-        <li><strong>分页</strong>：Mice/Cages 支持每页 25/50/100；结果 ≤500 时可选 All。</li>
-        <li><strong>可点击列</strong>：链接一般表示“下钻查看详情”或“带筛选跳转到相关列表”。</li>
-        <li><strong>导出建议</strong>：批量分析或做备份时用导出，单条核对优先在详情页看最新状态。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>4. 重点：Breedings 页面到底做什么（交配计划层）</h2>
-    <p>
-        <strong>Breeding</strong> 是“一个交配设置”的记录，不是“已经出生的后代”。
-        你可以把它理解为：<strong>计划与执行中的配对单</strong>。后续是否产仔、产了几窝，都会挂在这个配对单下面。
-    </p>
-    <ul class="guide-list">
-        <li><strong>什么时候建 Breeding</strong>：当你确认了 male / female（或双母）组合，并开始配对时就建。</li>
-        <li><strong>核心字段意义</strong>：`Breeding code` 是唯一标识；`Cage` 记录配对所在笼；`start_date / plug_date / expected_birth_date` 用于时间管理与提醒。</li>
-        <li><strong>状态怎么理解</strong>：常见是 active/planned/plugged/closed（具体以系统枚举为准）；关闭后通常表示该配对已结束，不再产生新的 workflow 主动作。</li>
-        <li><strong>页面怎么用</strong>：列表页用于看“当前有哪些配对在跑”；详情页用于核对配对信息并进入该 breeding 下的 litter 操作。</li>
-        <li><strong>常见错误</strong>：把“每一窝”当成 Breeding 新建；正确做法是同一对持续配对下，按实际分娩创建多个 litter。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>5. 重点：Litters 页面到底做什么（后代批次层）</h2>
-    <p>
-        <strong>Litter</strong> 是“某次分娩产生的一批后代”的记录。
-        它是 Breeding 的下游对象，关注的是：<strong>这窝什么时候生、多少只、什么时候离乳、后续是否完成尾标/分拣</strong>。
-    </p>
-    <ul class="guide-list">
-        <li><strong>什么时候建 Litter</strong>：确认有一窝出生时，从对应 breeding 建 litter（而不是反过来）。</li>
-        <li><strong>核心字段意义</strong>：`birth_date` 决定后续离乳时间管理；`litter_size / males / females` 支持资源评估；`wean_date` 标记是否完成离乳节点。</li>
-        <li><strong>状态的业务意义</strong>：active/tailed/weaned/ended/archived（以系统枚举为准）反映流程节点，便于筛选“还要做什么”。</li>
-        <li><strong>页面怎么用</strong>：Litters 列表是“待办看板”——先筛 `not weaned` 看近期任务，再按日期范围或 breeding 缩小到当天工作范围。</li>
-        <li><strong>与 Mice 的关系</strong>：Litter 是“批次层”，Mouse 是“个体层”；通常先把批次流程跑通，再逐只完善个体记录。</li>
-        <li><strong>Wean 时要决定 pups 归属项目</strong>：支持三种方式——归父方 project、归母方 project、或新建 project（详见下一节）。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>6. Wean Litter 怎么处理（重点）</h2>
-    <p>
-        在 <strong>Litter detail → Wean</strong> 页面，系统会创建这窝 pups 对应的 <strong>Mouse</strong> 记录，并写入 cage membership。
-        你需要先确认目标笼位，再决定 pups 的项目归属。
-    </p>
-    <ul class="guide-list">
-        <li><strong>Use sire project</strong>：pups 全部归父方项目；适合课题归属明确以父系线为主的场景。</li>
-        <li><strong>Use dam project</strong>：pups 全部归母方项目；适合母系承担主课题或实际饲养归属在母方组的场景。</li>
-        <li><strong>Create a new project</strong>：为这批后代建一个新项目；常用于跨项目配对后独立跟踪下一代。</li>
-        <li><strong>新建项目的 owner</strong>：默认是当前操作用户；系统会给该用户该项目的 manager membership，保证后续可编辑。</li>
-        <li><strong>权限校验</strong>：你选哪个项目，系统就校验你是否有该项目编辑权限；无权限会直接阻止提交。</li>
-        <li><strong>不再要求父母同项目</strong>：父方与母方来自不同项目也可以 wean，关键在于你给 pups 选择了合法的目标项目。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>7. Wean 真实示例（跨项目配对）</h2>
-    <p>
-        例子：父鼠在 <code>project1</code>，母鼠在 <code>project2</code>，现在要给这一窝 pups 做 wean。
-        进入 <strong>Litter detail → Wean</strong> 后，可按实际管理需求选择：
-    </p>
-    <ul class="guide-list">
-        <li><strong>归父方项目</strong>：选 <code>Use sire project (project1)</code>，新生鼠全部写入 project1。</li>
-        <li><strong>归母方项目</strong>：选 <code>Use dam project (project2)</code>，新生鼠全部写入 project2。</li>
-        <li><strong>独立新项目</strong>：选 <code>Create a new project</code>，填写如 <code>project3</code>，新生鼠全部写入 project3。</li>
-        <li><strong>怎么选更稳妥</strong>：若后续由某一课题组持续维护，优先归该组项目；若是联合课题并准备独立追踪后代，优先新建项目。</li>
-        <li><strong>提交前检查</strong>：确认目标笼位、pup 数量、UID 不重复、目标项目你有编辑权限。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>7. Breeding + Litter 的推荐操作流程（用户视角）</h2>
-    <ol class="guide-list">
-        <li>在 <strong>Breedings</strong> 创建/确认配对，检查配对笼与父母个体是否正确。</li>
-        <li>出现分娩后，在该 breeding 下创建 <strong>Litter</strong>，立即补 `birth_date`。</li>
-        <li>日常在 <strong>Litters</strong> 页面按 `not weaned` 与日期筛选，推进离乳、尾标、分拣节点。</li>
-        <li>进入 Wean 页面时，明确 pups 要归到父方/母方/新建项目，再批量生成个体鼠记录。</li>
-        <li>离乳后检查 litter 状态，并在需要时进入 Mice 逐只补全基因型与标签信息。</li>
-        <li>配对结束后回到 <strong>Breedings</strong> 关闭该 breeding，保持流程闭环。</li>
-    </ol>
-</section>
-
-<section class="card guide-card">
-    <h2>9. Strain Lines（品系行）与基因型：从使用者角度怎么用</h2>
-    <p>
-        可以把 <strong>Strain Line</strong> 理解成：<strong>这条「品系命名」在系统里对应的一套规则</strong>——包括统计上算哪条线、
-        以及<strong>以后给老鼠录基因型时，系统先给你摆好哪些位点、哪些常用下拉选项</strong>。
-        列表里可以按名称、位点说明、备注、负责人名字等搜索；数字链接用来跳到小鼠、笼位、交配或产仔列表，方便从品系往下查。
-    </p>
-    <h3 class="guide-subheading">9.1 你在品系页最需要先做好的两件事</h3>
-    <ul class="guide-list">
-        <li><strong>把「包含位点」配清楚</strong>：在品系编辑里维护 <strong>Included loci</strong>（每条一个逻辑位点）。你还可以为每个位点标类型（例如 Cre、flox）和染色体（常染色体 / X / Y），这样后面录鼠时下拉选项会更贴实验用语。</li>
-        <li><strong>指定负责人（Owner）</strong>：列表上的 Owner 表示「这条品系在实验室里找谁问」。新建时一般会默认成你自己；也可以改成别的同事。旧数据若 Owner 一直空，可请管理员在服务器跑一次补齐命令（见文末说明）。</li>
-    </ul>
-    <h3 class="guide-subheading">9.2 新建或编辑小鼠时：页面上的「基因型」块在帮你什么</h3>
-    <p>
-        选好 <strong>品系</strong>、填好 <strong>性别</strong>，如果还选了 <strong>父鼠 / 母鼠</strong>，下面会出现一块 <strong>Genotype Rows（按位点一行一行）</strong>，不用自己从零想该录哪些基因位点。
-    </p>
-    <ul class="guide-list">
-        <li><strong>页面上会先出现哪些位点？</strong> 会把「当前这只鼠选的品系」里配好的位点，再加上「父鼠所在品系」「母鼠所在品系」里配好的位点，合在一起、同名只保留一行，方便你一眼看到<strong>这条鼠可能要关心的所有位点</strong>。</li>
-        <li><strong>每一行怎么填？</strong> 每一行有一个下拉菜单，里面是常见写法（例如 Cre/+、fl/fl）；没有合适的就选 <strong>Custom</strong> 再自己打字。</li>
-        <li><strong>和性别有关：</strong> 系统会根据你选的公/母换一批更合理的选项；若是 <strong>Y 连锁位点 + 雌性</strong>，那一行会灰掉（雌鼠不按 Y 连锁那样录）。</li>
-    </ul>
-    <h3 class="guide-subheading">9.3 点「保存」之后：有父母 vs 没父母，系统认哪套位点</h3>
-    <p>
-        你在页面上看到的位点可能比较多；<strong>真正写进数据库、以后在「编辑基因型结果」里能改的那几行</strong>，按下面规则取一套「主模板」（和有没有父母有关）：
-    </p>
-    <ul class="guide-list">
-        <li><strong>若父鼠、母鼠都选了，且父母各自品系里都配过位点</strong>：系统以<strong>父母两边品系上的位点合并结果</strong>为主，用来生成这只鼠要维护的基因型行（避免和父母系谱里已经写过的位点重复堆一层）。</li>
-        <li><strong>其它情况</strong>（只选了一方父母、或父母品系上还没配位点、或根本没选父母）：就按<strong>你给小鼠选的那个 Strain line</strong> 里配好的位点来生成行。</li>
-        <li>你在每一行下拉或自定义里填的内容，会在保存时写进这只鼠的基因型记录里，并更新详情页上看到的<strong>基因型摘要</strong>。</li>
-    </ul>
-    <p class="muted small-print">
-        极少数情况下，保存前页面上多出来的某一行，若不在上述「主模板」里，保存后可能不会出现在详情里；以保存后小鼠详情或「Edit genotyping results」为准。
-        若父母品系已经把要录的位点都列全了，一般不用额外操心。
-    </p>
-    <h3 class="guide-subheading">9.4 只想改某几只鼠的基因型时去哪</h3>
-    <ul class="guide-list">
-        <li>打开该鼠详情，进入 <strong>Edit genotyping results</strong>。这里<strong>不能自己加新位点列</strong>，只能在系统根据品系（和父母）已经给出的位点上改结果——这样全实验室的「位点名单」仍由品系统一管，不会每人一套叫法。</li>
-        <li>这里用的位点规则与上一节一致：<strong>有父母且父母品系有位点 → 以父母为主</strong>；否则<strong>以这只鼠的品系为准</strong>。</li>
-    </ul>
-    <h3 class="guide-subheading">9.5 历史品系 Owner 一次性对齐创建人（管理员）</h3>
-    <p class="muted small-print">
-        仅当库里已有「创建人」但 Owner 仍为空时需要。在项目目录、已激活虚拟环境后执行：<br>
-        <code>python manage.py backfill_strainline_owner_from_created_by</code>（可先加 <code>--dry-run</code> 只看数量不写库）。
-    </p>
-</section>
-
-<section class="card guide-card">
-    <h2>10. Pedigree（谱系）</h2>
-    <p>
-        从小鼠详情进入 <strong>View Pedigree</strong> 后，页面以<strong>树状结构</strong>展示：上方为父母节点，经竖线汇聚到中间的<strong>焦点个体</strong>，下方分支列出同窝与后代，并用横线模拟树枝连接，便于快速扫读关系。
-        所有 UID 仍可点击进入对应小鼠详情。
-    </p>
-</section>
-
-<section class="card guide-card">
-    <h2>11. 推荐录入顺序（新课题）</h2>
-    <ol class="guide-list">
-        <li>确认或新建 <strong>Strain Line</strong>，保证命名与统计口径统一。</li>
-        <li>新建 <strong>Project</strong> 并指定 <strong>Owner</strong>；后续小鼠、导出与协作范围常与此挂钩。</li>
-        <li>新建 <strong>Cage</strong>；若使用导入且开启自动创建，也可在导入小鼠时补笼。</li>
-        <li>新建或导入 <strong>Mouse</strong>，优先保证 UID、性别、品系、笼位、课题等核心字段。</li>
-        <li>补录或导入 <strong>Genotype</strong>，完善遗传信息。</li>
-        <li>按实验记录 <strong>Breeding</strong> / <strong>Litter</strong>，形成繁殖与后代链路。</li>
-    </ol>
-</section>
-
-<section class="card guide-card">
-    <h2>12. Import / Export</h2>
-    <ul class="guide-list">
-        <li>支持导入 <strong>Cage</strong>、<strong>Mouse</strong>、<strong>Genotype</strong>；小鼠导入可采用「单文件含基因型列」的格式。</li>
-        <li>导入选项可自动创建缺失的 <strong>Strain Line</strong>、<strong>Project</strong>、<strong>Cage</strong>，减少手工前置维护。</li>
-        <li>常见失败原因：必填列缺失、日期格式错误、主键重复、引用无法解析、枚举值越界。</li>
-        <li>父母（sire/dam）须已存在，或与当前小鼠出现在同一导入文件中以便解析。</li>
-        <li>导出：Mice/Cages 导出已按导入字段顺序优先输出，并可附带扩展列（owner、summary、timestamps 等）。</li>
-        <li>运维：若历史品系 <strong>Owner</strong> 仍为空但已有创建人，可在服务器执行 <code>python manage.py backfill_strainline_owner_from_created_by</code>（见第 9 节）。</li>
-    </ul>
-</section>
-
-<section class="card guide-card">
-    <h2>13. 权限说明（摘要）</h2>
-    <p>
-        系统按角色控制「谁能看、谁能改、谁能导入/归档、谁能管课题成员、谁能看审计」等。
-        下表为常见能力对比；若与贵实验室策略不一致，以管理员配置为准。
-    </p>
-    <div class="table-wrap guide-table-wrap">
-        <table class="data-table guide-table">
-            <thead>
-                <tr>
-                    <th>功能</th>
-                    <th>Admin</th>
-                    <th>Manager</th>
-                    <th>Member</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>查看业务数据（Mice / Cages / Breedings / Litters / Genotypes / Strain Lines 等）</td>
-                    <td>是</td><td>是</td><td>是</td>
-                </tr>
-                <tr>
-                    <td>新建 / 编辑常规业务记录</td>
-                    <td>是</td><td>是</td><td>是</td>
-                </tr>
-                <tr>
-                    <td>导入（import）</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>导出（export）</td>
-                    <td>是</td><td>是</td><td>是</td>
-                </tr>
-                <tr>
-                    <td>归档 / 停用（archive / deactivate 等终态）</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>新建 / 编辑 Project，管理课题成员</td>
-                    <td>是</td><td>是</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>查看 Audit（审计日志）</td>
-                    <td>是</td><td>否</td><td>否</td>
-                </tr>
-                <tr>
-                    <td>管理全局用户与角色、进入 Django Admin</td>
-                    <td>是</td><td>否</td><td>否</td>
-                </tr>
-            </tbody>
-        </table>
+    <h1 data-guide-lang="zh">使用指南</h1>
+    <h1 data-guide-lang="en" hidden>Guide</h1>
+    <p class="muted" data-guide-lang="zh">给日常使用者看的操作指南：该去哪个页面、什么时候记录、哪些地方最容易填错。</p>
+    <p class="muted" data-guide-lang="en" hidden>A practical guide for daily colony work: where to go, what to record, and how to avoid messy data.</p>
+    <div class="guide-language-switch" role="group" aria-label="Guide language">
+        <button type="button" class="button button-small guide-language-button" data-guide-set-lang="zh" aria-pressed="true">中文</button>
+        <button type="button" class="button button-light button-small guide-language-button" data-guide-set-lang="en" aria-pressed="false">English</button>
     </div>
-    <p class="muted small-print">
-        补充：跨项目 breeding 时，操作人需要对涉及的每个项目都具备编辑权限；项目成员添加通常由该项目 owner、项目 manager 或 lab admin 执行。
-    </p>
 </section>
 
-<section class="card guide-card">
-    <h2>14. 状态与列表中的灰色行</h2>
-    <ul class="guide-list">
-        <li><strong>active</strong>：日常默认展示的主状态。</li>
-        <li><strong>inactive</strong>：非活跃，可能暂停使用或待处理。</li>
-        <li><strong>archived</strong>：归档保留历史，通常不作为当前工作重点。</li>
-        <li><strong>euthanized</strong>：小鼠已安乐，记录保留用于追溯。</li>
-        <li><strong>retired</strong> 等：笼位或其它对象已退役。列表中灰色行多表示非活跃/归档类状态。</li>
-    </ul>
-</section>
+<div data-guide-lang="zh">
+    <section class="card guide-card">
+        <h2>先看这里</h2>
+        <p>
+            MouseXGene 用来管理小鼠、笼子、课题、品系、繁殖、窝仔和基因型结果。
+            最重要的原则是：<strong>实验室真实发生了什么，就在对应页面及时记录什么</strong>。
+            例如换笼、结束小鼠、开始配繁、出生一窝、离乳，都应该走各自的流程，不要只写在备注里。
+        </p>
+        <ol class="guide-list">
+            <li>查或修改单只动物：去 <strong>Mice</strong>。</li>
+            <li>查一个笼子现在有什么鼠：去 <strong>Cages</strong>。</li>
+            <li>记录配繁组合：去 <strong>Breedings</strong>。</li>
+            <li>记录出生和离乳：去 <strong>Litters</strong>。</li>
+            <li>维护品系名称、位点和 PDF 说明：去 <strong>Strain Lines</strong>。</li>
+        </ol>
+    </section>
 
-<section class="card guide-card">
-    <h2>15. 常见问题</h2>
-    <dl class="guide-faq">
-        <dt>为什么很少「硬删除」记录？</dt>
-        <dd>优先使用归档或终态标记，避免破坏审计与谱系链条。</dd>
+    <section class="card guide-card">
+        <h2>每天怎么用</h2>
+        <ol class="guide-list">
+            <li>先打开 <strong>Home</strong>，看有没有缺出生日期、缺笼位、待离乳、繁殖逾期等提醒。</li>
+            <li>有 pups 要处理时，进 <strong>Litters</strong>，优先看未离乳或接近离乳日期的记录。</li>
+            <li>有新出生的一窝，从 <strong>Create Litter from Breeding</strong> 找到对应配繁记录后创建 litter。</li>
+            <li>有配繁结束，进 breeding detail，点击 <strong>End Breeding and Move Breeders</strong>。</li>
+            <li>要找一只鼠，在 <strong>Mice</strong> 用 UID、ear tag、toe tag 搜索。</li>
+            <li>要移动鼠，先确认目标笼子，再用 <strong>Move Cage</strong>。</li>
+        </ol>
+    </section>
 
-        <dt>导入时为什么父母找不到？</dt>
-        <dd>系统要把 sire/dam 解析成已存在的小鼠记录；请预先录入或放在同一导入文件中解析。</dd>
+    <section class="card guide-card">
+        <h2>核心概念</h2>
+        <div class="table-wrap guide-table-wrap">
+            <table class="data-table guide-table">
+                <thead>
+                    <tr>
+                        <th>对象</th>
+                        <th>是什么意思</th>
+                        <th>什么时候用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Project</strong></td>
+                        <td>课题或管理归属。</td>
+                        <td>给小鼠归属项目，方便筛选、权限管理和导出。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Strain Line</strong></td>
+                        <td>品系名称和预期基因位点。</td>
+                        <td>新建小鼠、离乳、录基因型前先确认品系。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Cage</strong></td>
+                        <td>实际笼位或笼号。</td>
+                        <td>记录当前笼内有哪些鼠、做换笼、查繁殖笼。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Mouse</strong></td>
+                        <td>一只具体小鼠。</td>
+                        <td>记录 UID、性别、生日、笼位、项目、父母、备注和基因型。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Breeding</strong></td>
+                        <td>一次配繁设置：一只 sire 加一只或多只 dams。</td>
+                        <td>配繁开始时创建；配繁结束时关闭并移动 breeders。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Litter</strong></td>
+                        <td>某次出生的一窝 pups。</td>
+                        <td>出生时创建；离乳时生成单只 Mouse 记录。</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Genotype</strong></td>
+                        <td>实际基因型检测结果。</td>
+                        <td>PCR/测序结果出来后填写，不要只凭品系名推测。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
 
-        <dt>为什么会自动创建 Strain Line / Project / Cage？</dt>
-        <dd>开启对应导入选项时，会为缺失依赖自动建占位对象，减少打断导入流程。</dd>
+    <section class="card guide-card">
+        <h2>Mice</h2>
+        <h3 class="guide-subheading">新建小鼠</h3>
+        <ol class="guide-list">
+            <li>进入 <strong>Mice → New Mouse</strong>。</li>
+            <li>先填共享信息：<strong>birth date</strong>、<strong>status</strong>、<strong>strain line</strong>、<strong>project</strong>，如果已经在笼里，也选 <strong>current cage</strong>。</li>
+            <li>下面表格每一行是一只小鼠，填写 <strong>Mouse UID</strong>、性别、ear tag、toe tag。</li>
+            <li>如果这批鼠来源明确，再填 <strong>Parentage</strong>；外购、历史补录或父母不清楚时选 <strong>No parentage recorded</strong>。</li>
+        </ol>
 
-        <dt>列表里有些行发灰是什么意思？</dt>
-        <dd>多表示非活跃或归档状态，提醒不要与当前主流程混淆。</dd>
+        <h3 class="guide-subheading">Parentage 怎么选</h3>
+        <ul class="guide-list">
+            <li><strong>No parentage recorded</strong>：父母未知、不重要、或外购鼠时使用。</li>
+            <li><strong>Use breeding cage parents</strong>：这批鼠来自某个配繁笼时使用。若该 breeding 有两只或多只母鼠，系统会记录全部 possible dams，不会假装知道具体是哪一只母鼠。</li>
+            <li><strong>Select sire and possible dam(s)</strong>：手动选择父亲和可能母亲。确定母亲时选 1 只；不确定时可选多只。</li>
+        </ul>
 
-        <dt>Project 后面的人名是谁？</dt>
-        <dd>一般为课题 <strong>Owner</strong> 的显示名（或全名/用户名），用于识别负责人。</dd>
+        <h3 class="guide-subheading">编辑、换笼、结束小鼠</h3>
+        <ul class="guide-list">
+            <li><strong>Edit Mouse</strong>：修改 UID 以外的基础信息、project、strain line、parentage、notes、status 等。</li>
+            <li><strong>Move Cage</strong>：活鼠换笼时使用，会更新当前笼位和笼位历史。</li>
+            <li><strong>End Mouse</strong>：小鼠安乐死或进入终态时使用。系统会弹窗确认，并把它从当前笼位占用中移除。</li>
+            <li><strong>Edit Genotyping Results</strong>：只用于修改真实基因型结果，不是修改小鼠基础信息的入口。</li>
+        </ul>
+    </section>
 
-        <dt>Strain Line 的 Owner 和创建人怎么对齐？</dt>
-        <dd>新建保存后会尽量把空的 Owner 设为创建人；大批量历史数据可运行 <code>backfill_strainline_owner_from_created_by</code> 管理命令一次性补齐（见第 9.5 节）。</dd>
-    </dl>
-</section>
+    <section class="card guide-card">
+        <h2>Cages</h2>
+        <ul class="guide-list">
+            <li>能先建笼子就先建笼子，再把小鼠放进去。</li>
+            <li><strong>Room</strong>、<strong>Rack</strong>、<strong>Position</strong> 尽量用统一格式，否则以后筛选会很乱。</li>
+            <li>Cage detail 里的 <strong>Current Mice</strong> 是当前占笼情况。鼠 UID 和 breeding 编号可以点击进入详情。</li>
+            <li>普通情况下不要硬删除笼子；不用的笼子设为 inactive 或 retired 更安全。</li>
+            <li>少量空笼不会明显拖慢系统。只有历史测试数据或明显错误数据才需要清理。</li>
+        </ul>
+    </section>
 
-<section class="card guide-card">
-    <h2>16. 新手速查卡（30 秒）</h2>
-    <ol class="guide-list">
-        <li>先看 <strong>Dashboard</strong> 告警，处理“缺关键字段”的数据。</li>
-        <li>建新繁殖：进 <strong>Breedings</strong>，先建配对（不是先建 litter）。</li>
-        <li>有分娩：进该 breeding 下建 <strong>Litter</strong>，先填 `birth_date`。</li>
-        <li>每天任务：在 <strong>Litters</strong> 按 `not weaned` + 日期筛选推进流程。</li>
-        <li>Wean 前先决定 pups 归属项目（父方/母方/新建），再提交创建。</li>
-        <li>查个体：在 <strong>Mice</strong> 用 UID 搜索，必要时进 pedigree 看家系。</li>
-        <li>批量分析或备份：优先用导出，避免在列表里手工逐条复制。</li>
-        <li>看不懂当前是谁登录：点顶栏 <strong>User: xxx</strong> 进入个人页确认账号。</li>
-    </ol>
-</section>
+    <section class="card guide-card">
+        <h2>Breedings</h2>
+        <h3 class="guide-subheading">创建配繁</h3>
+        <ol class="guide-list">
+            <li>进入 <strong>Breedings → New Breeding</strong>。</li>
+            <li>选择 1 只 <strong>Sire</strong>，再选择 1 只或多只 <strong>Dams</strong>。</li>
+            <li>选择实际配繁所在的 breeding cage。</li>
+            <li>配繁开始时就创建 breeding，不要等到 pups 出生后才补。</li>
+        </ol>
+        <p>
+            如果确实需要，父母可以来自不同 project 或不同 owner。系统允许这样做，但会给出提示；保存前请确认这确实是实验设计需要。
+        </p>
 
-<section class="card guide-card">
-    <h2>17. 常见报错 FAQ（原因与处理）</h2>
-    <dl class="guide-faq">
-        <dt>导入时报 “Missing required columns”</dt>
-        <dd>文件缺少必需列或列名拼写不一致。请先下载系统模板，对齐列名后再导入。</dd>
+        <h3 class="guide-subheading">从 breeding 创建 litter</h3>
+        <ul class="guide-list">
+            <li>出生一窝后，使用 <strong>Create Litter from Breeding</strong>。</li>
+            <li>如果 breeding 太多，可以按 breeding code、cage、project、strain line、owner、status 筛选。</li>
+            <li><strong>birth date</strong> 尽量准确，因为后面的 weaning reminder 依赖这个日期。</li>
+        </ul>
 
-        <dt>导入时报 “invalid date ... Use YYYY-MM-DD format”</dt>
-        <dd>日期格式不符合要求。把 Excel/CSV 日期统一成 <code>YYYY-MM-DD</code>（例如 2026-04-20）。</dd>
+        <h3 class="guide-subheading">结束 breeding</h3>
+        <ul class="guide-list">
+            <li>配繁结束、父母分开时，使用 <strong>End Breeding and Move Breeders</strong>。</li>
+            <li>每只 breeder 都要选择下一步去哪个笼子。</li>
+            <li>如果目标笼不存在，在该页面点 <strong>Create New Cage</strong>，建好后回到原页面继续。</li>
+            <li><strong>Exception: no current cage</strong> 只给真实例外使用，不要作为省略目标笼的常规做法。</li>
+        </ul>
+    </section>
 
-        <dt>导入时报 “duplicate ... in uploaded file”</dt>
-        <dd>同一个文件里出现重复主键（如重复 cage_id / mouse_uid）。去重后再导入。</dd>
+    <section class="card guide-card">
+        <h2>Litters</h2>
+        <h3 class="guide-subheading">Litter 是什么</h3>
+        <p>
+            Litter 是某一次出生的一窝 pups，不等于 breeding。
+            一个 breeding 可以在不同时间产生多窝 litters。
+        </p>
+        <ul class="guide-list">
+            <li><strong>Active / not weaned</strong>：还需要处理，通常是日常工作重点。</li>
+            <li><strong>Weaned</strong>：已经离乳，并生成了单只 Mouse 记录。</li>
+            <li><strong>Ended / archived</strong>：流程已经关闭，通常只作为历史记录查看。</li>
+        </ul>
 
-        <dt>导入时报 “... already exists in database”</dt>
-        <dd>数据库已有同名主键。可换新 ID，或按业务先归档旧记录再调整导入策略。</dd>
+        <h3 class="guide-subheading">Wean Litter 怎么做</h3>
+        <ol class="guide-list">
+            <li>进入 litter detail，点击 <strong>Wean</strong>。</li>
+            <li>先确认 <strong>Parentage</strong>。如果是双母或多母配繁，且不知道具体母亲，使用 breeding cage parentage。</li>
+            <li>填写 male / female pup 数量，再逐只填 UID 和标签。</li>
+            <li>选择公鼠和母鼠的目标笼位。某一性别数量为 0 时，不需要填该性别笼位。</li>
+            <li>选择 pups 的 project：父方 project、母方 project，或创建一个新 project。</li>
+            <li>选择 pups 的 strain line 来源：父方 strain、母方 strain，或创建一个新 strain line。</li>
+            <li>提交前检查 UID 不重复、目标笼正确、project 权限正确。</li>
+        </ol>
+        <p>
+            Wean 成功后，系统会创建单只 Mouse 记录、写入笼位历史、记录谱系来源，并生成基因型模板行。
+            正常情况下 litter 会变成 <strong>Weaned</strong> 状态。
+        </p>
+    </section>
 
-        <dt>导入时报 “invalid status / invalid cage_type / invalid purpose”</dt>
-        <dd>枚举值超出系统允许范围。请使用下拉页面里可见的标准值，不要自定义拼写。</dd>
+    <section class="card guide-card">
+        <h2>Strain Lines</h2>
+        <ul class="guide-list">
+            <li>Strain line 名称应尽量唯一、稳定。不要为了不同用户重复创建多个同名 WT。</li>
+            <li><strong>Projects</strong> 表示这条品系可以属于或用于哪些 project。</li>
+            <li><strong>Owners using this line</strong> 显示当前哪些 owner 的数据正在使用这条品系。</li>
+            <li>维护 <strong>Included loci</strong> 后，新建小鼠和 wean 时才会自动出现更合理的 genotype rows。</li>
+            <li>PDF 可用于上传饲养说明、基因型 protocol、品系说明等文档。</li>
+        </ul>
+        <p>
+            WT 小鼠建议共用一条 WT strain line。不同用户、不同课题的 WT，用 <strong>Project</strong>、<strong>Owner</strong>、笼位、UID 和 notes 区分。
+        </p>
+    </section>
 
-        <dt>保存时报权限错误（例如不能编辑/归档）</dt>
-        <dd>当前账号权限不足。请联系 Admin/Manager，或用有权限账号执行该操作。</dd>
+    <section class="card guide-card">
+        <h2>Genotypes</h2>
+        <ul class="guide-list">
+            <li>Genotype rows 主要来自小鼠 strain line；如果有父母信息，也会参考父母 strain line 的位点。</li>
+            <li>X-linked 和 Y-linked 位点会根据性别显示不同选项。</li>
+            <li>下拉框没有真实结果时，选 <strong>Custom</strong> 后手动输入。</li>
+            <li>实际 PCR 或测序结果出来后，从 mouse detail 进入 <strong>Edit Genotyping Results</strong> 修改。</li>
+            <li>不要把 genotype 备注当成 project、strain line 或 pedigree 的替代字段。</li>
+        </ul>
+    </section>
 
-        <dt>Wean 时提示没有项目编辑权限</dt>
-        <dd>你选择了某个 pups 归属项目，但当前账号对该项目无编辑权限。可改选你有权限的项目，或请项目 owner/manager/admin 先把你加入该项目。</dd>
+    <section class="card guide-card">
+        <h2>列表、搜索、导出</h2>
+        <ul class="guide-list">
+            <li>搜索框常用于 UID、cage ID、breeding code、ear tag、toe tag 等可见标识。</li>
+            <li>编辑或导出前先筛选，减少误操作。</li>
+            <li>如果页面看起来“少了很多数据”，先点 <strong>Reset</strong>，可能是旧筛选条件还在。</li>
+            <li>日常使用分页即可；只有结果很少时再用 <strong>All</strong>。</li>
+            <li>需要分析、备份或发给别人时，用 export，而不是从网页手工复制。</li>
+        </ul>
+    </section>
 
-        <dt>Wean 选择“Create a new project”后提示项目名重复</dt>
-        <dd>项目名是全局唯一。请换一个新名称，或改选已有的父方/母方项目归属。</dd>
+    <section class="card guide-card">
+        <h2>Import</h2>
+        <p>
+            日常新增少量小鼠，推荐直接用页面表单录入，不建议频繁用 Excel import。
+            Import 更适合历史数据清理、一次性大量录入或管理员维护。
+        </p>
+        <ul class="guide-list">
+            <li>导入前先下载系统模板，不要改列名。</li>
+            <li>Mouse UID 和 cage ID 必须唯一。</li>
+            <li>日期统一使用 <code>YYYY-MM-DD</code>。</li>
+            <li>status、sex、cage type、purpose 等字段要使用系统允许的值。</li>
+            <li>如果导入自动创建了 project、strain line 或 cage，导入后要回头检查这些占位数据是否合理。</li>
+            <li>不确定时，先找 manager 或 admin 确认再导入。</li>
+        </ul>
+    </section>
 
-        <dt>页面上显示 “No audit entries for this record yet.”</dt>
-        <dd>该记录目前没有可展示的审计条目（可能是老数据或仅有批量汇总日志）。不是系统故障。</dd>
+    <section class="card guide-card">
+        <h2>权限</h2>
+        <ul class="guide-list">
+            <li><strong>Admin</strong>：可以管理用户、角色、审计日志和全局数据。</li>
+            <li><strong>Manager</strong>：通常可以维护 project 数据和执行常见工作流。</li>
+            <li><strong>Member</strong>：可以查看和使用常规页面，但可能不能导入、归档或管理成员。</li>
+            <li>如果系统阻止保存，先确认你是否在正确 project 下，以及账号是否有对应权限。</li>
+        </ul>
+    </section>
 
-        <dt>导出后再导入失败</dt>
-        <dd>请确认你导入的是“包含导入必需列”的文件；扩展列可以有，但必需列不能删或改名。</dd>
+    <section class="card guide-card">
+        <h2>好习惯</h2>
+        <ul class="guide-list">
+            <li>换笼当天就记录 <strong>Move Cage</strong>。</li>
+            <li>不要重复使用 mouse UID 或 cage ID。</li>
+            <li>notes 用来补充背景，结构化信息尽量填在对应字段里。</li>
+            <li>breeding 结束时及时关闭并移动 breeders。</li>
+            <li>查看 litters 时，把 weaned 和 not weaned 分开看。</li>
+            <li>普通历史记录优先使用 inactive、retired、archived 或终态，不要随意删除。</li>
+        </ul>
+    </section>
 
-        <dt>为什么筛选结果和预期不一致？</dt>
-        <dd>先点 Reset 清空旧筛选，再逐个条件重新勾选；特别注意 `include inactive` 与分页设置。</dd>
+    <section class="card guide-card">
+        <h2>常见问题</h2>
+        <dl class="guide-faq">
+            <dt>为什么一只 pup 可以有多个 possible dams？</dt>
+            <dd>双母或多母配繁时，常常不知道具体是哪只母鼠生的。系统记录全部可能母亲，是为了让谱系更诚实。</dd>
 
-        <dt>为什么改了数据但页面像没更新？</dt>
-        <dd>先刷新并清缓存；若是服务器部署后未更新，优先检查代码同步、容器重建与 collectstatic 是否成功。</dd>
-    </dl>
-</section>
+            <dt>Wean 后 litter 要不要自动 end？</dt>
+            <dd>Weaned 表示已经离乳并生成单只鼠；ended / archived 表示记录完全关闭。两者可以分开，除非实验室决定所有 weaned litters 都立即关闭。</dd>
+
+            <dt>为什么 End Breeding 要选 destination cage？</dt>
+            <dd>配繁结束后 breeders 会离开 breeding cage。系统需要知道它们去了哪里，才能保持当前笼位占用准确。</dd>
+
+            <dt>Picker 里找不到鼠或笼子怎么办？</dt>
+            <dd>先检查 owner、project、strain line、include inactive 等筛选条件。必要时点 Reset 或换关键词搜索。</dd>
+
+            <dt>录错了怎么办？</dt>
+            <dd>普通错误直接 edit；涉及历史数据、删除、大量修改时，先找 admin 确认。</dd>
+
+            <dt>页面很慢或结果不对怎么办？</dt>
+            <dd>先清空筛选、缩小结果、硬刷新浏览器。仍然不对时，把具体 URL 和你要做的操作告诉管理员。</dd>
+        </dl>
+    </section>
+</div>
+
+<div data-guide-lang="en" hidden>
+    <section class="card guide-card">
+        <h2>Start Here</h2>
+        <p>
+            MouseXGene tracks mice, cages, projects, strain lines, breeding setups, litters, and genotype results.
+            The most important rule is: <strong>record the real lab event in the workflow that matches it</strong>.
+            Cage moves, terminal mouse status, new breedings, litter births, and weaning should each be recorded as structured data, not only in notes.
+        </p>
+        <ol class="guide-list">
+            <li>Find or edit one animal in <strong>Mice</strong>.</li>
+            <li>Check current cage occupancy in <strong>Cages</strong>.</li>
+            <li>Record mating setups in <strong>Breedings</strong>.</li>
+            <li>Record births and weaning in <strong>Litters</strong>.</li>
+            <li>Maintain line names, loci, and PDF documents in <strong>Strain Lines</strong>.</li>
+        </ol>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Daily Checklist</h2>
+        <ol class="guide-list">
+            <li>Open <strong>Home</strong> first and scan alerts for missing birth dates, missing cages, pending weaning, or overdue breedings.</li>
+            <li>When pups need attention, open <strong>Litters</strong> and focus on not-weaned or near-weaning records.</li>
+            <li>When a litter is born, use <strong>Create Litter from Breeding</strong> to find the matching breeding and create the litter.</li>
+            <li>When a breeding ends, open the breeding detail page and click <strong>End Breeding and Move Breeders</strong>.</li>
+            <li>To find one mouse, search in <strong>Mice</strong> by UID, ear tag, or toe tag.</li>
+            <li>Before moving a mouse, confirm the destination cage, then use <strong>Move Cage</strong>.</li>
+        </ol>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Core Concepts</h2>
+        <div class="table-wrap guide-table-wrap">
+            <table class="data-table guide-table">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Meaning</th>
+                        <th>When to use it</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Project</strong></td>
+                        <td>A research project or management owner.</td>
+                        <td>Assign mice to projects for filtering, permissions, and export.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Strain Line</strong></td>
+                        <td>The line name and expected genetic loci.</td>
+                        <td>Confirm it before creating mice, weaning pups, or entering genotypes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Cage</strong></td>
+                        <td>A real cage or cage position.</td>
+                        <td>Track current occupancy, cage moves, and breeding cages.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Mouse</strong></td>
+                        <td>One individual animal.</td>
+                        <td>Record UID, sex, birth date, cage, project, parents, notes, and genotypes.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Breeding</strong></td>
+                        <td>One mating setup: one sire plus one or more dams.</td>
+                        <td>Create it when mating starts; close it and move breeders when it ends.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Litter</strong></td>
+                        <td>One birth event from a breeding.</td>
+                        <td>Create it at birth; wean it to generate individual mouse records.</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Genotype</strong></td>
+                        <td>The actual genotyping result.</td>
+                        <td>Enter it after PCR or sequencing results are available. Do not infer it from the strain name alone.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Mice</h2>
+        <h3 class="guide-subheading">Create mice</h3>
+        <ol class="guide-list">
+            <li>Go to <strong>Mice → New Mouse</strong>.</li>
+            <li>Fill shared information first: <strong>birth date</strong>, <strong>status</strong>, <strong>strain line</strong>, <strong>project</strong>, and <strong>current cage</strong> if known.</li>
+            <li>Each row in the table is one mouse. Fill <strong>Mouse UID</strong>, sex, ear tag, and toe tag.</li>
+            <li>Use <strong>Parentage</strong> only when the source is known. For external, historical, or unknown animals, choose <strong>No parentage recorded</strong>.</li>
+        </ol>
+
+        <h3 class="guide-subheading">How to choose Parentage</h3>
+        <ul class="guide-list">
+            <li><strong>No parentage recorded</strong>: use this when parents are unknown, irrelevant, or external.</li>
+            <li><strong>Use breeding cage parents</strong>: use this when the mice came from a breeding cage. If the breeding has two or more dams, the system records all possible dams instead of pretending one exact dam is known.</li>
+            <li><strong>Select sire and possible dam(s)</strong>: manually choose the sire and possible dam(s). Select one dam if exact, or multiple dams if uncertain.</li>
+        </ul>
+
+        <h3 class="guide-subheading">Edit, move, or end a mouse</h3>
+        <ul class="guide-list">
+            <li><strong>Edit Mouse</strong>: edit basic information, project, strain line, parentage, notes, status, and similar fields.</li>
+            <li><strong>Move Cage</strong>: use this when a live mouse changes cage. It updates current cage and cage history.</li>
+            <li><strong>End Mouse</strong>: use this when a mouse is euthanized or reaches a terminal status. The system asks for confirmation and removes the mouse from current cage occupancy.</li>
+            <li><strong>Edit Genotyping Results</strong>: use this only for actual genotype calls, not for basic mouse information.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Cages</h2>
+        <ul class="guide-list">
+            <li>Create the cage before assigning mice whenever possible.</li>
+            <li>Keep <strong>Room</strong>, <strong>Rack</strong>, and <strong>Position</strong> formats consistent, otherwise filtering becomes messy.</li>
+            <li><strong>Current Mice</strong> on cage detail is the live occupancy view. Mouse UIDs and breeding codes are clickable.</li>
+            <li>Do not hard-delete normal cages. Use inactive or retired status when a cage is no longer in routine use.</li>
+            <li>A small number of empty cages does not meaningfully slow the system. Clean only historical test cages or clearly wrong data.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Breedings</h2>
+        <h3 class="guide-subheading">Create a breeding</h3>
+        <ol class="guide-list">
+            <li>Go to <strong>Breedings → New Breeding</strong>.</li>
+            <li>Select one <strong>Sire</strong> and one or more <strong>Dams</strong>.</li>
+            <li>Select the actual breeding cage.</li>
+            <li>Create the breeding when mating starts, not after pups are born.</li>
+        </ol>
+        <p>
+            Parents can come from different projects or owners if the experimental design requires it.
+            The system allows this and shows warnings so you can confirm before saving.
+        </p>
+
+        <h3 class="guide-subheading">Create litter from breeding</h3>
+        <ul class="guide-list">
+            <li>After pups are born, use <strong>Create Litter from Breeding</strong>.</li>
+            <li>If there are many breedings, filter by breeding code, cage, project, strain line, owner, or status.</li>
+            <li>Enter <strong>birth date</strong> as accurately as possible, because weaning reminders depend on it.</li>
+        </ul>
+
+        <h3 class="guide-subheading">End breeding</h3>
+        <ul class="guide-list">
+            <li>When the breeding setup is finished and parents are separated, use <strong>End Breeding and Move Breeders</strong>.</li>
+            <li>Choose the next cage for each breeder.</li>
+            <li>If the destination cage does not exist, click <strong>Create New Cage</strong> on that page, then return and finish.</li>
+            <li>Use <strong>Exception: no current cage</strong> only for real exceptions, not as the normal way to skip a destination cage.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Litters</h2>
+        <h3 class="guide-subheading">What a litter means</h3>
+        <p>
+            A litter is one birth event from a breeding. It is not the same as a breeding.
+            One breeding can produce multiple litters over time.
+        </p>
+        <ul class="guide-list">
+            <li><strong>Active / not weaned</strong>: still needs attention and is usually the daily priority.</li>
+            <li><strong>Weaned</strong>: pups have been weaned and individual Mouse records have been created.</li>
+            <li><strong>Ended / archived</strong>: the workflow is closed and usually kept for history only.</li>
+        </ul>
+
+        <h3 class="guide-subheading">How to wean a litter</h3>
+        <ol class="guide-list">
+            <li>Open litter detail and click <strong>Wean</strong>.</li>
+            <li>Confirm <strong>Parentage</strong>. If the breeding has multiple dams and the exact dam is unknown, use breeding cage parentage.</li>
+            <li>Enter male and female pup counts, then fill each pup UID and tags.</li>
+            <li>Select destination cages for male and female pups. A sex with count 0 does not need a cage.</li>
+            <li>Choose the pups' project: sire project, dam project, or a new project.</li>
+            <li>Choose the pups' strain line source: sire strain, dam strain, or a new strain line.</li>
+            <li>Before submitting, check UID uniqueness, destination cages, and project permissions.</li>
+        </ol>
+        <p>
+            After weaning, the system creates individual Mouse records, cage history, pedigree links, and genotype template rows.
+            Normally the litter becomes <strong>Weaned</strong>.
+        </p>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Strain Lines</h2>
+        <ul class="guide-list">
+            <li>Strain line names should be unique and stable. Do not create duplicate WT strain lines for different users.</li>
+            <li><strong>Projects</strong> shows which projects this line belongs to or can be used in.</li>
+            <li><strong>Owners using this line</strong> shows which owners currently have data using this line.</li>
+            <li>Maintain <strong>Included loci</strong> so new mouse and weaning forms can show useful genotype rows.</li>
+            <li>Use PDFs for husbandry notes, genotyping protocols, and line documentation.</li>
+        </ul>
+        <p>
+            WT mice should usually share one WT strain line. Separate different users' WT colonies with <strong>Project</strong>, <strong>Owner</strong>, cage, UID, and notes.
+        </p>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Genotypes</h2>
+        <ul class="guide-list">
+            <li>Genotype rows mainly come from the mouse strain line. When parentage exists, parent strain lines can also contribute loci.</li>
+            <li>X-linked and Y-linked loci show different options based on mouse sex.</li>
+            <li>If the dropdown does not contain the real result, choose <strong>Custom</strong> and type it manually.</li>
+            <li>After PCR or sequencing results are available, open mouse detail and use <strong>Edit Genotyping Results</strong>.</li>
+            <li>Do not use genotype notes as a replacement for project, strain line, or pedigree fields.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Lists, Search, and Export</h2>
+        <ul class="guide-list">
+            <li>Search commonly works best with UID, cage ID, breeding code, ear tag, toe tag, and other visible identifiers.</li>
+            <li>Filter before editing or exporting to reduce accidental work on the wrong records.</li>
+            <li>If a page looks like many records are missing, click <strong>Reset</strong>; an old filter may still be active.</li>
+            <li>Use pagination for daily work. Use <strong>All</strong> only for small result sets.</li>
+            <li>Use export for analysis, backup, or sharing a snapshot. Avoid copying rows manually from the page.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Import</h2>
+        <p>
+            For small daily additions, use the regular forms instead of Excel import.
+            Import is better for historical cleanup, one-time large entry, or administrator maintenance.
+        </p>
+        <ul class="guide-list">
+            <li>Download the system template first and do not rename columns.</li>
+            <li>Mouse UID and cage ID must be unique.</li>
+            <li>Use <code>YYYY-MM-DD</code> dates.</li>
+            <li>Use allowed system values for status, sex, cage type, and purpose.</li>
+            <li>If import creates placeholder projects, strain lines, or cages, review them afterward.</li>
+            <li>When unsure, ask a manager or admin before importing.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Permissions</h2>
+        <ul class="guide-list">
+            <li><strong>Admin</strong>: can manage users, roles, audit logs, and global data.</li>
+            <li><strong>Manager</strong>: can usually maintain project data and run common workflows.</li>
+            <li><strong>Member</strong>: can view and use routine pages, but may not be able to import, archive, or manage members.</li>
+            <li>If the system blocks saving, first check whether you are in the correct project and whether your account has the required role.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Good Habits</h2>
+        <ul class="guide-list">
+            <li>Record <strong>Move Cage</strong> on the day a cage move happens.</li>
+            <li>Do not reuse mouse UIDs or cage IDs.</li>
+            <li>Use notes for background context, but keep structured information in structured fields.</li>
+            <li>Close breedings and move breeders when breeding ends.</li>
+            <li>Review weaned and not-weaned litters separately.</li>
+            <li>For normal historical records, prefer inactive, retired, archived, or terminal status instead of deleting.</li>
+        </ul>
+    </section>
+
+    <section class="card guide-card">
+        <h2>Common Questions</h2>
+        <dl class="guide-faq">
+            <dt>Why can one pup have multiple possible dams?</dt>
+            <dd>In two-dam or multi-dam breeding, the exact mother is often unknown. Recording all possible dams keeps the pedigree honest.</dd>
+
+            <dt>Should weaning automatically end a litter?</dt>
+            <dd>Weaned means individual mouse records have been created. Ended or archived means the record is fully closed. Keep them separate unless the lab decides all weaned litters should close immediately.</dd>
+
+            <dt>Why does End Breeding require destination cages?</dt>
+            <dd>When breeding ends, breeders leave the breeding cage. The system needs their next cage to keep current occupancy correct.</dd>
+
+            <dt>What if a picker cannot find a mouse or cage?</dt>
+            <dd>Check owner, project, strain line, include inactive, and other filters first. Use Reset or a different search term if needed.</dd>
+
+            <dt>What if I entered something incorrectly?</dt>
+            <dd>Edit normal mistakes directly. For historical data, deletion, or bulk changes, ask an admin first.</dd>
+
+            <dt>What if a page is slow or results look wrong?</dt>
+            <dd>Clear filters, reduce the result set, and hard-refresh the browser. If it still looks wrong, tell the admin the exact URL and what you were trying to do.</dd>
+        </dl>
+    </section>
+</div>
+
+<script>
+(() => {
+    const langBlocks = Array.from(document.querySelectorAll("[data-guide-lang]"));
+    const buttons = Array.from(document.querySelectorAll("[data-guide-set-lang]"));
+
+    function normalizeLang(value) {
+        return value === "en" ? "en" : "zh";
+    }
+
+    function setGuideLang(lang) {
+        const selected = normalizeLang(lang);
+        langBlocks.forEach((block) => {
+            block.hidden = block.dataset.guideLang !== selected;
+        });
+        buttons.forEach((button) => {
+            const active = button.dataset.guideSetLang === selected;
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+            button.classList.toggle("button-light", !active);
+        });
+    }
+
+    setGuideLang("zh");
+    buttons.forEach((button) => {
+        button.addEventListener("click", () => setGuideLang(button.dataset.guideSetLang));
+    });
+})();
+</script>
 {% endblock %}

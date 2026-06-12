@@ -1228,6 +1228,17 @@ body.col-resize-active * {
     margin-bottom: 10px;
 }
 
+.guide-language-switch {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.guide-language-button[aria-pressed="true"] {
+    cursor: default;
+}
+
 .guide-subheading {
     font-size: 1.05rem;
     font-weight: 600;
