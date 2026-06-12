@@ -3,6 +3,7 @@ import json
 from django import forms
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.forms import BaseInlineFormSet, inlineformset_factory
 from django.utils import timezone
 from django.utils.safestring import mark_safe
@@ -144,12 +145,224 @@ def _selected_cage_queryset(*values, active_only: bool = True):
     return cages.order_by("cage_id")
 
 
+class MouseParentageMode:
+    NONE = "none"
+    BREEDING_CAGE = "breeding_cage"
+    SELECT_PARENTS = "select_parents"
+
+
+MOUSE_PARENTAGE_CHOICES = (
+    (MouseParentageMode.NONE, "No parentage recorded"),
+    (MouseParentageMode.BREEDING_CAGE, "Use breeding cage parents (dam uncertain)"),
+    (MouseParentageMode.SELECT_PARENTS, "Select sire and possible dam(s)"),
+)
+
+
+def _data_values(data, name: str) -> list:
+    if not data:
+        return []
+    if hasattr(data, "getlist"):
+        return list(data.getlist(name))
+    value = data.get(name)
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _listify_initial(value) -> list:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _breeding_model():
+    from breeding.models import Breeding
+
+    return Breeding
+
+
+def _parent_breeding_queryset(*values):
+    Breeding = _breeding_model()
+    ids = {_coerce_positive_int(value) for value in values}
+    ids.discard(None)
+    predicate = Q(active=True)
+    if ids:
+        predicate |= Q(pk__in=ids)
+    return (
+        Breeding.objects.filter(predicate)
+        .select_related("cage", "male", "female_1", "female_2")
+        .prefetch_related("breeding_members__mouse", "extra_female_links__mouse")
+        .distinct()
+        .order_by("cage__cage_id", "breeding_code")
+    )
+
+
+def _parent_breeding_label(breeding) -> str:
+    cage = breeding.cage.cage_id if breeding.cage_id else "No cage"
+    status = breeding.get_status_display()
+    return f"{cage} - {breeding.breeding_code} ({status})"
+
+
+def _breeding_parent_mice(breeding) -> tuple[Mouse | None, list[Mouse]]:
+    from colony.breeding_pedigree import breeding_sire_and_dams
+
+    return breeding_sire_and_dams(breeding)
+
+
+def _apply_parentage_field_attrs(form) -> None:
+    for name in ("parentage_mode", "source_breeding", "sire", "dam", "possible_dams"):
+        field = form.fields.get(name)
+        if field is not None:
+            existing = field.widget.attrs.get("class", "")
+            field.widget.attrs["class"] = f"{existing} filter-control".strip()
+
+
+def _configure_mouse_parentage_fields(form, *, instance: Mouse | None = None) -> None:
+    selected_source = (
+        form.data.get("source_breeding")
+        if form.is_bound
+        else form.initial.get("source_breeding")
+        or (instance.source_breeding_id if instance is not None and instance.pk else None)
+    )
+    form.fields["source_breeding"].queryset = _parent_breeding_queryset(selected_source)
+    form.fields["source_breeding"].label_from_instance = _parent_breeding_label
+
+    source_sire_id = None
+    source_dam_ids: list[int] = []
+    source_id = _coerce_positive_int(selected_source)
+    if source_id:
+        breeding = form.fields["source_breeding"].queryset.filter(pk=source_id).first()
+        if breeding is not None:
+            source_sire, source_dams = _breeding_parent_mice(breeding)
+            source_sire_id = source_sire.pk if source_sire is not None else None
+            source_dam_ids = [dam.pk for dam in source_dams]
+
+    initial_possible = _data_values(form.data, "possible_dams") if form.is_bound else _listify_initial(form.initial.get("possible_dams"))
+    if instance is not None and instance.pk and not form.is_bound:
+        if instance.source_breeding_id:
+            form.initial.setdefault("source_breeding", instance.source_breeding_id)
+        if instance.sire_id:
+            form.initial.setdefault("sire", instance.sire_id)
+        possible_ids = list(instance.possible_dams.values_list("pk", flat=True))
+        if possible_ids:
+            form.initial.setdefault("possible_dams", possible_ids)
+            initial_possible.extend(possible_ids)
+        elif instance.dam_id:
+            form.initial.setdefault("possible_dams", [instance.dam_id])
+            initial_possible.append(instance.dam_id)
+
+        if instance.source_breeding_id:
+            form.initial.setdefault("parentage_mode", MouseParentageMode.BREEDING_CAGE)
+        elif instance.sire_id or instance.dam_id or possible_ids:
+            form.initial.setdefault("parentage_mode", MouseParentageMode.SELECT_PARENTS)
+        else:
+            form.initial.setdefault("parentage_mode", MouseParentageMode.NONE)
+    elif not form.is_bound:
+        form.initial.setdefault("parentage_mode", form.initial.get("parentage_mode") or MouseParentageMode.NONE)
+
+    form.fields["sire"].queryset = _selected_mouse_queryset(
+        form.data.get("sire") if form.is_bound else form.initial.get("sire"),
+        instance.sire_id if instance is not None and instance.pk else None,
+        source_sire_id,
+    )
+    form.fields["dam"].queryset = _selected_mouse_queryset(
+        form.data.get("dam") if form.is_bound else form.initial.get("dam"),
+        instance.dam_id if instance is not None and instance.pk else None,
+        *initial_possible,
+        *source_dam_ids,
+    )
+    form.fields["possible_dams"].queryset = _selected_mouse_queryset(
+        *initial_possible,
+        form.data.get("dam") if form.is_bound else form.initial.get("dam"),
+        instance.dam_id if instance is not None and instance.pk else None,
+        *source_dam_ids,
+    )
+    form.fields["sire"].label = "Sire"
+    form.fields["dam"].label = "Known dam (internal)"
+    form.fields["possible_dams"].label = "Possible dam(s)"
+    form.fields["possible_dams"].help_text = "Select one dam if known, or multiple dams when the exact mother is unknown."
+    _apply_parentage_field_attrs(form)
+
+
+def _clean_mouse_parentage(form, cleaned_data: dict) -> dict:
+    mode = cleaned_data.get("parentage_mode") or MouseParentageMode.NONE
+    source_breeding = cleaned_data.get("source_breeding")
+    sire = cleaned_data.get("sire")
+    hidden_dam = cleaned_data.get("dam")
+    possible_dams = list(cleaned_data.get("possible_dams") or [])
+    if hidden_dam is not None and all(dam.pk != hidden_dam.pk for dam in possible_dams):
+        possible_dams.insert(0, hidden_dam)
+
+    mode_was_posted = bool(getattr(form, "is_bound", False) and "parentage_mode" in getattr(form, "data", {}))
+    if (
+        mode == MouseParentageMode.NONE
+        and not mode_was_posted
+        and (source_breeding is not None or sire is not None or possible_dams)
+    ):
+        mode = MouseParentageMode.BREEDING_CAGE if source_breeding is not None and sire is None and not possible_dams else MouseParentageMode.SELECT_PARENTS
+
+    if mode == MouseParentageMode.BREEDING_CAGE:
+        if source_breeding is None:
+            form.add_error("source_breeding", "Select a breeding cage, or choose another parentage mode.")
+        else:
+            sire, possible_dams = _breeding_parent_mice(source_breeding)
+            if sire is None:
+                form.add_error("source_breeding", "Selected breeding cage has no sire.")
+            if not possible_dams:
+                form.add_error("source_breeding", "Selected breeding cage has no dam.")
+    elif mode == MouseParentageMode.SELECT_PARENTS:
+        source_breeding = None
+        if sire is None and not possible_dams:
+            form.add_error("sire", "Select a sire and/or possible dam(s), or choose No parentage recorded.")
+    else:
+        mode = MouseParentageMode.NONE
+        source_breeding = None
+        sire = None
+        possible_dams = []
+
+    if sire is not None and sire.sex != Mouse.Sex.MALE:
+        form.add_error("sire", "Sire must be a male mouse.")
+    for dam in possible_dams:
+        if dam.sex != Mouse.Sex.FEMALE:
+            form.add_error("possible_dams", f"{dam.mouse_uid} is not a female mouse.")
+            break
+
+    cleaned_data["parentage_mode"] = mode
+    cleaned_data["source_breeding"] = source_breeding
+    cleaned_data["sire"] = sire
+    cleaned_data["dam"] = possible_dams[0] if len(possible_dams) == 1 else None
+    cleaned_data["possible_dams"] = possible_dams if len(possible_dams) > 1 else []
+    return cleaned_data
+
+
 class MouseForm(forms.ModelForm):
+    parentage_mode = forms.ChoiceField(
+        choices=MOUSE_PARENTAGE_CHOICES,
+        required=False,
+        label="Parentage",
+        initial=MouseParentageMode.NONE,
+    )
     current_cage_lookup = forms.CharField(
         max_length=64,
         required=False,
         label="Or enter cage ID",
         help_text="Partial cage ID is supported. Must match an existing cage.",
+    )
+    source_breeding = forms.ModelChoiceField(
+        queryset=_breeding_model().objects.none(),
+        required=False,
+        label="Breeding cage",
+        help_text="Selecting a breeding cage uses its sire and all dams.",
+    )
+    possible_dams = forms.ModelMultipleChoiceField(
+        queryset=Mouse.objects.none(),
+        required=False,
+        label="Possible dam(s)",
+        widget=forms.SelectMultiple(attrs={"size": 6}),
     )
 
     class Meta:
@@ -166,6 +379,8 @@ class MouseForm(forms.ModelForm):
             "current_cage",
             "sire",
             "dam",
+            "source_breeding",
+            "possible_dams",
             "project",
             "ear_tag",
             "toe_tag",
@@ -210,8 +425,7 @@ class MouseForm(forms.ModelForm):
             self.data.get("dam") if self.is_bound else self.initial.get("dam"),
             self.instance.dam_id if self.instance and self.instance.pk else None,
         )
-        self.fields["sire"].label = "Sire (Father)"
-        self.fields["dam"].label = "Dam (Mother)"
+        _configure_mouse_parentage_fields(self, instance=self.instance)
         self.fields["project"].queryset = self.fields["project"].queryset.order_by("name")
         self.fields["project"].required = True
         if self.instance.pk:
@@ -238,6 +452,7 @@ class MouseForm(forms.ModelForm):
             elif resolved is not None:
                 cleaned_data["current_cage"] = resolved
 
+        _clean_mouse_parentage(self, cleaned_data)
         return cleaned_data
 
 
@@ -247,6 +462,12 @@ MOUSE_BATCH_MAX_ROWS = 50
 class MouseBatchSharedForm(forms.Form):
     """Shared litter/colony fields when creating multiple mice at once."""
 
+    parentage_mode = forms.ChoiceField(
+        choices=MOUSE_PARENTAGE_CHOICES,
+        required=False,
+        label="Parentage",
+        initial=MouseParentageMode.NONE,
+    )
     birth_date = forms.DateField(
         required=False,
         widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
@@ -271,6 +492,18 @@ class MouseBatchSharedForm(forms.Form):
     )
     sire = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Sire (Father)")
     dam = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Dam (Mother)")
+    source_breeding = forms.ModelChoiceField(
+        queryset=_breeding_model().objects.none(),
+        required=False,
+        label="Breeding cage",
+        help_text="Selecting a breeding cage uses its sire and all dams.",
+    )
+    possible_dams = forms.ModelMultipleChoiceField(
+        queryset=Mouse.objects.none(),
+        required=False,
+        label="Possible dam(s)",
+        widget=forms.SelectMultiple(attrs={"size": 6}),
+    )
     project = forms.ModelChoiceField(queryset=Project.objects.none(), required=True)
     origin = forms.CharField(required=False, max_length=128)
     coat_color = forms.CharField(required=False, max_length=64)
@@ -289,6 +522,7 @@ class MouseBatchSharedForm(forms.Form):
         self.fields["dam"].queryset = _selected_mouse_queryset(
             self.data.get("dam") if self.is_bound else self.initial.get("dam")
         )
+        _configure_mouse_parentage_fields(self)
         self.fields["project"].queryset = Project.objects.filter(is_active=True).order_by("name")
 
     def clean(self):
@@ -300,6 +534,7 @@ class MouseBatchSharedForm(forms.Form):
                 self.add_error("current_cage_lookup", err)
             elif resolved is not None:
                 cleaned_data["current_cage"] = resolved
+        _clean_mouse_parentage(self, cleaned_data)
         return cleaned_data
 
 

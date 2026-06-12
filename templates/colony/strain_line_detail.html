@@ -19,12 +19,28 @@
     <article class="card">
         <h2>Definition</h2>
         <dl class="detail-grid">
-            <dt>Owner</dt><dd>{{ line.owner_display }}</dd>
+            <dt>Line owner</dt><dd>{{ line.owner_display }}</dd>
             <dt>Projects</dt>
             <dd>
                 {% if related_projects %}
                     {% for project in related_projects %}
                         <a class="link-primary" href="{% url 'project_detail' project.pk %}">{{ project.name }}</a>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <span class="muted">—</span>
+                {% endif %}
+            </dd>
+            <dt>Owners using this line</dt>
+            <dd>
+                {% if owner_rows %}
+                    {% for row in owner_rows %}
+                        <div>
+                            <a class="link-primary" href="{% url 'accounts:user_detail' row.owner.pk %}">{{ row.owner_display }}</a>
+                            <span class="muted small-print">
+                                · {{ row.active_mice_count }} active / {{ row.total_mice_count }} total mice
+                                · {{ row.projects|length }} project{% if row.projects|length != 1 %}s{% endif %}
+                            </span>
+                        </div>
                     {% endfor %}
                 {% else %}
                     <span class="muted">—</span>

@@ -3,29 +3,143 @@
 {% block title %}Create Litter from Breeding | MouseXGene{% endblock %}
 
 {% block content %}
-<section class="page-header">
-    <h1>Create Litter from Breeding</h1>
-    <p class="muted">Select a breeding, then continue to the litter record form.</p>
+<section class="page-header page-header-row">
+    <div>
+        <h1>Create Litter from Breeding</h1>
+        <p class="muted">Find the breeding setup, then record a litter from that row.</p>
+        {% if strain_line_filter_label %}
+            <p class="muted small-print">Filtered to breedings for strain line <strong>{{ strain_line_filter_label }}</strong>.</p>
+        {% endif %}
+    </div>
+    <div class="action-links">
+        <a href="{% url 'litters:litter_list' %}" class="button button-light">Back to Litters</a>
+    </div>
 </section>
 
-<section class="card">
-    <form method="post" class="form-layout">
-        {% csrf_token %}
-        <div class="form-row">
-            <label for="id_breeding_id">Breeding</label>
-            <select id="id_breeding_id" name="breeding_id" class="filter-control" required>
-                <option value="">Select breeding</option>
-                {% for breeding in breeding_options %}
-                    <option value="{{ breeding.pk }}" {% if selected_breeding_id == breeding.pk|stringformat:"s" %}selected{% endif %}>
-                        {{ breeding.breeding_code }}{% if breeding.cage %} · Cage {{ breeding.cage.cage_id }}{% endif %}
-                    </option>
+<section class="card card--filters">
+    <form method="get" class="filter-form" action="{% url 'litters:litter_create_from_breeding' %}">
+        <div class="filter-row filter-row--primary">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search breeding code, cage, sire, or dam" class="search-input filter-control" aria-label="Search breedings">
+            {% include "includes/_owner_filter_select.html" %}
+            <select name="project" class="filter-control" aria-label="Project">
+                <option value="">All projects</option>
+                {% for item in project_options %}
+                    <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
                 {% endfor %}
             </select>
+            <select name="strain_line_id" class="filter-control" aria-label="Strain line">
+                <option value="">All strain lines</option>
+                {% for item in strain_line_options %}
+                    <option value="{{ item.pk }}" {% if strain_line_id == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.line_name }}</option>
+                {% endfor %}
+            </select>
+            <select name="status" class="filter-control" aria-label="Status">
+                <option value="">All statuses</option>
+                {% for value, label in status_options %}
+                    <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <div class="filter-actions">
+                <button type="submit" class="button">Apply</button>
+                <a href="{% url 'litters:litter_create_from_breeding' %}" class="button button-reset">Reset</a>
+            </div>
         </div>
-        <div class="form-actions">
-            <button type="submit" class="button">Continue</button>
-            <a href="{% url 'litters:litter_list' %}" class="button">Cancel</a>
+        <div class="filter-row filter-row--secondary filter-row--per-page">
+            <label class="filter-label" for="id_include_closed_create_litter">Include closed</label>
+            <select name="include_closed" id="id_include_closed_create_litter" class="filter-control">
+                <option value="">Active/open only</option>
+                <option value="yes" {% if include_closed == "yes" %}selected{% endif %}>Include closed</option>
+            </select>
+            <label class="filter-label" for="id_per_page_create_litter">Per page</label>
+            <select name="per_page" id="id_per_page_create_litter" class="filter-control" onchange="this.form.requestSubmit()">
+                <option value="25" {% if per_page == "25" %}selected{% endif %}>25</option>
+                <option value="50" {% if per_page == "50" %}selected{% endif %}>50</option>
+                <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
+                <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %}>All (≤{{ list_all_max }})</option>
+            </select>
+            {% if total_count %}
+                <p class="list-range-meta muted">
+                    {% if page_obj and per_page != "all" %}
+                        Rows {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ total_count }}
+                    {% elif per_page == "all" %}
+                        Showing all {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% else %}
+                        {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% endif %}
+                </p>
+            {% endif %}
         </div>
     </form>
 </section>
+
+<section class="table-wrap">
+    <table class="data-table data-table--compact">
+        <thead>
+            <tr>
+                <th>Breeding Code</th>
+                <th>Cage</th>
+                <th>Sire</th>
+                <th>Dams</th>
+                <th>Owner</th>
+                <th>Start</th>
+                <th>Expected Birth</th>
+                <th>Litters</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for breeding in breeding_options %}
+                <tr>
+                    <td><a class="link-primary" href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
+                    <td>
+                        {% if breeding.cage %}
+                            <a class="link-primary" href="{% url 'colony:cage_detail' breeding.cage.pk %}">{{ breeding.cage.cage_id }}</a>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if breeding.display_sire %}
+                            <a class="link-primary" href="{% url 'mice:mouse_detail' breeding.display_sire.pk %}">{{ breeding.display_sire.mouse_uid }}</a>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% for dam in breeding.display_dams %}
+                            <div><a class="link-primary" href="{% url 'mice:mouse_detail' dam.pk %}">{{ dam.mouse_uid }}</a></div>
+                        {% empty %}
+                            —
+                        {% endfor %}
+                    </td>
+                    <td>
+                        {% for owner_row in breeding.owner_rows %}
+                            <div>{{ owner_row.owner_display }}</div>
+                        {% empty %}
+                            —
+                        {% endfor %}
+                    </td>
+                    <td>{{ breeding.start_date|default:"—" }}</td>
+                    <td>{{ breeding.display_expected_birth_date|default:"—" }}</td>
+                    <td>
+                        {{ breeding.litter_count|default:0 }}
+                        {% if breeding.latest_litter_date %}
+                            <div class="muted small-print">Latest {{ breeding.latest_litter_date }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="status-pill status-pill-{{ breeding.status }}">{{ breeding.get_status_display }}</span>
+                        {% if not breeding.active %}<div class="muted small-print">Inactive</div>{% endif %}
+                    </td>
+                    <td><a class="button button-small" href="{% url 'breeding:litter_create' breeding.pk %}">Create Litter</a></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="10" class="empty-row">No breedings match these filters.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+{% include "includes/pagination_nav.html" %}
 {% endblock %}

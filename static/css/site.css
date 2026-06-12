@@ -2136,8 +2136,73 @@ body.col-resize-active * {
     font-size: 0.82rem;
 }
 
+.data-table--end-breeding {
+    table-layout: fixed;
+    min-width: 760px;
+}
+
+.data-table--end-breeding .end-breeding-col-mouse {
+    width: 26%;
+}
+
+.data-table--end-breeding .end-breeding-col-sex {
+    width: 10%;
+}
+
+.data-table--end-breeding .end-breeding-col-current {
+    width: 20%;
+}
+
+.data-table--end-breeding .end-breeding-col-destination {
+    width: 44%;
+}
+
+.data-table--end-breeding td {
+    vertical-align: top;
+}
+
+.data-table--end-breeding select[name^="destination_cage_"] {
+    width: 100%;
+    max-width: 100%;
+}
+
+.end-cage-row-actions {
+    margin-top: 6px;
+}
+
+.end-cage-exception {
+    margin-top: 6px;
+}
+
 .strain-pdf-upload-form {
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--line);
+}
+
+.strain-pdf-upload-rows {
+    display: grid;
+    gap: 12px;
+}
+
+.strain-pdf-upload-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fafbfc;
+}
+
+.strain-pdf-remove-row {
+    justify-self: start;
+}
+
+.checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
 }

@@ -13,10 +13,7 @@
             <a class="button" href="{% url 'breeding:breeding_edit' breeding.pk %}">Edit Breeding</a>
             <a class="button" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
             {% if breeding.status != "closed" or breeding.active %}
-                <form method="post" action="{% url 'breeding:breeding_end' breeding.pk %}" class="action-inline-form">
-                    {% csrf_token %}
-                    <button type="submit" class="button">End Breeding</button>
-                </form>
+                <a class="button" href="{% url 'breeding:breeding_end' breeding.pk %}">End Breeding</a>
             {% endif %}
         {% endif %}
     </div>

@@ -16,13 +16,19 @@ from django.utils import timezone
 from openpyxl import Workbook
 
 from colony.cage_form_helpers import cage_filter_form_context
-from colony.cage_lifecycle import enrich_pending_breeding_cage, mark_cage_as_breeding, pending_breeding_cages_queryset, sync_breeding_member_cages
+from colony.cage_lifecycle import (
+    enrich_pending_breeding_cage,
+    mark_cage_as_breeding,
+    pending_breeding_cages_queryset,
+    sync_breeding_member_cages,
+    sync_cage_status_from_mice,
+)
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import breeding_age_tier
 
-from .forms import BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
+from .forms import EndBreedingForm, BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
@@ -634,6 +640,7 @@ def _litter_wean_page_context(
     breeding_sire=None,
     breeding_dams=None,
     wean_primary_dam=None,
+    parent_breeding_options=None,
     breeding_has_trio_dam: bool = False,
     wean_counts_source: str = "manual",
     cage_project_filter: str = "",
@@ -651,6 +658,7 @@ def _litter_wean_page_context(
         "breeding_sire": breeding_sire,
         "breeding_dams": breeding_dams,
         "wean_primary_dam": wean_primary_dam,
+        "parent_breeding_options": parent_breeding_options,
         "breeding_has_trio_dam": breeding_has_trio_dam,
         "wean_counts_source": wean_counts_source,
         "sire_strain_line": sire_strain,
@@ -667,6 +675,50 @@ def _litter_wean_page_context(
         "litter_recorded_male_count": litter.male_count,
         "litter_recorded_female_count": litter.female_count,
     }
+
+
+def _wean_parent_breeding_queryset(user, current_breeding: Breeding):
+    return (
+        _scoped_breedings(user)
+        .filter(cage__isnull=False)
+        .filter(
+            Q(pk=current_breeding.pk)
+            | Q(cage__purpose=Cage.Purpose.BREEDING)
+            | Q(cage__cage_type=Cage.CageType.BREEDING)
+        )
+        .distinct()
+        .order_by("cage__cage_id", "-active", "-start_date", "breeding_code")
+    )
+
+
+def _single_project_from_dams(dams: list[Mouse]) -> tuple[Project | None, str | None]:
+    projects = []
+    seen: set[int] = set()
+    for dam in dams:
+        if dam.project_id and dam.project_id not in seen:
+            seen.add(dam.project_id)
+            projects.append(dam.project)
+    if len(projects) == 1:
+        return projects[0], None
+    if not projects:
+        return None, "Selected possible dam(s) have no project assigned."
+    names = ", ".join(project.name for project in projects)
+    return None, f"Possible dams belong to different projects ({names}). Choose sire project or create a new project."
+
+
+def _single_strain_from_dams(dams: list[Mouse]) -> tuple[StrainLine | None, str | None]:
+    strains = []
+    seen: set[int] = set()
+    for dam in dams:
+        if dam.strain_line_id and dam.strain_line_id not in seen:
+            seen.add(dam.strain_line_id)
+            strains.append(dam.strain_line)
+    if len(strains) == 1:
+        return strains[0], None
+    if not strains:
+        return None, "Selected possible dam(s) have no strain line assigned."
+    names = ", ".join(strain.line_name for strain in strains)
+    return None, f"Possible dams have different strain lines ({names}). Choose sire strain or create a new strain line."
 
 
 def user_can_edit_litter(user, litter: Litter) -> bool:
@@ -725,6 +777,7 @@ def resolve_wean_strain_line(
     new_line_name: str,
     sire: Mouse | None,
     dam: Mouse | None,
+    possible_dams: list[Mouse] | None = None,
     user,
     litter_display: str,
     breeding_code: str,
@@ -735,6 +788,8 @@ def resolve_wean_strain_line(
             return None, "Sire has no strain line assigned."
         return sire.strain_line, None
     if mode == WeanLitterForm.StrainAssignmentMode.DAM:
+        if possible_dams is not None:
+            return _single_strain_from_dams(possible_dams)
         if not dam or not dam.strain_line_id:
             return None, "Dam has no strain line assigned."
         return dam.strain_line, None
@@ -1130,26 +1185,131 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
     breeding = get_object_or_404(_scoped_breedings(request.user), pk=pk)
-    ensure_can_edit_mice_projects(request.user, _breeding_member_mice(breeding))
-    if request.method != "POST":
-        return redirect("breeding:breeding_detail", pk=breeding.pk)
+    members = _breeding_member_mice(breeding)
+    ensure_can_edit_mice_projects(request.user, members)
     if breeding.status == Breeding.Status.CLOSED and not breeding.active:
         messages.info(request, f"Breeding {breeding.breeding_code} is already closed.")
         return redirect("breeding:breeding_detail", pk=breeding.pk)
 
-    breeding.status = Breeding.Status.CLOSED
-    breeding.active = False
-    if not breeding.archived_at:
-        breeding.archived_at = timezone.now()
-    breeding.save(update_fields=["status", "active", "archived_at"])
-    log_audit_event(
-        user=request.user,
-        action=AuditLog.Action.UPDATE,
-        obj=breeding,
-        message=f"Ended breeding {breeding.breeding_code}.",
+    if request.method == "POST":
+        form = EndBreedingForm(request.POST, breeding=breeding, members=members)
+        if form.is_valid():
+            end_date = form.cleaned_data["end_date"]
+            notes = (form.cleaned_data.get("notes") or "").strip()
+            reason = f"Breeding ended: {breeding.breeding_code}"
+            affected_cage_ids: set[int] = {breeding.cage_id} if breeding.cage_id else set()
+            move_messages: list[str] = []
+
+            with transaction.atomic():
+                locked_breeding = Breeding.objects.select_for_update().get(pk=breeding.pk)
+                locked_mice = {
+                    mouse.pk: mouse
+                    for mouse in Mouse.objects.select_for_update().filter(pk__in=[member.pk for member in members])
+                }
+                destinations = {
+                    mouse_pk: (
+                        Cage.objects.select_for_update().filter(pk=destination.pk).first()
+                        if destination is not None
+                        else None
+                    )
+                    for mouse_pk, destination in form.destination_map.items()
+                }
+
+                for member in members:
+                    mouse = locked_mice[member.pk]
+                    destination = destinations.get(member.pk)
+                    origin_cage = Cage.objects.filter(pk=mouse.current_cage_id).first() if mouse.current_cage_id else None
+                    if origin_cage:
+                        affected_cage_ids.add(origin_cage.pk)
+                    if destination:
+                        affected_cage_ids.add(destination.pk)
+
+                    if origin_cage and destination and origin_cage.pk == destination.pk:
+                        move_messages.append(f"{mouse.mouse_uid}: kept in {destination.cage_id}")
+                        continue
+
+                    current_memberships = list(
+                        CageMembership.objects.select_for_update().filter(mouse=mouse, is_current=True)
+                    )
+                    for membership in current_memberships:
+                        membership_end_date = end_date
+                        if membership.start_date and membership_end_date < membership.start_date:
+                            membership_end_date = membership.start_date
+                        membership.end_date = membership_end_date
+                        membership.is_current = False
+                        membership.reason = reason[:128]
+                        membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+
+                    mouse.current_cage = destination
+                    mouse.save(update_fields=["current_cage", "updated_at"])
+                    if destination is not None:
+                        CageMembership.objects.create(
+                            mouse=mouse,
+                            cage=destination,
+                            start_date=end_date,
+                            end_date=None,
+                            is_current=True,
+                            reason=reason[:128],
+                            notes=notes,
+                        )
+                        move_messages.append(
+                            f"{mouse.mouse_uid}: {origin_cage.cage_id if origin_cage else 'No cage'} -> {destination.cage_id}"
+                        )
+                    else:
+                        move_messages.append(
+                            f"{mouse.mouse_uid}: {origin_cage.cage_id if origin_cage else 'No cage'} -> no current cage"
+                        )
+
+                locked_breeding.status = Breeding.Status.CLOSED
+                locked_breeding.active = False
+                if not locked_breeding.archived_at:
+                    locked_breeding.archived_at = timezone.now()
+                locked_breeding.save(update_fields=["status", "active", "archived_at"])
+
+                if locked_breeding.cage_id:
+                    breeding_cage = Cage.objects.select_for_update().filter(pk=locked_breeding.cage_id).first()
+                    if breeding_cage is not None and not breeding_cage.current_mice.exists():
+                        cage_updates: list[str] = []
+                        if breeding_cage.purpose == Cage.Purpose.BREEDING:
+                            breeding_cage.purpose = Cage.Purpose.HOLDING
+                            cage_updates.append("purpose")
+                        if breeding_cage.cage_type == Cage.CageType.BREEDING:
+                            breeding_cage.cage_type = Cage.CageType.STANDARD
+                            cage_updates.append("cage_type")
+                        if cage_updates:
+                            cage_updates.append("updated_at")
+                            breeding_cage.save(update_fields=cage_updates)
+
+                for cage in Cage.objects.filter(pk__in=affected_cage_ids):
+                    sync_cage_status_from_mice(cage)
+
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=breeding,
+                message=(
+                    f"Ended breeding {breeding.breeding_code} on {end_date}. "
+                    f"Breeder movements: {'; '.join(move_messages)}"
+                )[:4000],
+            )
+            messages.success(request, f"Breeding {breeding.breeding_code} ended and breeder cages updated.")
+            return redirect("breeding:breeding_detail", pk=breeding.pk)
+    else:
+        form = EndBreedingForm(breeding=breeding, members=members)
+
+    breeding_sire, breeding_dams = _breeding_sire_and_dams(breeding)
+    return render(
+        request,
+        "breeding/breeding_end.html",
+        {
+            "breeding": breeding,
+            "form": form,
+            "member_rows": form.member_rows,
+            "breeding_sire": breeding_sire,
+            "breeding_dams": breeding_dams,
+            **cage_filter_form_context(),
+        },
     )
-    messages.success(request, f"Breeding {breeding.breeding_code} ended.")
-    return redirect("breeding:breeding_detail", pk=breeding.pk)
 
 
 def _enrich_litters_for_list(litters: list[Litter], *, today, user) -> None:
@@ -1464,7 +1624,12 @@ def litter_list(request: HttpRequest) -> HttpResponse:
 
 @authenticated_required
 def litter_create_from_breeding(request: HttpRequest) -> HttpResponse:
-    breeding_options = list(_scoped_breedings(request.user).order_by("-start_date", "breeding_code"))
+    q = (request.GET.get("q") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
+    owner = resolve_project_owner_filter(request)
+    strain_line_id = (request.GET.get("strain_line_id") or request.GET.get("strain_line") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    include_closed = (request.GET.get("include_closed") or "").strip()
     selected_breeding_id = (request.POST.get("breeding_id") or request.GET.get("breeding_id") or "").strip()
     if request.method == "POST":
         if not selected_breeding_id:
@@ -1480,12 +1645,89 @@ def litter_create_from_breeding(request: HttpRequest) -> HttpResponse:
                     messages.error(request, "Selected breeding is not available.")
                 else:
                     return redirect("breeding:litter_create", breeding_pk=breeding.pk)
+
+    breeding_options = _scoped_breedings(request.user)
+    if include_closed != "yes":
+        breeding_options = breeding_options.filter(active=True).exclude(status=Breeding.Status.CLOSED)
+    if owner and not strain_line_id:
+        breeding_options = breeding_options.filter(breeding_project_owner_filter_q(owner))
+    if project:
+        breeding_options = breeding_options.filter(
+            Q(male__project_id=project)
+            | Q(female_1__project_id=project)
+            | Q(female_2__project_id=project)
+            | Q(extra_female_links__mouse__project_id=project)
+            | Q(breeding_members__mouse__project_id=project)
+        )
+    if strain_line_id:
+        try:
+            breeding_options = breeding_options.filter(strain_line_member_breeding_filter(int(strain_line_id)))
+        except (TypeError, ValueError):
+            breeding_options = breeding_options.none()
+    if status:
+        breeding_options = breeding_options.filter(status=status)
+    if q:
+        breeding_options = breeding_options.filter(
+            Q(breeding_code__icontains=q)
+            | Q(cage__cage_id__icontains=q)
+            | Q(male__mouse_uid__icontains=q)
+            | Q(female_1__mouse_uid__icontains=q)
+            | Q(female_2__mouse_uid__icontains=q)
+            | Q(extra_female_links__mouse__mouse_uid__icontains=q)
+            | Q(breeding_members__mouse__mouse_uid__icontains=q)
+        )
+    breeding_options = (
+        breeding_options.distinct()
+        .annotate(
+            litter_count=Count("litters", distinct=True),
+            latest_litter_date=Max("litters__birth_date"),
+        )
+        .order_by("expected_birth_date", "-start_date", "breeding_code")
+    )
+    pagination = _paginate_queryset_for_list(
+        request,
+        breeding_options,
+        viewname="litters:litter_create_from_breeding",
+    )
+    breeding_rows = list(pagination["items"])
+    today = timezone.localdate()
+    _enrich_breedings_for_list(breeding_rows, today=today)
+    for breeding in breeding_rows:
+        breeding.owner_rows = _litter_owner_rows(
+            breeding,
+            getattr(breeding, "display_sire", None),
+            getattr(breeding, "display_dams", []) or [],
+        )
+
+    strain_line_filter_label = ""
+    if strain_line_id:
+        strain_line_filter_label = (
+            StrainLine.objects.filter(pk=strain_line_id).values_list("line_name", flat=True).first() or ""
+        )
     return render(
         request,
         "breeding/litter_create_from_breeding.html",
         {
-            "breeding_options": breeding_options,
+            "breeding_options": breeding_rows,
             "selected_breeding_id": selected_breeding_id,
+            "q": q,
+            "project": project,
+            "owner": "" if strain_line_id else owner,
+            "strain_line_id": strain_line_id,
+            "strain_line_filter_label": strain_line_filter_label,
+            "status": status,
+            "include_closed": include_closed,
+            "project_options": Project.objects.filter(is_active=True).order_by("name"),
+            "owner_options": project_owner_filter_options(),
+            "strain_line_options": StrainLine.objects.filter(is_active=True).order_by("line_name"),
+            "status_options": Breeding.Status.choices,
+            "page_obj": pagination["page_obj"],
+            "paginator": pagination["paginator"],
+            "pagination_hrefs": pagination["pagination_hrefs"],
+            "per_page": pagination["per_page"],
+            "total_count": pagination["total_count"],
+            "all_allowed": pagination["all_allowed"],
+            "list_all_max": LIST_ALL_RESULTS_MAX,
         },
     )
 
@@ -1568,11 +1810,18 @@ def litter_detail(request: HttpRequest, pk: int) -> HttpResponse:
     primary_dam = breeding_dams[0] if breeding_dams else litter.breeding.female_1
     registered_offspring = list(
         Mouse.objects.filter(
-            dam_id=primary_dam.id if primary_dam else litter.breeding.female_1_id,
-            sire_id=breeding_sire.id if breeding_sire else litter.breeding.male_id,
             birth_date=litter.birth_date,
         )
+        .filter(
+            Q(source_breeding=litter.breeding)
+            | Q(
+                dam_id=primary_dam.id if primary_dam else litter.breeding.female_1_id,
+                sire_id=breeding_sire.id if breeding_sire else litter.breeding.male_id,
+            )
+            | Q(possible_dams__in=breeding_dams)
+        )
         .select_related("strain_line", "current_cage", "project")
+        .distinct()
         .order_by("mouse_uid")
     )
     context = {
@@ -1666,7 +1915,13 @@ def litter_end(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     litter = get_object_or_404(
-        Litter.objects.select_related("breeding", "breeding__male", "breeding__female_1")
+        Litter.objects.select_related(
+            "breeding",
+            "breeding__cage",
+            "breeding__male",
+            "breeding__female_1",
+            "breeding__female_2",
+        )
         .prefetch_related("pups")
         .filter(breeding__in=_scoped_breedings(request.user)),
         pk=pk,
@@ -1674,20 +1929,25 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     breeding = litter.breeding
     breeding_sire, breeding_dams = _breeding_sire_and_dams(breeding)
     wean_sire = breeding_sire or breeding.male
-    # Offspring dam is female_1 for now; trio female_2 is not used for strain/genotype in v1.
-    primary_dam = breeding_dams[0] if breeding_dams else breeding.female_1
-    breeding_has_trio_dam = bool(breeding.female_2_id)
+    possible_dams = breeding_dams or [breeding.female_1]
+    primary_dam = possible_dams[0] if possible_dams else None
+    breeding_has_trio_dam = len(possible_dams) > 1
+    parent_breeding_options = _wean_parent_breeding_queryset(request.user, breeding)
+    dam_project, _dam_project_err = _single_project_from_dams(possible_dams)
     sire_project = wean_sire.project if wean_sire and wean_sire.project_id else breeding.male.project
-    dam_project = primary_dam.project if primary_dam and primary_dam.project_id else breeding.female_1.project
     wean_form_kwargs = {
         "sire_project": sire_project,
         "dam_project": dam_project,
         "sire_strain": wean_sire.strain_line if wean_sire and wean_sire.strain_line_id else None,
         "dam_strain": primary_dam.strain_line if primary_dam and primary_dam.strain_line_id else None,
+        "parent_breeding": breeding,
+        "parent_breeding_queryset": parent_breeding_options,
+        "parent_sire": wean_sire,
+        "parent_dams": possible_dams,
     }
     offspring_template_loci = _union_loci_from_strain_lines(
         wean_sire.strain_line if wean_sire else None,
-        primary_dam.strain_line if primary_dam else None,
+        *[dam.strain_line for dam in possible_dams if dam and dam.strain_line_id],
     )
     ensure_can_edit_mice_projects(request.user, _breeding_member_mice(breeding))
     wean_counts_source = "manual"
@@ -1725,6 +1985,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     breeding_sire=breeding_sire or breeding.male,
                     breeding_dams=breeding_dams,
                     wean_primary_dam=primary_dam,
+                    parent_breeding_options=parent_breeding_options,
                     breeding_has_trio_dam=breeding_has_trio_dam,
                     wean_counts_source="manual",
                     cage_project_filter=cage_project_filter,
@@ -1766,14 +2027,36 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     )
 
                 if not wean_form.errors:
+                    parent_source_breeding = wean_form.cleaned_data.get("resolved_parent_breeding") or breeding
+                    selected_wean_sire = wean_form.cleaned_data.get("resolved_sire") or wean_sire
+                    selected_possible_dams = list(
+                        wean_form.cleaned_data.get("resolved_possible_dams") or possible_dams
+                    )
+                    selected_primary_dam = selected_possible_dams[0] if selected_possible_dams else None
+                    dam_for_mouse = selected_primary_dam if len(selected_possible_dams) == 1 else None
+                    offspring_template_loci_for_save = _union_loci_from_strain_lines(
+                        selected_wean_sire.strain_line if selected_wean_sire else None,
+                        *[
+                            dam.strain_line
+                            for dam in selected_possible_dams
+                            if dam is not None and dam.strain_line_id
+                        ],
+                    )
+                    ensure_can_edit_mice_projects(request.user, _breeding_member_mice(parent_source_breeding))
                     male_cage = wean_form.cleaned_data["male_cage"]
                     female_cage = wean_form.cleaned_data["female_cage"]
                     assignment_mode = wean_form.cleaned_data["project_assignment_mode"]
                     inherited_project = None
                     if assignment_mode == WeanLitterForm.ProjectAssignmentMode.SIRE:
-                        inherited_project = sire_project
+                        inherited_project = (
+                            selected_wean_sire.project
+                            if selected_wean_sire is not None and selected_wean_sire.project_id
+                            else None
+                        )
                     elif assignment_mode == WeanLitterForm.ProjectAssignmentMode.DAM:
-                        inherited_project = dam_project
+                        inherited_project, project_err = _single_project_from_dams(selected_possible_dams)
+                        if project_err:
+                            wean_form.add_error("project_assignment_mode", project_err)
                     else:
                         new_project_name = wean_form.cleaned_data["new_project_name"].strip()
                         inherited_project, created = Project.objects.get_or_create(
@@ -1793,16 +2076,19 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                                 user=request.user,
                                 defaults={"role": ProjectMembership.Role.MANAGER},
                             )
+                    if inherited_project is None and not wean_form.errors:
+                        wean_form.add_error("project_assignment_mode", "Could not resolve a project for the pups.")
                 if not wean_form.errors:
                     ensure_can_edit_project_data(request.user, inherited_project)
                     pup_strain_line, strain_err = resolve_wean_strain_line(
                         mode=wean_form.cleaned_data["strain_assignment_mode"],
                         new_line_name=wean_form.cleaned_data.get("new_strain_line_name", ""),
-                        sire=wean_sire,
-                        dam=primary_dam,
+                        sire=selected_wean_sire,
+                        dam=dam_for_mouse,
+                        possible_dams=selected_possible_dams,
                         user=request.user,
                         litter_display=litter.litter_id_display,
-                        breeding_code=breeding.breeding_code,
+                        breeding_code=parent_source_breeding.breeding_code,
                         project=inherited_project,
                     )
                     if strain_err:
@@ -1821,17 +2107,19 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                                 status=Mouse.Status.ACTIVE,
                                 strain_line=pup_strain_line,
                                 current_cage=target_cage,
-                                sire=wean_sire,
-                                dam=primary_dam,
+                                sire=selected_wean_sire,
+                                dam=dam_for_mouse,
                                 project=inherited_project,
-                                source_breeding=breeding,
+                                source_breeding=parent_source_breeding,
                                 ear_tag=form.cleaned_data["ear_tag"],
                                 coat_color=form.cleaned_data["coat_color"],
                                 notes=form.cleaned_data["notes"],
                             )
+                            if len(selected_possible_dams) > 1:
+                                mouse.possible_dams.set(selected_possible_dams)
                             # Genotype loci = sire ∪ dam only; pup strain line is separate from PCR template.
                             mouse.ensure_template_genotype_components(
-                                extra_loci=offspring_template_loci,
+                                extra_loci=offspring_template_loci_for_save,
                                 include_strain_template=False,
                             )
                             weaned_entries.append((mouse, target_cage))
@@ -1864,10 +2152,12 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                                 pup.mouse = mouse
                                 pup.save(update_fields=["mouse_id", "updated_at"])
 
+                        if parent_source_breeding.pk != litter.breeding_id:
+                            litter.breeding = parent_source_breeding
                         litter.wean_date = wean_date
                         if litter.litter_status == Litter.LitterStatus.ACTIVE:
                             litter.litter_status = Litter.LitterStatus.WEANED
-                        litter.save(update_fields=["wean_date", "litter_status"])
+                        litter.save(update_fields=["breeding", "wean_date", "litter_status"])
 
                     messages.success(
                         request,
@@ -1885,7 +2175,9 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                             f"{female_cage.cage_id if female_cage else '—'}"
                             f" (female) under project {inherited_project.name} "
                             f"and strain line {pup_strain_line.line_name if pup_strain_line else '—'}: "
-                            f"{', '.join(created_uids)}."
+                            f"{', '.join(created_uids)}. Parentage source: "
+                            f"{parent_source_breeding.breeding_code}; possible dams: "
+                            f"{', '.join(dam.mouse_uid for dam in selected_possible_dams) or '—'}."
                         ),
                     )
                     return redirect("litters:litter_detail", pk=litter.pk)
@@ -1914,6 +2206,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
         breeding_sire=breeding_sire or breeding.male,
         breeding_dams=breeding_dams,
         wean_primary_dam=primary_dam,
+        parent_breeding_options=parent_breeding_options,
         breeding_has_trio_dam=breeding_has_trio_dam,
         wean_counts_source=wean_counts_source,
     )

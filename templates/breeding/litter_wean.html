@@ -32,30 +32,31 @@
                 —
             {% endif %}
         </dd>
-        <dt>Dam (female_1)</dt>
+        <dt>Dam / possible dams</dt>
         <dd>
-            {% if wean_primary_dam %}
-                <a href="{% url 'mice:mouse_detail' wean_primary_dam.pk %}">{{ wean_primary_dam.mouse_uid }}</a>
-                {% if dam_strain_line %}
-                    <span class="muted">({{ dam_strain_line.line_name }})</span>
-                {% else %}
-                    <span class="muted">(no strain line)</span>
-                {% endif %}
+            {% if breeding_dams %}
+                {% for dam in breeding_dams %}
+                    <a href="{% url 'mice:mouse_detail' dam.pk %}">{{ dam.mouse_uid }}</a>
+                    {% if dam.strain_line %}
+                        <span class="muted">({{ dam.strain_line.line_name }})</span>
+                    {% else %}
+                        <span class="muted">(no strain line)</span>
+                    {% endif %}
+                    {% if not forloop.last %}, {% endif %}
+                {% endfor %}
             {% else %}
                 —
             {% endif %}
         </dd>
-        {% if breeding_dams|length > 1 %}
-            <dt>Other dams</dt>
-            <dd>
-                {% for dam in breeding_dams %}
-                    {% if dam.pk != wean_primary_dam.pk %}
-                        <a href="{% url 'mice:mouse_detail' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
-                    {% endif %}
-                {% endfor %}
-            </dd>
-        {% endif %}
         <dt>Breeding</dt><dd><a href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding }}</a></dd>
+        <dt>Breeding cage</dt>
+        <dd>
+            {% if litter.breeding.cage %}
+                <a href="{% url 'colony:cage_detail' litter.breeding.cage.pk %}">{{ litter.breeding.cage.cage_id }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
         <dt>Total born</dt><dd>{{ litter.total_born|default:"-" }}</dd>
         <dt>Alive</dt><dd>{{ litter.alive_count|default:"-" }}</dd>
     </dl>
@@ -64,8 +65,8 @@
     {% endif %}
     {% if breeding_has_trio_dam %}
         <p class="muted small-print">
-            Trio mating: offspring are linked to {{ wean_primary_dam.mouse_uid }} (female_1) as dam.
-            female_2 is not used for strain line or genotype templates in this version.
+            Multiple possible dams are available. If the exact mother is unknown, keep breeding-cage parentage selected;
+            pups will store this breeding as their source and list all selected possible dams in pedigree views.
         </p>
     {% endif %}
 </section>
@@ -73,7 +74,7 @@
 <section class="card">
     <h2>Expected Offspring Loci (Combined Template)</h2>
     <p class="muted">
-        PCR template for each weaned pup: union of sire and dam strain line expected loci (deduplicated).
+        PCR template for each weaned pup: union of sire and selected possible dam strain line expected loci (deduplicated).
         Pup strain line (Follow sire / Follow dam / Create new) is separate from which loci to test.
         The system does not guess genotype results; fill them later from real genotyping.
     </p>
@@ -100,8 +101,49 @@
             </div>
         {% endif %}
 
+        <div class="card card-nested">
+            <h2>Parentage</h2>
+            <p class="muted small-print">Use the breeding cage when the exact dam is unknown. Select parent(s) manually only when the sire and possible dam(s) are known.</p>
+            <div class="form-row">
+                <label for="{{ wean_form.parentage_mode.id_for_label }}">{{ wean_form.parentage_mode.label }}</label>
+                {{ wean_form.parentage_mode }}
+                {% if wean_form.parentage_mode.errors %}
+                    <div class="field-error">{% for error in wean_form.parentage_mode.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+            <div class="form-row" data-parentage-cage-row>
+                <label for="{{ wean_form.parent_breeding.id_for_label }}">{{ wean_form.parent_breeding.label }}</label>
+                {{ wean_form.parent_breeding }}
+                {% if wean_form.parent_breeding.help_text %}
+                    <small class="muted">{{ wean_form.parent_breeding.help_text }}</small>
+                {% endif %}
+                {% if wean_form.parent_breeding.errors %}
+                    <div class="field-error">{% for error in wean_form.parent_breeding.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+            <div data-parentage-manual>
+                <div class="form-row">
+                    <label for="{{ wean_form.wean_sire.id_for_label }}">{{ wean_form.wean_sire.label }}</label>
+                    {{ wean_form.wean_sire }}
+                    {% if wean_form.wean_sire.errors %}
+                        <div class="field-error">{% for error in wean_form.wean_sire.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                    {% endif %}
+                </div>
+                <div class="form-row">
+                    <label>{{ wean_form.wean_possible_dams.label }}</label>
+                    {{ wean_form.wean_possible_dams }}
+                    {% if wean_form.wean_possible_dams.help_text %}
+                        <small class="muted">{{ wean_form.wean_possible_dams.help_text }}</small>
+                    {% endif %}
+                    {% if wean_form.wean_possible_dams.errors %}
+                        <div class="field-error">{% for error in wean_form.wean_possible_dams.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
         {% for field in wean_form %}
-            {% if field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
+            {% if field.name == "parentage_mode" or field.name == "parent_breeding" or field.name == "wean_sire" or field.name == "wean_possible_dams" or field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
                 {# Rendered in dedicated blocks below #}
             {% elif field.name == "new_strain_line_name" %}
                 <div class="form-row" id="wean-new-strain-row">
@@ -355,12 +397,21 @@
     const submitBtn = document.getElementById("wean-submit-btn");
     const projectAssignmentMode = document.getElementById("id_project_assignment_mode");
     const strainAssignmentMode = document.getElementById("id_strain_assignment_mode");
+    const parentageMode = document.getElementById("id_parentage_mode");
+    const parentageCageRow = document.querySelector("[data-parentage-cage-row]");
+    const parentageManual = document.querySelector("[data-parentage-manual]");
     const sireProjectId = "{% if breeding_sire and breeding_sire.project_id %}{{ breeding_sire.project_id }}{% endif %}";
     const damProjectId = "{% if wean_primary_dam and wean_primary_dam.project_id %}{{ wean_primary_dam.project_id }}{% endif %}";
     const sireStrainId = "{% if sire_strain_line %}{{ sire_strain_line.pk }}{% endif %}";
     const damStrainId = "{% if dam_strain_line %}{{ dam_strain_line.pk }}{% endif %}";
     let entriesSynced = true;
     let existingPupUidKeys = new Set();
+
+    function syncParentageMode() {
+        const isManual = parentageMode?.value === "select_parents";
+        if (parentageCageRow) parentageCageRow.hidden = isManual;
+        if (parentageManual) parentageManual.hidden = !isManual;
+    }
 
     function targetProjectId() {
         if (projectAssignmentMode?.value === "sire") return sireProjectId;
@@ -932,11 +983,13 @@
     }
     strainMode?.addEventListener("change", syncStrainFields);
     projectAssignmentMode?.addEventListener("change", syncCageSummaries);
+    parentageMode?.addEventListener("change", syncParentageMode);
 
     reloadCages();
     syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
     syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus);
     syncStrainFields();
+    syncParentageMode();
     syncPupCountSummary();
     if (pupEntriesSyncHint && pupEntriesContainer) {
         const { male, female } = readPupCounts();

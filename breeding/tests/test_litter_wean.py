@@ -12,6 +12,7 @@ from breeding.views import (
     _litter_wean_pup_initial_rows,
     _litter_wean_rows_from_sex_counts,
 )
+from colony.breeding_pedigree import mouse_family_pedigree
 from colony.models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
@@ -114,6 +115,9 @@ class LitterWeanPageTests(TestCase):
         response = self.client.get(reverse("litters:litter_wean", args=[self.litter.pk]))
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
+        self.assertIn("Parentage", html)
+        self.assertIn("Use breeding cage parents", html)
+        self.assertIn("Select sire and possible dam(s)", html)
         self.assertIn('id="id_male_cage"', html)
         self.assertIn('id="id_female_cage"', html)
         self.assertIn('id="wean-sex-summary"', html)
@@ -142,6 +146,7 @@ class LitterWeanPageTests(TestCase):
         for uid in ("M-WEAN-ALL-M-1", "M-WEAN-ALL-M-2"):
             pup = Mouse.objects.get(mouse_uid=uid)
             self.assertEqual(pup.current_cage_id, self.male_cage.pk)
+            self.assertEqual(pup.dam_id, self.dam.pk)
         self.litter.refresh_from_db()
         self.assertEqual(self.litter.litter_status, Litter.LitterStatus.WEANED)
 
@@ -282,6 +287,74 @@ class LitterWeanPageTests(TestCase):
         female_pup = Mouse.objects.get(mouse_uid="M-WEAN-MIX-F")
         self.assertEqual(male_pup.current_cage_id, self.male_cage.pk)
         self.assertEqual(female_pup.current_cage_id, self.female_cage.pk)
+
+    def test_wean_trio_uses_breeding_cage_possible_dams_by_default(self):
+        dam2 = Mouse.objects.create(
+            mouse_uid="M-WEAN-D2",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.breeding.female_2 = dam2
+        self.breeding.save(update_fields=["female_2"])
+
+        response = self._wean_post(
+            male_pup_count="1",
+            female_pup_count="0",
+            male_cage_lookup=self.male_cage.cage_id,
+            **{
+                "pups-0-mouse_uid": "M-WEAN-TRIO-PUP",
+                "pups-0-sex": "M",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        pup = Mouse.objects.get(mouse_uid="M-WEAN-TRIO-PUP")
+        self.assertEqual(pup.sire_id, self.sire.pk)
+        self.assertIsNone(pup.dam_id)
+        self.assertEqual(pup.source_breeding_id, self.breeding.pk)
+        self.assertEqual(set(pup.possible_dams.values_list("mouse_uid", flat=True)), {"M-WEAN-D", "M-WEAN-D2"})
+        pedigree = mouse_family_pedigree(pup)
+        self.assertEqual({dam.mouse_uid for dam in pedigree.dams}, {"M-WEAN-D", "M-WEAN-D2"})
+
+    def test_wean_manual_single_dam_sets_known_dam(self):
+        dam2 = Mouse.objects.create(
+            mouse_uid="M-WEAN-D3",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.breeding.female_2 = dam2
+        self.breeding.save(update_fields=["female_2"])
+
+        response = self._wean_post(
+            parentage_mode="select_parents",
+            parent_breeding=str(self.breeding.pk),
+            wean_sire=str(self.sire.pk),
+            wean_possible_dams=[str(dam2.pk)],
+            male_pup_count="0",
+            female_pup_count="1",
+            female_cage_lookup=self.female_cage.cage_id,
+            **{
+                "pups-0-mouse_uid": "M-WEAN-KNOWN-DAM",
+                "pups-0-sex": "F",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        pup = Mouse.objects.get(mouse_uid="M-WEAN-KNOWN-DAM")
+        self.assertEqual(pup.sire_id, self.sire.pk)
+        self.assertEqual(pup.dam_id, dam2.pk)
+        self.assertEqual(pup.source_breeding_id, self.breeding.pk)
+        self.assertFalse(pup.possible_dams.exists())
 
     def test_wean_rejects_same_cage_for_mixed_sex(self):
         response = self._wean_post(

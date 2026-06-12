@@ -339,6 +339,105 @@ class BreedingForm(forms.ModelForm):
         return breeding
 
 
+class EndBreedingForm(forms.Form):
+    end_date = forms.DateField(
+        initial=timezone.localdate,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        label="End date",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        label="Notes",
+    )
+
+    def __init__(self, *args, breeding: Breeding, members: list[Mouse], **kwargs):
+        self.breeding = breeding
+        self.members = list(members)
+        self.destination_map: dict[int, Cage | None] = {}
+        super().__init__(*args, **kwargs)
+        cage_queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        if self.breeding.cage_id:
+            cage_queryset = cage_queryset.exclude(pk=self.breeding.cage_id)
+        for mouse in self.members:
+            destination_name = self.destination_field_name(mouse)
+            no_cage_name = self.no_cage_field_name(mouse)
+            self.fields[destination_name] = forms.ModelChoiceField(
+                queryset=cage_queryset,
+                required=False,
+                label=f"{mouse.mouse_uid} destination cage",
+                empty_label="Select destination cage",
+            )
+            self.fields[destination_name].widget.attrs.update({"class": "filter-control"})
+            self.fields[no_cage_name] = forms.BooleanField(
+                required=False,
+                label="No current cage after ending",
+            )
+        self.member_rows = [
+            {
+                "mouse": mouse,
+                "destination": self[self.destination_field_name(mouse)],
+                "no_cage": self[self.no_cage_field_name(mouse)],
+            }
+            for mouse in self.members
+        ]
+
+    @staticmethod
+    def destination_field_name(mouse: Mouse) -> str:
+        return f"destination_cage_{mouse.pk}"
+
+    @staticmethod
+    def no_cage_field_name(mouse: Mouse) -> str:
+        return f"no_cage_{mouse.pk}"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        self.destination_map = {}
+        if not self.members:
+            raise forms.ValidationError("This breeding has no breeder members to move.")
+
+        member_ids = [mouse.pk for mouse in self.members]
+        proposed_by_cage: dict[int, list[Mouse]] = {}
+        destination_labels: dict[int, str] = {}
+        for mouse in self.members:
+            destination_name = self.destination_field_name(mouse)
+            no_cage_name = self.no_cage_field_name(mouse)
+            destination = cleaned_data.get(destination_name)
+            no_cage = bool(cleaned_data.get(no_cage_name))
+            if destination and no_cage:
+                self.add_error(destination_name, "Choose a destination cage or no current cage, not both.")
+                continue
+            if not destination and not no_cage:
+                self.add_error(destination_name, "Select a destination cage, or check no current cage.")
+                continue
+            if destination and self.breeding.cage_id and destination.pk == self.breeding.cage_id:
+                self.add_error(destination_name, "Choose a cage other than the breeding cage being ended.")
+                continue
+            self.destination_map[mouse.pk] = destination if destination else None
+            if destination and mouse.status == Mouse.Status.ACTIVE:
+                proposed_by_cage.setdefault(destination.pk, []).append(mouse)
+                destination_labels[destination.pk] = destination.cage_id
+
+        for cage_id, moving_mice in proposed_by_cage.items():
+            sexes = {
+                mouse.sex
+                for mouse in moving_mice
+                if mouse.sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}
+            }
+            existing_sexes = set(
+                Mouse.objects.filter(current_cage_id=cage_id, status=Mouse.Status.ACTIVE)
+                .exclude(pk__in=member_ids)
+                .values_list("sex", flat=True)
+            )
+            sexes.update(sex for sex in existing_sexes if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE})
+            if Mouse.Sex.MALE in sexes and Mouse.Sex.FEMALE in sexes:
+                raise forms.ValidationError(
+                    f"Destination cage {destination_labels.get(cage_id, cage_id)} would contain active male and female mice. "
+                    "Use same-sex holding cages when ending a breeding."
+                )
+        return cleaned_data
+
+
 class LitterForm(forms.ModelForm):
     class Meta:
         model = Litter
@@ -384,6 +483,10 @@ LitterPupFormSet = inlineformset_factory(
 
 
 class WeanLitterForm(forms.Form):
+    class ParentageMode:
+        BREEDING_CAGE = "breeding_cage"
+        SELECT_PARENTS = "select_parents"
+
     class ProjectAssignmentMode:
         SIRE = "sire"
         DAM = "dam"
@@ -394,6 +497,33 @@ class WeanLitterForm(forms.Form):
         DAM = "dam"
         NEW = "new"
 
+    parentage_mode = forms.ChoiceField(
+        label="Parentage",
+        required=False,
+        choices=(
+            (ParentageMode.BREEDING_CAGE, "Use breeding cage parents (dam uncertain)"),
+            (ParentageMode.SELECT_PARENTS, "Select sire and possible dam(s)"),
+        ),
+        initial=ParentageMode.BREEDING_CAGE,
+    )
+    parent_breeding = forms.ModelChoiceField(
+        queryset=Breeding.objects.none(),
+        label="Breeding cage",
+        required=False,
+        help_text="Only breeding cage records are listed. Selecting a cage uses its sire and all dams.",
+    )
+    wean_sire = forms.ModelChoiceField(
+        queryset=Mouse.objects.none(),
+        label="Sire",
+        required=False,
+    )
+    wean_possible_dams = forms.ModelMultipleChoiceField(
+        queryset=Mouse.objects.none(),
+        label="Possible dam(s)",
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+        help_text="Select one dam if known, or multiple dams when the exact mother is unknown.",
+    )
     male_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
         label="Male pups cage",
@@ -457,6 +587,10 @@ class WeanLitterForm(forms.Form):
         dam_project=None,
         sire_strain=None,
         dam_strain=None,
+        parent_breeding=None,
+        parent_breeding_queryset=None,
+        parent_sire=None,
+        parent_dams=None,
         pup_male_count=0,
         pup_female_count=0,
         **kwargs,
@@ -464,6 +598,34 @@ class WeanLitterForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.pup_male_count = int(pup_male_count or 0)
         self.pup_female_count = int(pup_female_count or 0)
+        self.default_parent_breeding = parent_breeding
+        self.default_parent_sire = parent_sire
+        self.default_parent_dams = list(parent_dams or [])
+        self.fields["parent_breeding"].queryset = (
+            parent_breeding_queryset
+            if parent_breeding_queryset is not None
+            else Breeding.objects.filter(pk=parent_breeding.pk)
+            if parent_breeding is not None
+            else Breeding.objects.none()
+        )
+        self.fields["parent_breeding"].label_from_instance = self._parent_breeding_label
+        sire_ids = [parent_sire.pk] if parent_sire is not None else []
+        dam_ids = [dam.pk for dam in self.default_parent_dams]
+        self.fields["wean_sire"].queryset = Mouse.objects.filter(pk__in=sire_ids).order_by("mouse_uid")
+        self.fields["wean_possible_dams"].queryset = Mouse.objects.filter(pk__in=dam_ids).order_by("mouse_uid")
+        if not self.is_bound:
+            self.initial.setdefault(
+                "parentage_mode",
+                self.ParentageMode.BREEDING_CAGE
+                if parent_breeding is not None and len(self.default_parent_dams) > 1
+                else self.ParentageMode.SELECT_PARENTS,
+            )
+            if parent_breeding is not None:
+                self.initial.setdefault("parent_breeding", parent_breeding.pk)
+            if parent_sire is not None:
+                self.initial.setdefault("wean_sire", parent_sire.pk)
+            if self.default_parent_dams:
+                self.initial.setdefault("wean_possible_dams", [dam.pk for dam in self.default_parent_dams])
         active_cages = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
         self.fields["male_cage"].queryset = active_cages
         self.fields["female_cage"].queryset = active_cages
@@ -482,8 +644,47 @@ class WeanLitterForm(forms.Form):
             (self.StrainAssignmentMode.NEW, "Create a new strain line"),
         )
 
+    @staticmethod
+    def _parent_breeding_label(breeding: Breeding) -> str:
+        cage = breeding.cage.cage_id if breeding.cage_id else "No cage"
+        status = breeding.get_status_display()
+        return f"{cage} — {breeding.breeding_code} ({status})"
+
     def clean(self):
         cleaned_data = super().clean()
+        parentage_mode = cleaned_data.get("parentage_mode") or self.ParentageMode.BREEDING_CAGE
+        parent_breeding = cleaned_data.get("parent_breeding") or self.default_parent_breeding
+        if self.is_bound and parentage_mode == self.ParentageMode.SELECT_PARENTS:
+            sire = cleaned_data.get("wean_sire")
+            possible_dams = list(cleaned_data.get("wean_possible_dams") or [])
+        else:
+            sire = cleaned_data.get("wean_sire") or self.default_parent_sire
+            possible_dams = list(cleaned_data.get("wean_possible_dams") or self.default_parent_dams)
+        if parentage_mode == self.ParentageMode.BREEDING_CAGE:
+            if parent_breeding is None:
+                self.add_error("parent_breeding", "Select a breeding cage.")
+            else:
+                sire, possible_dams = _breeding_parent_mice(parent_breeding)
+                if sire is None:
+                    self.add_error("parent_breeding", "Selected breeding cage has no sire.")
+                if not possible_dams:
+                    self.add_error("parent_breeding", "Selected breeding cage has no dam.")
+        else:
+            if sire is None:
+                self.add_error("wean_sire", "Select a sire.")
+            if not possible_dams:
+                self.add_error("wean_possible_dams", "Select at least one possible dam.")
+        if sire is not None and sire.sex != Mouse.Sex.MALE:
+            self.add_error("wean_sire", "Sire must be a male mouse.")
+        for dam in possible_dams:
+            if dam.sex != Mouse.Sex.FEMALE:
+                self.add_error("wean_possible_dams", f"{dam.mouse_uid} is not a female mouse.")
+                break
+        cleaned_data["parentage_mode"] = parentage_mode
+        cleaned_data["resolved_parent_breeding"] = parent_breeding
+        cleaned_data["resolved_sire"] = sire
+        cleaned_data["resolved_possible_dams"] = possible_dams
+
         mode = cleaned_data.get("project_assignment_mode")
         new_project_name = (cleaned_data.get("new_project_name") or "").strip()
         if mode == self.ProjectAssignmentMode.NEW and not new_project_name:
@@ -544,6 +745,22 @@ def _resolve_wean_cage_assignment(form, cleaned_data, *, cage_field: str, lookup
         form.add_error(cage_field, f"Cage {cage.cage_id} is not active.")
         return None
     return cage
+
+
+def _breeding_parent_mice(breeding: Breeding) -> tuple[Mouse | None, list[Mouse]]:
+    members = list(breeding.breeding_members.select_related("mouse").order_by("sort_order", "mouse__mouse_uid"))
+    if members:
+        sire = next((row.mouse for row in members if row.role == Breeding.MemberRole.SIRE), None)
+        dams = [row.mouse for row in members if row.role == Breeding.MemberRole.DAM]
+        return sire, dams
+    dams = [dam for dam in (breeding.female_1, breeding.female_2) if dam is not None]
+    extra_dams = [row.mouse for row in breeding.extra_female_links.select_related("mouse").order_by("mouse__mouse_uid")]
+    seen = {dam.pk for dam in dams}
+    for dam in extra_dams:
+        if dam.pk not in seen:
+            seen.add(dam.pk)
+            dams.append(dam)
+    return breeding.male, dams
 
 
 class PupEntryForm(forms.Form):

@@ -41,7 +41,7 @@
         <section class="card card-nested">
             <h2>Shared information (same for all mice)</h2>
             {% for field in shared_form %}
-                {% if field.name == "current_cage" or field.name == "current_cage_lookup" or field.name == "sire" or field.name == "dam" %}
+                {% if field.name == "current_cage" or field.name == "current_cage_lookup" or field.name == "parentage_mode" or field.name == "source_breeding" or field.name == "sire" or field.name == "dam" or field.name == "possible_dams" %}
                 {% elif field.name == "project" %}
                     <div class="form-row">
                         <label for="{{ field.id_for_label }}">
@@ -467,6 +467,7 @@
     const projectSelect = document.getElementById("id_project");
     const sireSelect = document.getElementById("id_sire");
     const damSelect = document.getElementById("id_dam");
+    const possibleDamsSelect = document.getElementById("id_possible_dams");
     const genotypeRowCountInput = document.getElementById("id_genotype_row_count");
     const container = document.getElementById("genotype-template-rows");
     const sexLinkedWarning = document.getElementById("batch-sex-linked-warning");
@@ -538,16 +539,32 @@
         return Array.isArray(value) ? value : [];
     }
 
-    function parentLoci(parentSelect) {
-        if (!parentSelect || !parentSelect.value) return [];
-        const strainId = mouseStrainMap[parentSelect.value];
+    function selectedValues(select) {
+        return Array.from(select?.selectedOptions || [])
+            .map((opt) => opt.value)
+            .filter(Boolean);
+    }
+
+    function parentLociForId(parentId) {
+        if (!parentId) return [];
+        const strainId = mouseStrainMap[parentId];
         if (!strainId) return [];
         return lociForStrainId(strainId);
     }
 
+    function possibleDamIds() {
+        const ids = selectedValues(possibleDamsSelect);
+        if (!ids.length && damSelect?.value) return [damSelect.value];
+        return ids;
+    }
+
+    function possibleDamLoci() {
+        return possibleDamIds().flatMap((id) => parentLociForId(id));
+    }
+
     async function ensureParentStrainMap() {
         if (!window.MXGPicker) return;
-        const ids = [sireSelect?.value || "", damSelect?.value || ""]
+        const ids = [sireSelect?.value || "", ...possibleDamIds()]
             .filter(Boolean)
             .filter((id) => !mouseStrainMap[id]);
         if (!ids.length) return;
@@ -585,8 +602,8 @@
         const sex = batchSexForGenotype();
         const loci = dedupeLoci([
             ...lociForStrainId(strainId),
-            ...parentLoci(sireSelect),
-            ...parentLoci(damSelect),
+            ...parentLociForId(sireSelect?.value || ""),
+            ...possibleDamLoci(),
         ]);
         renderedGenotypeLoci = loci;
         const pMap = postedMap();
@@ -708,6 +725,7 @@
     });
     sireSelect?.addEventListener("change", renderRows);
     damSelect?.addEventListener("change", renderRows);
+    possibleDamsSelect?.addEventListener("change", renderRows);
     document.querySelectorAll(".batch-sex-select").forEach((select) => {
         select.addEventListener("change", updateSexLinkedWarning);
     });

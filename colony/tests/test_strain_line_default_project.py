@@ -58,6 +58,8 @@ class StrainLineProjectsTests(TestCase):
         self.assertEqual(list(saved.projects.values_list("pk", flat=True)), [self.project_a.pk])
 
     def test_strain_line_detail_lists_related_projects(self):
+        other_user = get_user_model().objects.create_user(username="strainproj_other", password="x")
+        project_c = Project.objects.create(name="Gamma Project", owner=other_user)
         Mouse.objects.create(
             mouse_uid="M-A1",
             sex=Mouse.Sex.MALE,
@@ -72,10 +74,21 @@ class StrainLineProjectsTests(TestCase):
             project=self.project_b,
             current_cage=self.cage,
         )
+        Mouse.objects.create(
+            mouse_uid="M-C1",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=project_c,
+            current_cage=self.cage,
+        )
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.strain.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alpha Project")
         self.assertContains(response, "Beta Project")
+        self.assertContains(response, "Gamma Project")
+        self.assertContains(response, "Owners using this line")
+        self.assertContains(response, "strainproj")
+        self.assertContains(response, "strainproj_other")
         self.assertNotContains(response, "Default project")
 
     def test_project_detail_lists_linked_strain_line_without_mice(self):

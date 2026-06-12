@@ -8,12 +8,30 @@
     const includeInactive = document.getElementById("id_mouse_parent_include_inactive");
     const refreshBtn = document.getElementById("mouse-parent-filter-apply");
     const statusEl = document.getElementById("mouse-parent-filter-status");
+    const parentageMode = document.getElementById("id_parentage_mode");
+    const parentageCageRow = document.querySelector("[data-parentage-cage-row]");
+    const parentageManual = document.querySelector("[data-parentage-manual]");
     const sireSelect = document.getElementById("id_sire");
     const damSelect = document.getElementById("id_dam");
-    if (!sireSelect || !damSelect || !window.MXGPicker) return;
+    const possibleDamsSelect = document.getElementById("id_possible_dams");
+    if (!sireSelect || !damSelect || !possibleDamsSelect || !window.MXGPicker) return;
 
     let selectedSireId = sireSelect.value || "";
-    let selectedDamId = damSelect.value || "";
+    let selectedDamIds = selectedValues(possibleDamsSelect);
+
+    function selectedValues(select) {
+        return Array.from(select?.selectedOptions || [])
+            .map((opt) => opt.value)
+            .filter(Boolean);
+    }
+
+    function syncParentageMode() {
+        const mode = parentageMode?.value || "none";
+        const isBreedingCage = mode === "breeding_cage";
+        const isManual = mode === "select_parents";
+        if (parentageCageRow) parentageCageRow.hidden = !isBreedingCage;
+        if (parentageManual) parentageManual.hidden = !isManual;
+    }
 
     function baseFilters(sex) {
         return {
@@ -22,21 +40,69 @@
             strain_line_id: strainFilter?.value || "",
             q: searchInput?.value || "",
             include_inactive: includeInactive?.checked ? "1" : "",
+            selected_ids: sex === "M" ? selectedSireId : selectedDamIds,
             sex,
         };
+    }
+
+    function renderMouseMultiSelect(select, mice, selectedIds) {
+        const selected = new Set((selectedIds || []).map((id) => String(id)));
+        const previousLabels = {};
+        Array.from(select.options || []).forEach((opt) => {
+            if (opt.value) previousLabels[opt.value] = opt.textContent || opt.value;
+        });
+        select.innerHTML = "";
+        const rendered = new Set();
+        for (const mouse of mice) {
+            const opt = document.createElement("option");
+            opt.value = String(mouse.id);
+            opt.textContent = MXGPicker.formatMouseOption(mouse);
+            if (selected.has(String(mouse.id))) opt.selected = true;
+            select.appendChild(opt);
+            rendered.add(String(mouse.id));
+        }
+        for (const id of selected) {
+            if (!rendered.has(id)) {
+                const opt = document.createElement("option");
+                opt.value = id;
+                opt.textContent = previousLabels[id] || `Selected mouse #${id}`;
+                opt.selected = true;
+                select.appendChild(opt);
+            }
+        }
+    }
+
+    function syncHiddenDam() {
+        selectedDamIds = selectedValues(possibleDamsSelect);
+        const singleDamId = selectedDamIds.length === 1 ? selectedDamIds[0] : "";
+        const existing = Array.from(damSelect.options || []).some((opt) => opt.value === singleDamId);
+        if (singleDamId && !existing) {
+            const label = Array.from(possibleDamsSelect.options || []).find((opt) => opt.value === singleDamId)?.textContent;
+            const opt = document.createElement("option");
+            opt.value = singleDamId;
+            opt.textContent = label || `Selected mouse #${singleDamId}`;
+            damSelect.appendChild(opt);
+        }
+        damSelect.value = singleDamId;
+        damSelect.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     async function reloadParents() {
         if (statusEl) statusEl.textContent = "Loading parent choices...";
         selectedSireId = sireSelect.value || selectedSireId;
-        selectedDamId = damSelect.value || selectedDamId;
+        selectedDamIds = selectedValues(possibleDamsSelect);
+        if (!selectedDamIds.length && damSelect.value) {
+            selectedDamIds = [damSelect.value];
+        }
         try {
             const [sires, dams] = await Promise.all([
                 MXGPicker.loadMice(mouseApiUrl, baseFilters("M")),
                 MXGPicker.loadMice(mouseApiUrl, baseFilters("F")),
             ]);
             MXGPicker.renderMouseSelect(sireSelect, sires, selectedSireId);
-            MXGPicker.renderMouseSelect(damSelect, dams, selectedDamId);
+            MXGPicker.renderMouseSelect(damSelect, dams, selectedDamIds.length === 1 ? selectedDamIds[0] : "");
+            renderMouseMultiSelect(possibleDamsSelect, dams, selectedDamIds);
+            syncHiddenDam();
             if (statusEl) statusEl.textContent = `Showing ${sires.length} sire candidate(s), ${dams.length} dam candidate(s).`;
         } catch (err) {
             if (statusEl) {
@@ -50,15 +116,17 @@
     sireSelect.addEventListener("change", () => {
         selectedSireId = sireSelect.value || "";
     });
-    damSelect.addEventListener("change", () => {
-        selectedDamId = damSelect.value || "";
+    possibleDamsSelect.addEventListener("change", () => {
+        syncHiddenDam();
     });
+    parentageMode?.addEventListener("change", syncParentageMode);
     ownerFilter?.addEventListener("change", reloadParentsDebounced);
     projectFilter?.addEventListener("change", reloadParentsDebounced);
     strainFilter?.addEventListener("change", reloadParentsDebounced);
     searchInput?.addEventListener("input", reloadParentsDebounced);
     includeInactive?.addEventListener("change", reloadParents);
     refreshBtn?.addEventListener("click", reloadParents);
+    syncParentageMode();
     reloadParents();
 })();
 </script>

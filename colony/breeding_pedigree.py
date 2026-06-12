@@ -101,8 +101,26 @@ def infer_source_breeding_for_mouse(mouse: Mouse) -> Breeding | None:
     return None
 
 
+def _possible_dams_for_mouse(mouse: Mouse) -> list[Mouse]:
+    if not mouse.pk:
+        return []
+    return list(mouse.possible_dams.all())
+
+
+def _merge_dams(primary: list[Mouse], fallback: list[Mouse]) -> list[Mouse]:
+    out: list[Mouse] = []
+    seen: set[int] = set()
+    for dam in [*primary, *fallback]:
+        if dam is None or dam.pk in seen:
+            continue
+        seen.add(dam.pk)
+        out.append(dam)
+    return out
+
+
 def mouse_family_pedigree_from_prefetch(mouse: Mouse) -> MouseFamilyPedigree:
     """Prefer relations already on the mouse instance (list views prefetch)."""
+    possible_dams = _possible_dams_for_mouse(mouse)
     breeding: Breeding | None = None
     if mouse.source_breeding_id:
         breeding = mouse.source_breeding
@@ -114,6 +132,8 @@ def mouse_family_pedigree_from_prefetch(mouse: Mouse) -> MouseFamilyPedigree:
         sire, dams = breeding_sire_and_dams(breeding)
         if mouse.sire_id:
             sire = mouse.sire
+        if possible_dams:
+            dams = _merge_dams(possible_dams, [])
         if mouse.dam_id and mouse.dam and all(d.pk != mouse.dam_id for d in dams):
             dams = [mouse.dam, *dams]
         return MouseFamilyPedigree(
@@ -126,6 +146,7 @@ def mouse_family_pedigree_from_prefetch(mouse: Mouse) -> MouseFamilyPedigree:
 
 
 def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
+    possible_dams = _possible_dams_for_mouse(mouse)
     breeding = infer_source_breeding_for_mouse(mouse)
     if breeding is not None:
         sire, dams = breeding_sire_and_dams(breeding)
@@ -133,6 +154,8 @@ def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
             sire = mouse.sire
         elif mouse.sire_id:
             sire = mouse.sire
+        if possible_dams:
+            dams = _merge_dams(possible_dams, [])
         if mouse.dam_id and mouse.dam and all(d.pk != mouse.dam_id for d in dams):
             dams = [mouse.dam, *dams]
         return MouseFamilyPedigree(
@@ -141,7 +164,7 @@ def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
             breeding_cage=breeding.cage,
             source_breeding=breeding,
         )
-    dams = [mouse.dam] if mouse.dam_id else []
+    dams = possible_dams or ([mouse.dam] if mouse.dam_id else [])
     return MouseFamilyPedigree(
         sire=mouse.sire if mouse.sire_id else None,
         dams=dams,

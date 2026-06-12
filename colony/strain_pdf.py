@@ -12,15 +12,18 @@ MAX_STRAIN_LINE_PDF_BYTES = 10 * 1024 * 1024  # 10 MiB
 PDF_DESCRIPTION_LABELS = {
     "strain_line_info": "Strain line info",
     "genotype_info": "Genotype info",
+    "husbandry": "Husbandry",
+    "genetics": "Genetics",
+    "colony_notes": "Colony notes",
+    "protocol": "Protocol",
+    "other": "Other",
 }
 
 
 def resolve_pdf_description(*, kind: str, custom: str = "") -> str:
     kind = (kind or "").strip()
-    if kind == "strain_line_info":
-        return PDF_DESCRIPTION_LABELS["strain_line_info"]
-    if kind == "genotype_info":
-        return PDF_DESCRIPTION_LABELS["genotype_info"]
+    if kind in PDF_DESCRIPTION_LABELS:
+        return PDF_DESCRIPTION_LABELS[kind]
     label = (custom or "").strip()
     if not label:
         raise ValidationError("Enter a custom PDF description.")

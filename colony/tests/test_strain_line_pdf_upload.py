@@ -33,12 +33,14 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self._upload_form_token(response)
         self.assertContains(response, "Add PDF")
+        self.assertContains(response, "Add another PDF")
 
     def test_detail_page_has_no_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'class="strain-pdf-upload-form"')
         self.assertNotContains(response, "Add PDF")
+        self.assertNotContains(response, "Attach up to")
 
     def test_upload_pdf_from_edit_uses_description_as_name(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
@@ -61,6 +63,29 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertEqual(doc.display_name, "Genotype info")
         self.assertTrue(doc.file.name.endswith(".pdf"))
         self.assertIn("Genotype", doc.file.name)
+
+    def test_upload_multiple_pdfs_from_edit(self):
+        edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        page = self.client.get(edit_url)
+        token = self._upload_form_token(page)
+        upload_url = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
+        response = self.client.post(
+            upload_url,
+            {
+                "csrfmiddlewaretoken": token,
+                "next": edit_url,
+                "pdf_files": [
+                    SimpleUploadedFile("husbandry.pdf", b"%PDF-1.4 husbandry", content_type="application/pdf"),
+                    SimpleUploadedFile("custom.pdf", b"%PDF-1.4 custom", content_type="application/pdf"),
+                ],
+                "pdf_description_kinds": ["husbandry", "custom"],
+                "pdf_description_customs": ["", "Colony notes batch A"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        docs = list(StrainLineDocument.objects.filter(strain_line=self.line).order_by("description"))
+        self.assertEqual(len(docs), 2)
+        self.assertEqual([doc.description for doc in docs], ["Colony notes batch A", "Husbandry"])
 
 
 class StrainLineRelatedRecordLinkTests(TestCase):

@@ -15,7 +15,12 @@
         {% if can_import %}
             <a class="button" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
             {% if mouse.status != "euthanized" and mouse.status != "archived" %}
-                <form method="post" action="{% url 'mice:mouse_end' mouse.pk %}" class="action-inline-form">
+                <form
+                    method="post"
+                    action="{% url 'mice:mouse_end' mouse.pk %}"
+                    class="action-inline-form"
+                    onsubmit="return confirm('End / euthanize mouse {{ mouse.mouse_uid|escapejs }}? This will mark it euthanized and remove it from current cage occupancy.');"
+                >
                     {% csrf_token %}
                     <button type="submit" class="button">End / Euthanize Mouse</button>
                 </form>

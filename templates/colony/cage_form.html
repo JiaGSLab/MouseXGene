@@ -6,11 +6,20 @@
 <section class="page-header">
     <h1>{{ page_title }}</h1>
     <p class="muted">Fields marked <span class="required-mark">*</span> are required.</p>
+    {% if next_url %}
+        <p class="muted small-print">After saving, you will return to the previous workflow.</p>
+    {% endif %}
 </section>
 
 <section class="card">
     <form method="post" class="form-layout">
         {% csrf_token %}
+        {% if next_url %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+        {% endif %}
+        {% if select_field %}
+            <input type="hidden" name="select_field" value="{{ select_field }}">
+        {% endif %}
 
         {% if form.non_field_errors %}
             <div class="form-errors">
@@ -111,7 +120,9 @@
 
         <div class="form-actions">
             <button type="submit" class="button">{{ submit_label }}</button>
-            {% if cancel_kwargs %}
+            {% if next_url %}
+                <a href="{{ next_url }}" class="button button-light">Cancel</a>
+            {% elif cancel_kwargs %}
                 <a href="{% url cancel_url pk=cancel_kwargs.pk %}" class="button button-light">Cancel</a>
             {% else %}
                 <a href="{% url cancel_url %}" class="button button-light">Cancel</a>

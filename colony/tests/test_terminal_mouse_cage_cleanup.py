@@ -51,6 +51,12 @@ class TerminalMouseCageCleanupTests(TestCase):
         self.assertIn("End Mouse", self.membership.reason)
         self.assertEqual(self.cage.status, Cage.Status.CLOSED)
 
+    def test_mouse_detail_end_mouse_requires_browser_confirmation(self):
+        response = self.client.get(reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.assertContains(response, "End / euthanize mouse")
+        self.assertContains(response, "current cage occupancy")
+        self.assertContains(response, "return confirm")
+
     def test_editing_mouse_to_terminal_status_removes_current_cage(self):
         death_date = timezone.localdate()
         response = self.client.post(

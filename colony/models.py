@@ -277,6 +277,11 @@ class StrainLineDocument(TimeStampedModel):
     class DescriptionKind(models.TextChoices):
         STRAIN_LINE_INFO = "strain_line_info", "Strain line info"
         GENOTYPE_INFO = "genotype_info", "Genotype info"
+        HUSBANDRY = "husbandry", "Husbandry"
+        GENETICS = "genetics", "Genetics"
+        COLONY_NOTES = "colony_notes", "Colony notes"
+        PROTOCOL = "protocol", "Protocol"
+        OTHER = "other", "Other"
         CUSTOM = "custom", "Custom"
 
     strain_line = models.ForeignKey(StrainLine, on_delete=models.CASCADE, related_name="documents")
@@ -409,6 +414,13 @@ class Mouse(ActorStampedModel):
         related_name="offspring_from_dam",
         null=True,
         blank=True,
+    )
+    possible_dams = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="possible_offspring_from_dam",
+        blank=True,
+        help_text="Candidate dams when the exact mother is unknown, for example trio breeding litters.",
     )
     source_breeding = models.ForeignKey(
         "breeding.Breeding",

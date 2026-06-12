@@ -1,7 +1,9 @@
 import csv
 import json
 import logging
+import re
 from io import BytesIO
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.contrib import messages
@@ -16,6 +18,7 @@ from django.db import transaction
 from django.db.models import Count, Exists, F, Max, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from openpyxl import Workbook
 
 from .forms import (
@@ -1025,9 +1028,10 @@ def _batch_entry_forms_from_request(request: HttpRequest, rows: list[dict[str, s
 def _mouse_create_draft_from_request(request: HttpRequest) -> dict:
     shared: dict[str, str] = {}
     for name in MouseBatchSharedForm.base_fields:
-        value = request.POST.get(name)
-        if value is not None:
-            shared[name] = value
+        values = request.POST.getlist(name)
+        if not values:
+            continue
+        shared[name] = values if name == "possible_dams" else values[-1]
     return {
         "shared": shared,
         "batch_rows": _extract_batch_mouse_rows_from_post(request),
@@ -1088,7 +1092,8 @@ def _validate_batch_shared_sex_linked_genotype(
         strain_line=shared_form.cleaned_data.get("strain_line"),
         sire=shared_form.cleaned_data.get("sire"),
         dam=shared_form.cleaned_data.get("dam"),
-        source_breeding=None,
+        source_breeding=shared_form.cleaned_data.get("source_breeding"),
+        possible_dams=list(shared_form.cleaned_data.get("possible_dams") or []),
     )
     linked_loci = [
         entry["locus_name"]
@@ -1121,12 +1126,15 @@ def _create_mice_from_batch(
     strain_line = shared.get("strain_line")
     sire = shared.get("sire")
     dam = shared.get("dam")
+    possible_dams = list(shared.get("possible_dams") or [])
+    source_breeding = shared.get("source_breeding")
     current_cage = shared.get("current_cage")
     template_loci = _resolved_template_loci_for_context(
         strain_line=strain_line,
         sire=sire,
         dam=dam,
-        source_breeding=None,
+        source_breeding=source_breeding,
+        possible_dams=possible_dams,
     )
     membership_start = shared.get("birth_date") or timezone.localdate()
     created: list[Mouse] = []
@@ -1147,6 +1155,7 @@ def _create_mice_from_batch(
                 current_cage=current_cage,
                 sire=sire,
                 dam=dam,
+                source_breeding=source_breeding,
                 project=project,
                 ear_tag=row.get("ear_tag") or "",
                 toe_tag=row.get("toe_tag") or "",
@@ -1156,6 +1165,8 @@ def _create_mice_from_batch(
                 created_by=user,
                 updated_by=user,
             )
+            if possible_dams:
+                mouse.possible_dams.set(possible_dams)
             before_signature = _genotype_components_signature(mouse)
             prefilled = mouse.ensure_template_genotype_components(
                 extra_loci=template_loci,
@@ -1272,6 +1283,7 @@ def _resolved_template_loci_for_context(
     sire: Mouse | None,
     dam: Mouse | None,
     source_breeding: Breeding | None = None,
+    possible_dams: list[Mouse] | None = None,
 ) -> list[str]:
     """Resolve logical template loci with parental-union priority."""
     return [
@@ -1281,6 +1293,7 @@ def _resolved_template_loci_for_context(
             sire=sire,
             dam=dam,
             source_breeding=source_breeding,
+            possible_dams=possible_dams,
         )
         if (row.get("locus_name") or "").strip()
     ]
@@ -1292,11 +1305,16 @@ def _resolved_template_loci_entries_for_context(
     sire: Mouse | None,
     dam: Mouse | None,
     source_breeding: Breeding | None = None,
+    possible_dams: list[Mouse] | None = None,
 ) -> list[dict[str, str]]:
     """Resolve logical template locus entries with parental-union priority."""
     if source_breeding is not None:
         parent_sire, parent_dams = breeding_sire_and_dams(source_breeding)
         parent_rows = _template_loci_union_for_mouse_relations(sire=parent_sire, dams=parent_dams)
+        if parent_rows:
+            return parent_rows
+    if possible_dams:
+        parent_rows = _template_loci_union_for_mouse_relations(sire=sire, dams=possible_dams)
         if parent_rows:
             return parent_rows
     if sire is not None and dam is not None:
@@ -2348,6 +2366,23 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("name")
     )
+    owner_rows_by_id: dict[int, dict] = {}
+    for project in related_projects:
+        owner = project.owner
+        row = owner_rows_by_id.setdefault(
+            owner.pk,
+            {
+                "owner": owner,
+                "owner_display": (format_project_owner_label(owner) or owner.get_username() or str(owner.pk)).strip(),
+                "projects": [],
+                "active_mice_count": 0,
+                "total_mice_count": 0,
+            },
+        )
+        row["projects"].append(project)
+        row["active_mice_count"] += getattr(project, "strain_active_mice_count", 0) or 0
+        row["total_mice_count"] += getattr(project, "strain_total_mice_count", 0) or 0
+    owner_rows = sorted(owner_rows_by_id.values(), key=lambda item: item["owner_display"].lower())
     usage_counts = compute_strain_line_usage_counts(line.pk)
     return render(
         request,
@@ -2356,6 +2391,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "line": line,
             "usage_counts": usage_counts,
             "related_projects": related_projects,
+            "owner_rows": owner_rows,
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
@@ -2404,48 +2440,62 @@ def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
         next_url = reverse("colony:strain_line_detail", kwargs={"pk": line.pk})
 
     uploads = request.FILES.getlist("pdf_files")
-    uploaded = request.FILES.get("pdf_file") or (uploads[0] if uploads else None)
-    if not uploaded:
+    legacy_upload = request.FILES.get("pdf_file")
+    if legacy_upload and not uploads:
+        uploads = [legacy_upload]
+    if not uploads:
         messages.error(request, "No PDF file selected.")
         return redirect(next_url)
 
     existing = line.documents.count()
-    if existing >= MAX_STRAIN_LINE_PDF_COUNT:
+    slots_remaining = MAX_STRAIN_LINE_PDF_COUNT - existing
+    if slots_remaining <= 0:
         messages.error(
             request,
             f"This strain line already has {existing} PDF(s). "
             f"You can attach at most {MAX_STRAIN_LINE_PDF_COUNT} in total.",
         )
         return redirect(next_url)
-
-    try:
-        description = resolve_pdf_description(
-            kind=(request.POST.get("pdf_description_kind") or "").strip(),
-            custom=(request.POST.get("pdf_description_custom") or "").strip(),
-        )
-    except ValidationError as exc:
-        messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
+    if len(uploads) > slots_remaining:
+        messages.error(request, f"Select at most {slots_remaining} PDF file(s) for the remaining slot(s).")
         return redirect(next_url)
 
-    try:
-        validate_strain_line_pdf_file(uploaded)
-    except ValidationError as exc:
-        messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
-        return redirect(next_url)
+    kinds = request.POST.getlist("pdf_description_kinds")
+    customs = request.POST.getlist("pdf_description_customs")
+    legacy_kind = request.POST.get("pdf_description_kind")
+    legacy_custom = request.POST.get("pdf_description_custom")
+    if not kinds and legacy_kind is not None:
+        kinds = [legacy_kind]
+    if not customs and legacy_custom is not None:
+        customs = [legacy_custom]
 
-    kind = (request.POST.get("pdf_description_kind") or StrainLineDocument.DescriptionKind.CUSTOM).strip()
-    if kind not in StrainLineDocument.DescriptionKind.values:
-        kind = StrainLineDocument.DescriptionKind.CUSTOM
+    prepared: list[tuple] = []
+    for index, uploaded in enumerate(uploads):
+        kind = (kinds[index] if index < len(kinds) else StrainLineDocument.DescriptionKind.CUSTOM).strip()
+        custom = (customs[index] if index < len(customs) else "").strip()
+        if kind not in StrainLineDocument.DescriptionKind.values:
+            kind = StrainLineDocument.DescriptionKind.CUSTOM
+        try:
+            description = resolve_pdf_description(kind=kind, custom=custom)
+            validate_strain_line_pdf_file(uploaded)
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if getattr(exc, "messages", None) else str(exc))
+            return redirect(next_url)
+        prepared.append((uploaded, kind, description))
 
-    description = unique_pdf_description(line.pk, description)
-    StrainLineDocument.objects.create(
-        strain_line=line,
-        description=description,
-        description_kind=kind,
-        file=uploaded,
-        uploaded_by=request.user,
-    )
-    messages.success(request, f"Uploaded PDF “{description}”.")
+    created_labels: list[str] = []
+    with transaction.atomic():
+        for uploaded, kind, description in prepared:
+            unique_description = unique_pdf_description(line.pk, description)
+            StrainLineDocument.objects.create(
+                strain_line=line,
+                description=unique_description,
+                description_kind=kind,
+                file=uploaded,
+                uploaded_by=request.user,
+            )
+            created_labels.append(unique_description)
+    messages.success(request, f"Uploaded {len(created_labels)} PDF file(s): {', '.join(created_labels)}.")
     return redirect(next_url)
 
 
@@ -2545,8 +2595,65 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+_CAGE_CREATE_RETURN_FIELD_RE = re.compile(r"^[A-Za-z0-9_-]{1,120}$")
+
+
+def _safe_cage_create_next_url(request: HttpRequest, raw_url: str | None) -> str:
+    url = (raw_url or "").strip()
+    if not url:
+        return ""
+    if url_has_allowed_host_and_scheme(
+        url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return url
+    return ""
+
+
+def _safe_cage_create_select_field(raw_field: str | None) -> str:
+    field = (raw_field or "").strip()
+    if not field or not _CAGE_CREATE_RETURN_FIELD_RE.match(field):
+        return ""
+    return field
+
+
+def _cage_create_initial_from_query(request: HttpRequest) -> dict[str, str]:
+    choices = {
+        "cage_type": set(Cage.CageType.values),
+        "purpose": set(Cage.Purpose.values),
+        "status": set(Cage.Status.values),
+    }
+    initial: dict[str, str] = {}
+    for field_name, allowed_values in choices.items():
+        value = (request.GET.get(field_name) or "").strip()
+        if value in allowed_values:
+            initial[field_name] = value
+    return initial
+
+
+def _cage_create_return_url(next_url: str, *, cage: Cage, select_field: str) -> str:
+    parts = urlsplit(next_url)
+    query_pairs = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in {"created_cage", "select_field"}
+    ]
+    query_pairs.append(("created_cage", str(cage.pk)))
+    if select_field:
+        query_pairs.append(("select_field", select_field))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_pairs), parts.fragment))
+
+
 @authenticated_required
 def cage_create(request: HttpRequest) -> HttpResponse:
+    next_url = _safe_cage_create_next_url(
+        request,
+        request.POST.get("next") if request.method == "POST" else request.GET.get("next"),
+    )
+    select_field = _safe_cage_create_select_field(
+        request.POST.get("select_field") if request.method == "POST" else request.GET.get("select_field")
+    )
     if request.method == "POST":
         form = CageForm(request.POST)
         if form.is_valid():
@@ -2569,15 +2676,19 @@ def cage_create(request: HttpRequest) -> HttpResponse:
                 obj=cage,
                 message=f"Created cage {cage.cage_id}.",
             )
+            if next_url:
+                return redirect(_cage_create_return_url(next_url, cage=cage, select_field=select_field))
             return redirect("colony:cage_detail", pk=cage.pk)
     else:
-        form = CageForm()
+        form = CageForm(initial=_cage_create_initial_from_query(request))
 
     context = {
         "form": form,
         "page_title": "Create Cage",
         "submit_label": "Save Cage",
         "cancel_url": "colony:cage_list",
+        "next_url": next_url,
+        "select_field": select_field,
     }
     return render(request, "colony/cage_form.html", context)
 
@@ -3349,14 +3460,14 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "created_by__profile",
             "updated_by",
             "updated_by__profile",
-        ),
+        ).prefetch_related("possible_dams"),
         pk=pk,
     )
     genotype_records = MouseGenotype.objects.select_related("gene").filter(mouse=mouse)
     genotype_components = MouseGenotypeComponent.objects.select_related("strain_line").filter(mouse=mouse)
     cage_history = mouse.cage_memberships.select_related("cage").all()
     offspring = (
-        _scoped_mouse_queryset(request.user).filter(Q(sire=mouse) | Q(dam=mouse))
+        _scoped_mouse_queryset(request.user).filter(Q(sire=mouse) | Q(dam=mouse) | Q(possible_dams=mouse))
         .select_related("current_cage")
         .prefetch_related("genotypes__gene")
         .distinct()
@@ -3368,7 +3479,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
             _scoped_mouse_queryset(request.user),
         )
         .select_related("current_cage")
-        .prefetch_related("genotypes__gene")
+        .prefetch_related("genotypes__gene", "possible_dams")
         .order_by("mouse_uid")
     )
     family_pedigree = mouse_family_pedigree(mouse)
@@ -3410,11 +3521,11 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
             "dam",
             "source_breeding",
             "source_breeding__cage",
-        ),
+        ).prefetch_related("possible_dams"),
         pk=pk,
     )
     offspring = (
-        _scoped_mouse_queryset(request.user).filter(Q(sire=mouse) | Q(dam=mouse))
+        _scoped_mouse_queryset(request.user).filter(Q(sire=mouse) | Q(dam=mouse) | Q(possible_dams=mouse))
         .select_related("current_cage")
         .prefetch_related("genotypes__gene")
         .distinct()
@@ -3426,7 +3537,7 @@ def mouse_pedigree(request: HttpRequest, pk: int) -> HttpResponse:
             _scoped_mouse_queryset(request.user),
         )
         .select_related("current_cage")
-        .prefetch_related("genotypes__gene")
+        .prefetch_related("genotypes__gene", "possible_dams")
         .order_by("mouse_uid")
     )
     family_pedigree = mouse_family_pedigree(mouse)
@@ -3471,6 +3582,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         .prefetch_related(
             "genotype_components__strain_line",
             "genotypes__gene",
+            "possible_dams",
             "litter_pup_origin__litter__breeding",
             "source_breeding__breeding_members__mouse",
             "source_breeding__extra_female_links__mouse",
@@ -3493,13 +3605,23 @@ def family_tree(request: HttpRequest) -> HttpResponse:
     elif parent == "sire":
         mice = mice.filter(sire__isnull=False)
     elif parent == "dam":
-        mice = mice.filter(dam__isnull=False)
+        mice = mice.filter(Q(dam__isnull=False) | Q(possible_dams__isnull=False)).distinct()
     elif parent == "both":
-        mice = mice.filter(sire__isnull=False, dam__isnull=False)
+        mice = mice.filter(sire__isnull=False).filter(Q(dam__isnull=False) | Q(possible_dams__isnull=False)).distinct()
     elif parent == "either":
-        mice = mice.filter(Q(sire__isnull=False) | Q(dam__isnull=False) | Q(source_breeding__isnull=False))
+        mice = mice.filter(
+            Q(sire__isnull=False)
+            | Q(dam__isnull=False)
+            | Q(possible_dams__isnull=False)
+            | Q(source_breeding__isnull=False)
+        ).distinct()
     elif parent == "none":
-        mice = mice.filter(sire__isnull=True, dam__isnull=True, source_breeding__isnull=True)
+        mice = mice.filter(
+            sire__isnull=True,
+            dam__isnull=True,
+            possible_dams__isnull=True,
+            source_breeding__isnull=True,
+        )
 
     mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
     for m in mice:
@@ -3673,17 +3795,20 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
             strain_changed = bool(original_strain_id and new_strain and original_strain_id != new_strain.id)
             has_truth = _mouse_has_meaningful_genotype_truth(mouse)
             if strain_changed and has_truth and strain_change_action not in {"replace", "overlap", "cancel"}:
+                old_possible_dams = list(mouse.possible_dams.all())
                 old_loci = _resolved_template_loci_for_context(
                     strain_line=original_strain,
                     sire=mouse.sire,
                     dam=mouse.dam,
                     source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+                    possible_dams=old_possible_dams,
                 )
                 new_loci = _resolved_template_loci_for_context(
                     strain_line=new_strain,
-                    sire=mouse.sire,
-                    dam=mouse.dam,
-                    source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+                    sire=form.cleaned_data.get("sire"),
+                    dam=form.cleaned_data.get("dam"),
+                    source_breeding=form.cleaned_data.get("source_breeding"),
+                    possible_dams=list(form.cleaned_data.get("possible_dams") or []),
                 )
                 old_keys = {StrainLine.normalize_locus_name(x).casefold() for x in old_loci if StrainLine.normalize_locus_name(x)}
                 new_keys = {StrainLine.normalize_locus_name(x).casefold() for x in new_loci if StrainLine.normalize_locus_name(x)}
@@ -3723,6 +3848,7 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 sire=mouse.sire,
                 dam=mouse.dam,
                 source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+                possible_dams=list(mouse.possible_dams.all()),
             )
             prefilled = 0
             filled = 0

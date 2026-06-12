@@ -1,13 +1,15 @@
 <section class="card" id="strain-pdf-documents">
     <h2>PDF introductions</h2>
-    <p class="muted">
-        Attach up to <strong>10</strong> PDF files (max <strong>10 MB</strong> each) describing husbandry, genetics, or colony notes for this strain line.
-        {% if pdf_slots_remaining == 0 %}
-            <strong>You have reached the limit.</strong> Remove a file below to upload another.
-        {% else %}
-            <strong>{{ pdf_slots_remaining }}</strong> slot(s) remaining.
-        {% endif %}
-    </p>
+    {% if allow_pdf_upload %}
+        <p class="muted">
+            Attach up to <strong>10</strong> PDF files (max <strong>10 MB</strong> each) describing husbandry, genetics, or colony notes for this strain line.
+            {% if pdf_slots_remaining == 0 %}
+                <strong>You have reached the limit.</strong> Remove a file below to upload another.
+            {% else %}
+                <strong>{{ pdf_slots_remaining }}</strong> slot(s) remaining.
+            {% endif %}
+        </p>
+    {% endif %}
 
     {% if documents %}
         <ul class="strain-pdf-list">
@@ -39,40 +41,97 @@
         <form method="post" action="{% url 'colony:strain_line_upload_documents' line.pk %}" enctype="multipart/form-data" class="strain-pdf-upload-form">
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <input type="hidden" name="next" value="{{ request.path }}">
-            <div class="form-row">
-                <label for="id_pdf_description_kind">PDF description</label>
-                <select name="pdf_description_kind" id="id_pdf_description_kind" class="filter-control" required>
-                    <option value="strain_line_info">Strain line info</option>
-                    <option value="genotype_info">Genotype info</option>
-                    <option value="custom">Custom</option>
-                </select>
+
+            <div id="strain-pdf-upload-rows" class="strain-pdf-upload-rows">
+                <div class="strain-pdf-upload-row" data-pdf-row>
+                    <div class="form-row">
+                        <label>PDF description</label>
+                        <select name="pdf_description_kinds" class="filter-control" data-pdf-kind required>
+                            <option value="strain_line_info">Strain line info</option>
+                            <option value="genotype_info">Genotype info</option>
+                            <option value="husbandry">Husbandry</option>
+                            <option value="genetics">Genetics</option>
+                            <option value="colony_notes">Colony notes</option>
+                            <option value="protocol">Protocol</option>
+                            <option value="other">Other</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-row" data-pdf-custom-row hidden>
+                        <label>Custom description</label>
+                        <input type="text" name="pdf_description_customs" maxlength="255" placeholder="Enter a short label for this PDF" data-pdf-custom>
+                    </div>
+                    <div class="form-row">
+                        <label>PDF file</label>
+                        <input type="file" name="pdf_files" accept="application/pdf,.pdf" required>
+                    </div>
+                    <button type="button" class="button button-light button-small strain-pdf-remove-row" data-remove-pdf-row hidden>Remove row</button>
+                </div>
             </div>
-            <div class="form-row" id="pdf-description-custom-row" hidden>
-                <label for="id_pdf_description_custom">Custom description</label>
-                <input type="text" name="pdf_description_custom" id="id_pdf_description_custom" maxlength="255" placeholder="Enter a short label for this PDF">
-            </div>
-            <div class="form-row">
-                <label for="id_pdf_file">PDF file</label>
-                <input type="file" name="pdf_file" id="id_pdf_file" accept="application/pdf,.pdf" required>
-                <small class="muted">The description above is used as the stored file name, not the original upload name.</small>
-            </div>
+
             <div class="form-actions">
-                <button type="submit" class="button button-light">Add PDF</button>
+                <button type="button" class="button button-light" id="add-strain-pdf-row" data-max-rows="{{ pdf_slots_remaining }}">Add another PDF</button>
+                <button type="submit" class="button button-light">Add PDF(s)</button>
             </div>
         </form>
         <script>
         (() => {
-            const kind = document.getElementById("id_pdf_description_kind");
-            const customRow = document.getElementById("pdf-description-custom-row");
-            const customInput = document.getElementById("id_pdf_description_custom");
-            if (!kind || !customRow || !customInput) return;
-            const sync = () => {
+            const rowsContainer = document.getElementById("strain-pdf-upload-rows");
+            const addButton = document.getElementById("add-strain-pdf-row");
+            if (!rowsContainer || !addButton) return;
+            const maxRows = Number.parseInt(addButton.dataset.maxRows || "1", 10) || 1;
+
+            function rows() {
+                return Array.from(rowsContainer.querySelectorAll("[data-pdf-row]"));
+            }
+
+            function syncRow(row) {
+                const kind = row.querySelector("[data-pdf-kind]");
+                const customRow = row.querySelector("[data-pdf-custom-row]");
+                const customInput = row.querySelector("[data-pdf-custom]");
+                if (!kind || !customRow || !customInput) return;
                 const showCustom = kind.value === "custom";
                 customRow.hidden = !showCustom;
                 customInput.required = showCustom;
-            };
-            kind.addEventListener("change", sync);
-            sync();
+                if (!showCustom) customInput.value = "";
+            }
+
+            function syncButtons() {
+                const currentRows = rows();
+                addButton.disabled = currentRows.length >= maxRows;
+                currentRows.forEach((row, index) => {
+                    const remove = row.querySelector("[data-remove-pdf-row]");
+                    if (remove) remove.hidden = currentRows.length === 1 || index === 0;
+                });
+            }
+
+            rowsContainer.addEventListener("change", (event) => {
+                const row = event.target.closest("[data-pdf-row]");
+                if (row) syncRow(row);
+            });
+            rowsContainer.addEventListener("click", (event) => {
+                const button = event.target.closest("[data-remove-pdf-row]");
+                if (!button) return;
+                const row = button.closest("[data-pdf-row]");
+                if (row && rows().length > 1) row.remove();
+                syncButtons();
+            });
+            addButton.addEventListener("click", () => {
+                const currentRows = rows();
+                if (currentRows.length >= maxRows) return;
+                const clone = currentRows[0].cloneNode(true);
+                clone.querySelectorAll("input").forEach((input) => {
+                    input.value = "";
+                    if (input.type === "file") input.required = true;
+                });
+                const select = clone.querySelector("[data-pdf-kind]");
+                if (select) select.value = "strain_line_info";
+                rowsContainer.appendChild(clone);
+                syncRow(clone);
+                syncButtons();
+            });
+            rows().forEach(syncRow);
+            syncButtons();
         })();
         </script>
     {% endif %}
