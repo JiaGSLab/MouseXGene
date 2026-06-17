@@ -6,13 +6,17 @@ from django.urls import reverse
 from django.utils import timezone
 
 from colony.models import Cage, CageMembership, Mouse, StrainLine
-from core.models import Project
+from core.models import Project, ProjectMembership
 from users.models import UserProfile
 
 
 class TerminalMouseCageCleanupTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username="terminal-admin", password="x")
+        self.user = get_user_model().objects.create_superuser(
+            username="terminal-admin",
+            email="terminal-admin@example.test",
+            password="x",
+        )
         UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.ADMIN)
         self.client = Client()
         self.client.login(username="terminal-admin", password="x")
@@ -37,7 +41,15 @@ class TerminalMouseCageCleanupTests(TestCase):
         )
 
     def test_end_mouse_removes_current_cage_and_closes_membership(self):
-        response = self.client.post(reverse("mice:mouse_end", args=[self.mouse.pk]))
+        response = self.client.post(
+            reverse("mice:mouse_end", args=[self.mouse.pk]),
+            {
+                "terminal_status": Mouse.Status.EUTHANIZED,
+                "end_date": timezone.localdate().isoformat(),
+                "reason": "Scheduled endpoint",
+                "confirm": "on",
+            },
+        )
 
         self.assertRedirects(response, reverse("mice:mouse_detail", args=[self.mouse.pk]))
         self.mouse.refresh_from_db()
@@ -51,17 +63,49 @@ class TerminalMouseCageCleanupTests(TestCase):
         self.assertIn("End Mouse", self.membership.reason)
         self.assertEqual(self.cage.status, Cage.Status.CLOSED)
 
-    def test_mouse_detail_end_mouse_requires_browser_confirmation(self):
+    def test_mouse_detail_links_to_end_mouse_workflow(self):
         response = self.client.get(reverse("mice:mouse_detail", args=[self.mouse.pk]))
-        self.assertContains(response, "End / euthanize mouse")
-        self.assertContains(response, "current cage occupancy")
-        self.assertContains(response, "return confirm")
+        self.assertContains(response, "End / Euthanize Mouse")
+        self.assertContains(response, reverse("mice:mouse_end", args=[self.mouse.pk]))
+
+    def test_project_manager_can_open_end_mouse_form(self):
+        manager = get_user_model().objects.create_user(username="terminal-manager", password="x")
+        UserProfile.objects.filter(user=manager).update(role=UserProfile.Role.MEMBER)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=manager,
+            role=ProjectMembership.Role.MANAGER,
+        )
+        self.client.logout()
+        self.client.login(username="terminal-manager", password="x")
+
+        detail = self.client.get(reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.assertContains(detail, "End / Euthanize Mouse")
+        response = self.client.get(reverse("mice:mouse_end", args=[self.mouse.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Confirm End Mouse")
+
+    def test_end_mouse_requires_confirmation(self):
+        response = self.client.post(
+            reverse("mice:mouse_end", args=[self.mouse.pk]),
+            {
+                "terminal_status": Mouse.Status.EUTHANIZED,
+                "end_date": timezone.localdate().isoformat(),
+                "reason": "Scheduled endpoint",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required")
+        self.mouse.refresh_from_db()
+        self.assertEqual(self.mouse.status, Mouse.Status.ACTIVE)
 
     def test_editing_mouse_to_terminal_status_removes_current_cage(self):
         death_date = timezone.localdate()
         response = self.client.post(
             reverse("mice:mouse_edit", args=[self.mouse.pk]),
             {
+                "admin_correction_unlocked": "1",
+                "admin_correction_reason": "record historical terminal status",
                 "mouse_uid": self.mouse.mouse_uid,
                 "sex": self.mouse.sex,
                 "birth_date": "",
@@ -106,7 +150,15 @@ class TerminalMouseCageCleanupTests(TestCase):
             current_cage=cage,
         )
 
-        response = self.client.post(reverse("mice:mouse_end", args=[mouse.pk]))
+        response = self.client.post(
+            reverse("mice:mouse_end", args=[mouse.pk]),
+            {
+                "terminal_status": Mouse.Status.EUTHANIZED,
+                "end_date": timezone.localdate().isoformat(),
+                "reason": "Scheduled endpoint",
+                "confirm": "on",
+            },
+        )
 
         self.assertRedirects(response, reverse("mice:mouse_detail", args=[mouse.pk]))
         mouse.refresh_from_db()

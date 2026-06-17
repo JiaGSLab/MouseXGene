@@ -76,7 +76,7 @@ def _parse_int_list_params(request: HttpRequest, *, limit: int = 500) -> list[in
 def mouse_picker_api(request: HttpRequest) -> JsonResponse:
     owner_ids = _parse_int_list_param(request, "owner_ids", "owner_id", "owner")
     project_ids = _parse_int_list_param(request, "project_ids", "project_id", "project")
-    strain_line_id = _parse_int_param(request.GET.get("strain_line_id") or request.GET.get("strain_line"))
+    strain_line_ids = _parse_int_list_param(request, "strain_line_ids", "strain_line_id", "strain_line")
     selected_ids = _parse_int_list_param(request, "selected_ids", "selected_id")
     q = (request.GET.get("q") or "").strip()
     sex = (request.GET.get("sex") or "").strip().upper()
@@ -96,8 +96,8 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
         mice = mice.filter(project__owner_id__in=owner_ids)
     if project_ids:
         mice = mice.filter(project_id__in=project_ids)
-    if strain_line_id:
-        mice = mice.filter(strain_line_id=strain_line_id)
+    if strain_line_ids:
+        mice = mice.filter(strain_line_id__in=strain_line_ids)
     if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}:
         mice = mice.filter(sex=sex)
     if q:

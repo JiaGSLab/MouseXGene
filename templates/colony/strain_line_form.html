@@ -13,6 +13,7 @@
 <section class="card">
     <form method="post" class="form-layout">
         {% csrf_token %}
+        {% include "colony/includes/admin_correction_panel.html" %}
         {% if form.non_field_errors %}
             <div class="form-errors">
                 {% for error in form.non_field_errors %}
@@ -238,6 +239,7 @@
             checkbox.type = "checkbox";
             checkbox.id = id;
             checkbox.checked = option.selected;
+            checkbox.disabled = select.disabled;
             checkbox.addEventListener("change", () => {
                 option.selected = checkbox.checked;
                 syncSummary();
@@ -294,7 +296,17 @@
         select.classList.add("is-js-hidden");
         select.setAttribute("aria-hidden", "true");
         select.tabIndex = -1;
+        button.disabled = select.disabled;
+        if (search) search.disabled = select.disabled;
         syncSummary();
+
+        document.addEventListener("mxg:adminCorrectionUnlocked", () => {
+            button.disabled = false;
+            if (search) search.disabled = false;
+            optionRows.forEach((row) => {
+                row.checkbox.disabled = false;
+            });
+        });
 
         button.addEventListener("click", () => setOpen(panel.hidden));
         search?.addEventListener("input", filterOptions);
@@ -336,6 +348,7 @@
     const rows = document.getElementById("loci-rows");
     const addBtn = document.getElementById("add-locus-row");
     if (!hidden || !hiddenConfig || !rows || !addBtn) return;
+    let lociLocked = hidden.disabled || hiddenConfig.disabled;
 
     const LOCUS_TYPES = [
         ["standard_autosomal", "Standard autosomal"],
@@ -405,10 +418,12 @@
         input.placeholder = "e.g. Lyz2-Cre";
         input.value = value.locus_name || "";
         input.setAttribute("data-locus-name", "1");
+        input.disabled = lociLocked;
         input.addEventListener("input", syncHidden);
 
         const typeSelect = document.createElement("select");
         typeSelect.setAttribute("data-locus-type", "1");
+        typeSelect.disabled = lociLocked;
         LOCUS_TYPES.forEach(([val, label]) => {
             const opt = document.createElement("option");
             opt.value = val;
@@ -422,6 +437,7 @@
 
         const chrSelect = document.createElement("select");
         chrSelect.setAttribute("data-chromosome-type", "1");
+        chrSelect.disabled = lociLocked;
         CHROMOSOME_TYPES.forEach(([val, label]) => {
             const opt = document.createElement("option");
             opt.value = val;
@@ -437,6 +453,7 @@
         remove.type = "button";
         remove.className = "button button-light";
         remove.textContent = "Remove";
+        remove.disabled = lociLocked;
         remove.addEventListener("click", () => {
             wrap.remove();
             syncHidden();
@@ -456,6 +473,16 @@
         appendRow("");
     }
     addBtn.addEventListener("click", () => appendRow(""));
+    addBtn.disabled = lociLocked;
+    document.addEventListener("mxg:adminCorrectionUnlocked", () => {
+        lociLocked = false;
+        hidden.disabled = false;
+        hiddenConfig.disabled = false;
+        addBtn.disabled = false;
+        rows.querySelectorAll("input, select, button").forEach((el) => {
+            el.disabled = false;
+        });
+    });
     const form = rows.closest("form");
     if (form) {
         form.addEventListener("submit", () => {

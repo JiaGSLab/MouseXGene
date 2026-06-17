@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}End Mouse {{ mouse.mouse_uid }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>End Mouse {{ mouse.mouse_uid }}</h1>
+    <p class="muted">Record the final status and remove this mouse from current cage occupancy.</p>
+</section>
+
+<section class="card">
+    <h2>Mouse Summary</h2>
+    <dl class="detail-grid">
+        <dt>Mouse UID</dt><dd>{{ mouse.mouse_uid }}</dd>
+        <dt>Current Status</dt><dd>{{ mouse.get_status_display }}</dd>
+        <dt>Current Cage</dt>
+        <dd>
+            {% if mouse.current_cage %}
+                <a class="link-primary" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Project</dt>
+        <dd>
+            {% if mouse.project %}
+                <a class="link-primary" href="{% url 'project_detail' mouse.project_id %}">{{ mouse.project.name }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Strain Line</dt><dd>{{ mouse.strain_line }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Final Status</h2>
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-row">
+            <label for="{{ form.terminal_status.id_for_label }}">{{ form.terminal_status.label }}</label>
+            {{ form.terminal_status }}
+            {% if form.terminal_status.errors %}
+                <div class="field-error">{% for error in form.terminal_status.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.end_date.id_for_label }}">{{ form.end_date.label }}</label>
+            {{ form.end_date }}
+            {% if form.end_date.errors %}
+                <div class="field-error">{% for error in form.end_date.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% if form.reason.errors %}
+                <div class="field-error">{% for error in form.reason.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label class="checkbox-inline" for="{{ form.confirm.id_for_label }}">
+                {{ form.confirm }}
+                <span>{{ form.confirm.label }}</span>
+            </label>
+            {% if form.confirm.errors %}
+                <div class="field-error">{% for error in form.confirm.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="button button-danger">Confirm End Mouse</button>
+            <a href="{% url 'mice:mouse_detail' mouse.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

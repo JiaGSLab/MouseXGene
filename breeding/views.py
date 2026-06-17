@@ -29,6 +29,7 @@ from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import breeding_age_tier
 
 from .forms import EndBreedingForm, BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
+from .consistency import breeding_cage_mismatch_rows
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
@@ -309,11 +310,13 @@ def _enrich_breedings_for_list(breedings: list[Breeding], *, today) -> None:
             b.alert_days_style = alert_styles["days_style"]
         b.display_sire, b.display_dams = _breeding_sire_and_dams(b)
         b.display_sire_age_days = _mouse_age_days(b.display_sire, today=today)
+        b.display_sire_age_display = _age_days_display(b.display_sire_age_days)
         b.display_sire_genotype = _mouse_genotype_summary_for_list(b.display_sire)
         b.display_dam_rows = [
             {
                 "mouse": dam,
                 "age_days": _mouse_age_days(dam, today=today),
+                "age_display": _mouse_age_weeks_display(dam, today=today),
                 "genotype": _mouse_genotype_summary_for_list(dam),
             }
             for dam in (b.display_dams or [])
@@ -1158,6 +1161,7 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
     display_expected_birth_date = breeding.expected_birth_date or (
         breeding.start_date + timedelta(days=21) if breeding.start_date else None
     )
+    cage_mismatch_rows = breeding_cage_mismatch_rows(breeding)
     breeding_audit_entries = audit_entries_for_object("Breeding", breeding.pk)
     actors = merge_actor_labels(breeding, breeding_audit_entries)
     return render(
@@ -1170,6 +1174,7 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "expected_offspring_loci": expected_offspring_loci,
             "breeding_sire": breeding_sire,
             "breeding_dams": breeding_dams,
+            "cage_mismatch_rows": cage_mismatch_rows,
             "litter_timing_alert": litter_timing_alert,
             "latest_litter_date": latest_litter_date,
             "mendelian_reviews": mendelian_reviews,

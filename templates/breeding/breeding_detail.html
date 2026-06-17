@@ -19,6 +19,34 @@
     </div>
 </section>
 
+{% if cage_mismatch_rows %}
+<section class="card dashboard-alert dashboard-alert--hot">
+    <h2>Breeding Cage Mismatch</h2>
+    <p class="field-error">
+        Active breeders must stay in the breeding cage. Use Edit Breeding to correct the breeding cage, or End Breeding before moving breeders to holding cages.
+    </p>
+    <ul class="mini-list">
+        {% for row in cage_mismatch_rows %}
+            <li>
+                {{ row.role }} <a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a>
+                should be in
+                {% if row.expected_cage %}
+                    <a href="{% url 'colony:cage_detail' row.expected_cage.pk %}">{{ row.expected_cage.cage_id }}</a>
+                {% else %}
+                    no breeding cage
+                {% endif %}
+                but is currently in
+                {% if row.current_cage %}
+                    <a href="{% url 'colony:cage_detail' row.current_cage.pk %}">{{ row.current_cage.cage_id }}</a>
+                {% else %}
+                    no current cage
+                {% endif %}.
+            </li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 <section class="card">
     <h2>Basic Information</h2>
     <dl class="detail-grid">

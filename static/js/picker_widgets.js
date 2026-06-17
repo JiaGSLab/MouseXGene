@@ -166,10 +166,14 @@
             const count = cageMouseCount(cage);
             if (!count) {
                 const emptyPieces = [`${cage.cage_id} is empty`];
+                if (cage.home_project_name) emptyPieces.push(`Home project: ${cage.home_project_name}`);
+                if (cage.colony_name) emptyPieces.push(`Colony: ${cage.colony_name}`);
                 if (cage.purpose_label) emptyPieces.push(`Purpose: ${cage.purpose_label}`);
                 return `${emptyPieces.join(". ")}.`;
             }
             const pieces = [cageOptionLabel(cage)];
+            if (cage.home_project_name) pieces.push(`Home project: ${cage.home_project_name}`);
+            if (cage.colony_name) pieces.push(`Colony: ${cage.colony_name}`);
             if (cage.purpose_label) pieces.push(`Purpose: ${cage.purpose_label}`);
             const projects = compactList(cage.project_names || []);
             const mice = compactList(cage.mouse_uids || []);
@@ -178,10 +182,11 @@
             return `${pieces.join(". ")}.`;
         },
         cageWarnings(cage, context = {}) {
-            if (!cage || cage.is_empty) return [];
+            if (!cage) return [];
             const warnings = [];
             const projectIds = idSet(cage.project_ids);
             const strainIds = idSet(cage.strain_line_ids);
+            if (cage.home_project_id) projectIds.add(String(cage.home_project_id));
             const cageSexes = idSet(cage.sexes);
             const projectId = String(context.projectId || "");
             const strainLineId = String(context.strainLineId || "");

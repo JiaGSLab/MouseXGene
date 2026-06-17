@@ -167,7 +167,7 @@
                 </td>
                 <td>
                     {% if mouse.strain_line %}
-                        <a class="table-link" href="{% url 'mice:mouse_list' %}?strain_line_id={{ mouse.strain_line_id }}">{{ mouse.strain_line }}</a>
+                        <a class="table-link" href="{% url 'colony:strain_line_detail' mouse.strain_line_id %}">{{ mouse.strain_line }}</a>
                     {% else %}
                         <span class="cell-empty">—</span>
                     {% endif %}

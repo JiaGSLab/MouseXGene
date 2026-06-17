@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Retire Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Retire Cage {{ cage.cage_id }}</h1>
+    <p class="muted">Remove an empty cage from active cage pickers while preserving its history and cage ID.</p>
+</section>
+
+<section class="card">
+    <h2>Cage Summary</h2>
+    <dl class="detail-grid">
+        <dt>Cage ID</dt><dd>{{ cage.cage_id }}</dd>
+        <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
+        <dt>Purpose</dt><dd>{{ cage.get_purpose_display }}</dd>
+        <dt>Home Project</dt>
+        <dd>
+            {% if cage.project %}
+                <a class="link-primary" href="{% url 'project_detail' cage.project_id %}">{{ cage.project.name }}</a>
+                <span class="muted"> · {{ cage.project.owner_display }}</span>
+            {% else %}
+                <span class="muted">Not assigned</span>
+            {% endif %}
+        </dd>
+        <dt>Default Colony / Intended Line</dt>
+        <dd>
+            {% if cage.colony %}
+                {{ cage.colony.name }}
+            {% else %}
+                <span class="muted">Mixed / not assigned</span>
+            {% endif %}
+        </dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Retirement Record</h2>
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-row">
+            <label for="{{ form.retire_date.id_for_label }}">{{ form.retire_date.label }}</label>
+            {{ form.retire_date }}
+            {% if form.retire_date.errors %}
+                <div class="field-error">{% for error in form.retire_date.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% if form.reason.help_text %}<small class="muted">{{ form.reason.help_text }}</small>{% endif %}
+            {% if form.reason.errors %}
+                <div class="field-error">{% for error in form.reason.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label class="checkbox-inline" for="{{ form.confirm.id_for_label }}">
+                {{ form.confirm }}
+                <span>{{ form.confirm.label }}</span>
+            </label>
+            {% if form.confirm.errors %}
+                <div class="field-error">{% for error in form.confirm.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="button button-danger">Retire Cage</button>
+            <a href="{% url 'colony:cage_detail' cage.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

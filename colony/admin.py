@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine
+from .models import Cage, CageMembership, Colony, Mouse, MouseGenotypeComponent, StrainLine
 
 
 class NoHardDeleteAdminMixin:
@@ -23,9 +23,28 @@ class MouseGenotypeComponentInline(admin.TabularInline):
 
 @admin.register(Cage)
 class CageAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
-    list_display = ("cage_id", "created_date", "room", "rack", "position", "cage_type", "purpose", "status", "archived_at")
+    list_display = (
+        "cage_id",
+        "project",
+        "colony",
+        "created_date",
+        "room",
+        "rack",
+        "position",
+        "cage_type",
+        "purpose",
+        "status",
+        "archived_at",
+    )
     search_fields = ("cage_id", "room", "rack", "position", "notes")
-    list_filter = ("cage_type", "purpose", "status")
+    list_filter = ("project", "colony", "cage_type", "purpose", "status")
+
+
+@admin.register(Colony)
+class ColonyAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
+    list_display = ("name", "project", "strain_line", "status", "updated_at")
+    search_fields = ("name", "project__name", "strain_line__line_name", "strain_line__name", "notes")
+    list_filter = ("status", "project", "strain_line")
 
 
 @admin.register(Mouse)
@@ -36,6 +55,7 @@ class MouseAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
         "sex",
         "status",
         "strain_line",
+        "colony",
         "current_cage",
         "birth_date",
         "death_date",
@@ -44,7 +64,7 @@ class MouseAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
         "origin",
     )
     search_fields = ("mouse_uid", "ear_tag", "toe_tag", "origin", "coat_color", "death_reason", "notes")
-    list_filter = ("sex", "status", "strain_line")
+    list_filter = ("sex", "status", "strain_line", "colony", "project")
     inlines = (MouseGenotypeComponentInline,)
 
 

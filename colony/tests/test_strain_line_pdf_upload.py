@@ -12,8 +12,12 @@ from users.models import UserProfile
 
 class StrainLinePdfUploadTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username="pdfupload", password="x")
-        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
+        self.user = get_user_model().objects.create_superuser(
+            username="pdfupload",
+            email="pdfupload@example.test",
+            password="x",
+        )
+        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.ADMIN)
         self.client = Client(enforce_csrf_checks=True)
         self.client.login(username="pdfupload", password="x")
         self.line = StrainLine.objects.create(line_name="PdfStrain", name="PdfStrain")
@@ -34,6 +38,7 @@ class StrainLinePdfUploadTests(TestCase):
         self._upload_form_token(response)
         self.assertContains(response, "Add PDF")
         self.assertContains(response, "Add another PDF")
+        self.assertContains(response, 'id="strain-pdf-upload-row-template"')
 
     def test_detail_page_has_no_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))

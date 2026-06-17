@@ -11,16 +11,14 @@
 <section class="page-header">
     <h1>{{ page_title }}</h1>
     <p class="muted">
-        Fields marked <span class="required-mark">*</span> are required. Create dependencies first:
-        <a href="{% url 'colony:strain_line_list' %}">Strain Lines</a>.
-        After save, genotype components are auto pre-populated from the selected strain line template (if configured),
-        then you can fill actual alleles from genotyping results.
+        Edit daily tags and notes here. Use Move Cage for cage changes and Edit Genotyping Results for actual genotype calls.
     </p>
 </section>
 
 <section class="card">
     <form method="post" class="form-layout">
         {% csrf_token %}
+        {% include "colony/includes/admin_correction_panel.html" %}
 
         {% if form.non_field_errors %}
             <div class="form-errors">
@@ -51,71 +49,22 @@
                 </div>
                 <div class="card card-nested">
                     <h2>Current Cage</h2>
-                    <p class="muted small-print">Filter by owner, project, and/or strain line, then pick a cage or type a cage ID (partial match supported).</p>
-                    <div class="filter-grid">
-                        <div class="form-row">
-                            <label for="id_mouse_cage_owner_filter">Filter by owner</label>
-                            <select id="id_mouse_cage_owner_filter" class="filter-control">
-                                <option value="">All owners</option>
-                                {% for owner in cage_owner_options %}
-                                    <option value="{{ owner.id }}">{{ owner.name }}</option>
-                                {% endfor %}
-                            </select>
+                    <p class="muted small-print">Use the dedicated Move Cage workflow to change cage assignment and preserve movement history.</p>
+                    <dl class="detail-grid">
+                        <dt>Current Cage</dt>
+                        <dd>
+                            {% if form.instance.current_cage %}
+                                <a class="link-primary" href="{% url 'colony:cage_detail' form.instance.current_cage.pk %}">{{ form.instance.current_cage.cage_id }}</a>
+                            {% else %}
+                                No current cage assigned.
+                            {% endif %}
+                        </dd>
+                    </dl>
+                    {% if form.instance.status == "active" %}
+                        <div class="action-links">
+                            <a class="button button-light" href="{% url 'mice:mouse_move' form.instance.pk %}">Move Cage</a>
                         </div>
-                        <div class="form-row">
-                            <label for="id_mouse_cage_project_filter">Filter by project</label>
-                            <select id="id_mouse_cage_project_filter" class="filter-control">
-                                <option value="">All projects</option>
-                                {% for project in cage_project_options %}
-                                    <option value="{{ project.id }}">{{ project.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="form-row">
-                            <label for="id_mouse_cage_strain_filter">Filter by strain line</label>
-                            <select id="id_mouse_cage_strain_filter" class="filter-control">
-                                <option value="">All strain lines</option>
-                                {% for strain in cage_strain_line_options %}
-                                    <option value="{{ strain.id }}">{{ strain.line_name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                        <button type="button" class="button button-light" id="mouse-cage-filter-apply">Refresh list</button>
-                        <button type="button" class="button button-light" id="mouse-cage-sync-form-filters">Use form project / strain</button>
-                        <span class="muted small-print" id="mouse-cage-filter-status">Showing all active cages.</span>
-                    </div>
-                    <div class="form-row">
-                        <label for="{{ form.current_cage.id_for_label }}">{{ form.current_cage.label }}</label>
-                        {{ form.current_cage }}
-                        {% if form.current_cage.errors %}
-                            <div class="field-error">
-                                {% for error in form.current_cage.errors %}
-                                    <div>{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    </div>
-                    <div class="form-row">
-                        <label for="{{ form.current_cage_lookup.id_for_label }}">{{ form.current_cage_lookup.label }}</label>
-                        {{ form.current_cage_lookup }}
-                        {% if form.current_cage_lookup.help_text %}
-                            <small class="muted">{{ form.current_cage_lookup.help_text }}</small>
-                        {% endif %}
-                        <p class="muted small-print" id="mouse-cage-lookup-status" aria-live="polite"></p>
-                        <p class="muted small-print" id="mouse-cage-selected-summary" aria-live="polite"></p>
-                        {% if form.current_cage_lookup.errors %}
-                            <div class="field-error">
-                                {% for error in form.current_cage_lookup.errors %}
-                                    <div>{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    </div>
-                    <small class="muted">
-                        Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
-                    </small>
+                    {% endif %}
                 </div>
             {% else %}
                 <div class="form-row">
@@ -136,14 +85,19 @@
                 </div>
                 {% if field.name == "strain_line" %}
                     <section class="card">
-                        <h2>Genotype Rows (from Strain Line)</h2>
-                        <p class="muted">
-                            When you choose a strain line, expected loci are shown below. Fill the actual genotype display for this mouse
-                            (for example <code>Cre/+</code>, <code>fl/fl</code>, <code>+/Y</code>).
-                            For detailed corrections, use the mouse detail page's Edit Genotyping Results workflow.
-                        </p>
-                        <input type="hidden" name="genotype_row_count" id="id_genotype_row_count" value="0">
-                        <div id="genotype-template-rows"></div>
+                        <h2>Expected loci from strain line / parents</h2>
+                        {% if expected_loci %}
+                            <ul class="compact-list">
+                                {% for locus in expected_loci %}
+                                    <li>{{ locus }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="muted">No expected loci template for this mouse.</p>
+                        {% endif %}
+                        <div class="action-links">
+                            <a class="button button-light" href="{% url 'mice:mouse_genotype_components_edit' form.instance.pk %}">Edit Genotyping Results</a>
+                        </div>
                     </section>
                     {% include "colony/_mouse_parent_picker.html" with parent_form=form %}
                 {% endif %}
@@ -161,275 +115,9 @@
     </form>
 </section>
 
-{{ strain_template_loci_map|json_script:"strain-template-loci-map" }}
-{% if strain_project_map %}{{ strain_project_map|json_script:"strain-project-map" }}{% endif %}
-{{ existing_genotype_map|json_script:"existing-genotype-map" }}
-{{ posted_genotype_rows|json_script:"posted-genotype-rows" }}
 {% include "colony/_mouse_parent_picker_script.html" %}
 <script>
-(async () => {
-    const strainMap = JSON.parse(document.getElementById("strain-template-loci-map").textContent || "{}");
-    const mouseStrainMapApiUrl = "{{ mouse_strain_map_api_url|default:'/mice/api/strain-line-map/'|escapejs }}";
-    let mouseStrainMap = {};
-    const strainProjectEl = document.getElementById("strain-project-map");
-    const strainProjectMap = strainProjectEl
-        ? JSON.parse(strainProjectEl.textContent || "{}")
-        : {};
-    const applyStrainProject = {{ apply_strain_project|yesno:"true,false" }};
-    const existingMap = JSON.parse(document.getElementById("existing-genotype-map").textContent || "{}");
-    const postedRows = JSON.parse(document.getElementById("posted-genotype-rows").textContent || "[]");
-    const strainSelect = document.getElementById("id_strain_line");
-    const projectSelect = document.getElementById("id_project");
-    const sireSelect = document.getElementById("id_sire");
-    const damSelect = document.getElementById("id_dam");
-    const possibleDamsSelect = document.getElementById("id_possible_dams");
-    const rowCountInput = document.getElementById("id_genotype_row_count");
-    const container = document.getElementById("genotype-template-rows");
-
-    const AUTOSOMAL_OPTIONS = {
-        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
-        flox: ["+/+", "fl/+", "fl/fl", "+/-", "-/-", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
-        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["Custom"],
-    };
-    const X_LINKED_FEMALE_OPTIONS = {
-        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
-        flox: ["+/+", "fl/+", "fl/fl", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
-        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["+/+", "Cre/+", "Cre/Cre", "fl/+", "fl/fl", "KI/+", "KI/KI", "Custom"],
-    };
-    const X_LINKED_MALE_OPTIONS = {
-        standard_autosomal: ["+/Y", "-/Y", "Custom"],
-        flox: ["+/Y", "fl/Y", "-/Y", "Custom"],
-        cre_transgene: ["+/Y", "Cre/Y", "CreERT2/Y", "-/Y", "Custom"],
-        reporter_ki: ["+/Y", "KI/Y", "-/Y", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["+/Y", "Cre/Y", "-/Y", "fl/Y", "KI/Y", "Custom"],
-    };
-    const Y_LINKED_MALE_OPTIONS = ["+/Y", "-/Y", "KI/Y", "Custom"];
-
-    function postedMap() {
-        const out = {};
-        if (!Array.isArray(postedRows)) return out;
-        for (const row of postedRows) {
-            if (!row || !row.locus) continue;
-            out[row.locus] = row.genotype || "";
-        }
-        return out;
-    }
-
-    function dedupeLoci(entries) {
-        const out = [];
-        const seen = new Set();
-        for (const raw of entries) {
-            const text = String(raw?.locus_name || "").trim();
-            if (!text) continue;
-            const key = text.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-            out.push({
-                locus_name: text,
-                locus_type: String(raw?.locus_type || "custom").trim() || "custom",
-                chromosome_type: String(raw?.chromosome_type || "autosomal").trim() || "autosomal",
-            });
-        }
-        return out;
-    }
-
-    function lociForStrainId(strainId) {
-        const value = strainMap[strainId];
-        return Array.isArray(value) ? value : [];
-    }
-
-    function selectedValues(select) {
-        return Array.from(select?.selectedOptions || [])
-            .map((opt) => opt.value)
-            .filter(Boolean);
-    }
-
-    function parentLociForId(parentId) {
-        if (!parentId) return [];
-        const strainId = mouseStrainMap[parentId];
-        if (!strainId) return [];
-        return lociForStrainId(strainId);
-    }
-
-    function possibleDamIds() {
-        const ids = selectedValues(possibleDamsSelect);
-        if (!ids.length && damSelect?.value) return [damSelect.value];
-        return ids;
-    }
-
-    function possibleDamLoci() {
-        return possibleDamIds().flatMap((id) => parentLociForId(id));
-    }
-
-    async function ensureParentStrainMap() {
-        if (!window.MXGPicker) return;
-        const ids = [sireSelect?.value || "", ...possibleDamIds()]
-            .filter(Boolean)
-            .filter((id) => !mouseStrainMap[id]);
-        if (!ids.length) return;
-        try {
-            Object.assign(
-                mouseStrainMap,
-                await MXGPicker.loadMouseStrainMap(mouseStrainMapApiUrl, { ids: ids.join(",") })
-            );
-        } catch (err) {
-            console.warn("Failed to load parent strain map", err);
-        }
-    }
-
-    function optionsFor(item, sex) {
-        const locusType = item.locus_type || "custom";
-        const chromosomeType = item.chromosome_type || "autosomal";
-        if (chromosomeType === "autosomal") {
-            return { options: AUTOSOMAL_OPTIONS[locusType] || AUTOSOMAL_OPTIONS.custom, disabled: false };
-        }
-        if (chromosomeType === "x_linked") {
-            if (sex === "M") {
-                return { options: X_LINKED_MALE_OPTIONS[locusType] || X_LINKED_MALE_OPTIONS.custom, disabled: false };
-            }
-            return { options: X_LINKED_FEMALE_OPTIONS[locusType] || X_LINKED_FEMALE_OPTIONS.custom, disabled: false };
-        }
-        // y_linked
-        if (sex === "F") {
-            return { options: ["N/A"], disabled: true };
-        }
-        return { options: Y_LINKED_MALE_OPTIONS, disabled: false };
-    }
-
-    async function renderRows() {
-        await ensureParentStrainMap();
-        const strainId = strainSelect ? strainSelect.value : "";
-        const sex = document.getElementById("id_sex")?.value || "U";
-        const loci = dedupeLoci([
-            ...lociForStrainId(strainId),
-            ...parentLociForId(sireSelect?.value || ""),
-            ...possibleDamLoci(),
-        ]);
-        const pMap = postedMap();
-        container.innerHTML = "";
-        if (!loci.length) {
-            rowCountInput.value = "0";
-            const p = document.createElement("p");
-            p.className = "muted";
-            p.textContent = "No expected loci template on this strain line.";
-            container.appendChild(p);
-            return;
-        }
-        loci.forEach((item, idx) => {
-            const locus = item.locus_name;
-            const locusType = item.locus_type;
-            const chromosomeType = item.chromosome_type;
-            const current = (pMap[locus] ?? existingMap[locus] ?? "").trim();
-            const optionPack = optionsFor(item, sex);
-            const options = optionPack.options;
-            const row = document.createElement("div");
-            row.className = "form-row";
-            const label = document.createElement("label");
-            label.setAttribute("for", `id_genotype_display_${idx}`);
-            label.textContent = `${locus} (${locusType}, ${chromosomeType})`;
-            const hidden = document.createElement("input");
-            hidden.type = "hidden";
-            hidden.name = `genotype_locus_${idx}`;
-            hidden.value = locus;
-
-            const valueHidden = document.createElement("input");
-            valueHidden.type = "hidden";
-            valueHidden.name = `genotype_display_${idx}`;
-            valueHidden.id = `id_genotype_display_${idx}`;
-
-            const select = document.createElement("select");
-            select.name = `genotype_choice_${idx}`;
-            const customInput = document.createElement("input");
-            customInput.type = "text";
-            customInput.placeholder = "Custom genotype (e.g. del/Y)";
-
-            let hasMatched = false;
-            options.forEach((optValue) => {
-                const opt = document.createElement("option");
-                opt.value = optValue;
-                opt.textContent = optValue;
-                if (current && current === optValue) {
-                    opt.selected = true;
-                    hasMatched = true;
-                }
-                select.appendChild(opt);
-            });
-
-            if (current && !hasMatched) {
-                select.value = "Custom";
-                customInput.value = current;
-            } else if (!current && options[0] !== "Custom") {
-                select.value = options[0];
-            } else {
-                select.value = "Custom";
-            }
-
-            function syncValue() {
-                if (optionPack.disabled) {
-                    customInput.style.display = "none";
-                    valueHidden.value = "";
-                    return;
-                }
-                if (select.value === "Custom") {
-                    customInput.style.display = "";
-                    valueHidden.value = (customInput.value || "").trim();
-                } else {
-                    customInput.style.display = "none";
-                    valueHidden.value = select.value;
-                }
-            }
-            select.disabled = optionPack.disabled;
-            select.addEventListener("change", syncValue);
-            customInput.addEventListener("input", syncValue);
-            syncValue();
-
-            row.appendChild(label);
-            row.appendChild(hidden);
-            row.appendChild(select);
-            row.appendChild(customInput);
-            row.appendChild(valueHidden);
-            container.appendChild(row);
-        });
-        rowCountInput.value = String(loci.length);
-    }
-
-    function applyProjectFromStrain() {
-        if (!applyStrainProject || !strainSelect || !projectSelect) return;
-        const projectId = strainProjectMap[strainSelect.value];
-        if (projectId) {
-            projectSelect.value = projectId;
-        }
-    }
-
-    if (strainSelect) {
-        strainSelect.addEventListener("change", () => {
-            applyProjectFromStrain();
-            renderRows();
-        });
-    }
-    if (sireSelect) {
-        sireSelect.addEventListener("change", renderRows);
-    }
-    if (damSelect) {
-        damSelect.addEventListener("change", renderRows);
-    }
-    if (possibleDamsSelect) {
-        possibleDamsSelect.addEventListener("change", renderRows);
-    }
-    const sexSelect = document.getElementById("id_sex");
-    if (sexSelect) {
-        sexSelect.addEventListener("change", renderRows);
-    }
-    applyProjectFromStrain();
-    await renderRows();
-
+(() => {
     const formEl = document.querySelector("form.form-layout");
     const statusSelect = document.getElementById("id_status");
     const initialStatus = statusSelect?.dataset.initialStatus || "";

@@ -1,0 +1,57 @@
+{% if admin_correction_available %}
+<div class="admin-correction-panel" data-admin-correction-panel>
+    <h2>Admin correction</h2>
+    <p class="muted small-print">Locked historical fields stay read-only until you explicitly unlock correction mode.</p>
+    <input
+        type="hidden"
+        name="admin_correction_unlocked"
+        id="admin-correction-unlocked"
+        value="{% if admin_correction_unlocked %}1{% else %}0{% endif %}"
+    >
+    <div class="action-links" data-admin-correction-locked-state {% if admin_correction_unlocked %}hidden{% endif %}>
+        <button type="button" class="button button-light" id="admin-correction-unlock">Unlock admin correction</button>
+    </div>
+    <div class="form-row" data-admin-correction-reason {% if not admin_correction_unlocked %}hidden{% endif %}>
+        <label for="admin-correction-reason">Correction reason</label>
+        <textarea
+            name="admin_correction_reason"
+            id="admin-correction-reason"
+            rows="2"
+            placeholder="Required when changing locked historical fields"
+        >{{ admin_correction_reason }}</textarea>
+    </div>
+</div>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const hidden = document.getElementById("admin-correction-unlocked");
+    const unlock = document.getElementById("admin-correction-unlock");
+    const reasonWrap = document.querySelector("[data-admin-correction-reason]");
+    const lockedState = document.querySelector("[data-admin-correction-locked-state]");
+
+    function enableCorrectionFields() {
+        if (hidden) hidden.value = "1";
+        document.querySelectorAll("[data-admin-correction-field]").forEach((field) => {
+            field.disabled = false;
+            field.removeAttribute("aria-disabled");
+            field.classList.remove("input-locked");
+        });
+        if (reasonWrap) reasonWrap.hidden = false;
+        if (lockedState) lockedState.hidden = true;
+        document.dispatchEvent(new CustomEvent("mxg:adminCorrectionUnlocked"));
+        const reason = document.getElementById("admin-correction-reason");
+        if (reason) reason.focus();
+    }
+
+    if (hidden?.value === "1") {
+        enableCorrectionFields();
+    }
+    unlock?.addEventListener("click", () => {
+        const ok = window.confirm(
+            "This is an admin correction. It may change historical records and will be written to the audit log. Continue?"
+        );
+        if (!ok) return;
+        enableCorrectionFields();
+    });
+});
+</script>
+{% endif %}

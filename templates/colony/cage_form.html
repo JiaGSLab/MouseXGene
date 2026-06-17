@@ -14,6 +14,7 @@
 <section class="card">
     <form method="post" class="form-layout">
         {% csrf_token %}
+        {% include "colony/includes/admin_correction_panel.html" %}
         {% if next_url %}
             <input type="hidden" name="next" value="{{ next_url }}">
         {% endif %}
@@ -45,6 +46,25 @@
             {% if form.created_date.errors %}
                 <div class="field-error">{% for error in form.created_date.errors %}<div>{{ error }}</div>{% endfor %}</div>
             {% endif %}
+        </div>
+
+        <div class="form-row form-row--inline-fields">
+            <div class="form-row">
+                <label for="{{ form.project.id_for_label }}">{{ form.project.label }}</label>
+                {{ form.project }}
+                {% if form.project.help_text %}<small class="muted">{{ form.project.help_text }}</small>{% endif %}
+                {% if form.project.errors %}
+                    <div class="field-error">{% for error in form.project.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+            <div class="form-row">
+                <label for="{{ form.colony.id_for_label }}">{{ form.colony.label }}</label>
+                {{ form.colony }}
+                {% if form.colony.help_text %}<small class="muted">{{ form.colony.help_text }}</small>{% endif %}
+                {% if form.colony.errors %}
+                    <div class="field-error">{% for error in form.colony.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
         </div>
 
         <div class="form-row form-row--inline-fields">

@@ -185,7 +185,7 @@
                 <td>
                     {% if breeding.display_sire %}
                         <div><a href="{% url 'mice:mouse_detail' breeding.display_sire.pk %}">{{ breeding.display_sire.mouse_uid }}</a></div>
-                        <div class="muted small-print">Age: {{ breeding.display_sire_age_days|default:"-" }}d</div>
+                        <div class="muted small-print">Age: {{ breeding.display_sire_age_display|default:"-" }}</div>
                         <div class="muted small-print">Genotype: {{ breeding.display_sire_genotype|default:"-" }}</div>
                     {% else %}
                         -
@@ -206,7 +206,7 @@
                                     {% for row in breeding.display_dam_rows %}
                                         <tr>
                                             <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
-                                            <td>{{ row.age_days|default:"-" }}d</td>
+                                            <td>{{ row.age_display|default:"-" }}</td>
                                             <td>{{ row.genotype|default:"-" }}</td>
                                         </tr>
                                     {% endfor %}

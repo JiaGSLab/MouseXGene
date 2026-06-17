@@ -327,6 +327,71 @@ class StrainLineDocument(TimeStampedModel):
         return f"{self.strain_line_id}: {self.display_name}"
 
 
+class Colony(ActorStampedModel):
+    """Actual maintained animal group for one project and one strain line."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        ARCHIVED = "archived", "Archived"
+
+    project = models.ForeignKey(
+        "core.Project",
+        on_delete=models.PROTECT,
+        related_name="colonies",
+    )
+    strain_line = models.ForeignKey(
+        StrainLine,
+        on_delete=models.PROTECT,
+        related_name="colonies",
+    )
+    name = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("project__name", "strain_line__line_name", "name")
+        constraints = [
+            models.UniqueConstraint(fields=["project", "strain_line"], name="colony_unique_project_strain"),
+        ]
+        indexes = [
+            models.Index(fields=["status", "project"], name="colony_colony_status_proj"),
+            models.Index(fields=["status", "strain_line"], name="colony_colony_status_strain"),
+        ]
+
+    @property
+    def owner(self):
+        return self.project.owner if self.project_id else None
+
+    @property
+    def owner_display(self) -> str:
+        return self.project.owner_display if self.project_id else "—"
+
+    def default_name(self) -> str:
+        project_name = self.project.name if self.project_id else "Project"
+        strain_name = self.strain_line.label if self.strain_line_id else "Strain line"
+        return f"{project_name} / {strain_name}"
+
+    def save(self, *args, **kwargs):
+        if not (self.name or "").strip():
+            self.name = self.default_name()
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "name" not in update_fields:
+                kwargs["update_fields"] = list(update_fields) + ["name"]
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_or_create_for(cls, *, project_id: int, strain_line_id: int) -> "Colony":
+        colony, _created = cls.objects.get_or_create(
+            project_id=project_id,
+            strain_line_id=strain_line_id,
+            defaults={"name": ""},
+        )
+        return colony
+
+    def __str__(self) -> str:
+        return self.name or self.default_name()
+
+
 class Cage(ActorStampedModel):
     class CageType(models.TextChoices):
         STANDARD = "standard", "Standard"
@@ -355,6 +420,22 @@ class Cage(ActorStampedModel):
     cage_type = models.CharField(max_length=20, choices=CageType.choices, default=CageType.STANDARD)
     purpose = models.CharField(max_length=20, choices=Purpose.choices, default=Purpose.HOLDING)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    project = models.ForeignKey(
+        "core.Project",
+        on_delete=models.PROTECT,
+        related_name="cages",
+        null=True,
+        blank=True,
+        help_text="Home project for this cage. Empty only when ownership cannot be inferred yet.",
+    )
+    colony = models.ForeignKey(
+        Colony,
+        on_delete=models.SET_NULL,
+        related_name="cages",
+        null=True,
+        blank=True,
+        help_text="Optional default colony for this cage.",
+    )
     archived_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
@@ -362,7 +443,21 @@ class Cage(ActorStampedModel):
         ordering = ("cage_id",)
         indexes = [
             models.Index(fields=["status", "cage_id"], name="colony_cage_status_id"),
+            models.Index(fields=["status", "project"], name="colony_cage_status_proj"),
+            models.Index(fields=["status", "colony"], name="colony_cage_status_colony"),
         ]
+
+    @property
+    def owner_display(self) -> str:
+        return self.project.owner_display if self.project_id else "—"
+
+    def save(self, *args, **kwargs):
+        if self.colony_id and not self.project_id:
+            self.project_id = self.colony.project_id
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "project" not in update_fields:
+                kwargs["update_fields"] = list(update_fields) + ["project"]
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.cage_id
@@ -394,6 +489,14 @@ class Mouse(ActorStampedModel):
     death_reason = models.CharField(max_length=255, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     strain_line = models.ForeignKey(StrainLine, on_delete=models.PROTECT, related_name="mice")
+    colony = models.ForeignKey(
+        Colony,
+        on_delete=models.PROTECT,
+        related_name="mice",
+        null=True,
+        blank=True,
+        help_text="Actual project-specific colony/stock this mouse belongs to.",
+    )
     current_cage = models.ForeignKey(
         Cage,
         on_delete=models.SET_NULL,
@@ -449,8 +552,25 @@ class Mouse(ActorStampedModel):
             models.Index(fields=["status", "mouse_uid"], name="colony_mouse_status_uid"),
             models.Index(fields=["status", "project"], name="colony_mouse_status_proj"),
             models.Index(fields=["status", "strain_line"], name="colony_mouse_status_strain"),
+            models.Index(fields=["status", "colony"], name="colony_mouse_status_colony"),
             models.Index(fields=["status", "current_cage"], name="colony_mouse_status_cage"),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.project_id and self.strain_line_id:
+            if (
+                not self.colony_id
+                or self.colony.project_id != self.project_id
+                or self.colony.strain_line_id != self.strain_line_id
+            ):
+                self.colony = Colony.get_or_create_for(
+                    project_id=self.project_id,
+                    strain_line_id=self.strain_line_id,
+                )
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None and "colony" not in update_fields:
+                    kwargs["update_fields"] = list(update_fields) + ["colony"]
+        super().save(*args, **kwargs)
 
     def clean(self) -> None:
         if self.death_date and self.birth_date and self.death_date < self.birth_date:
@@ -743,3 +863,22 @@ def _sync_strain_line_projects_after_mouse_save(sender, instance: Mouse, **kwarg
         return
     if instance.strain_line_id and instance.project_id:
         instance.strain_line.projects.add(instance.project_id)
+
+
+@receiver(post_save, sender=Mouse)
+def _sync_cage_home_from_mouse_save(sender, instance: Mouse, **kwargs) -> None:
+    if kwargs.get("raw") or not instance.current_cage_id:
+        return
+    updates: list[str] = []
+    cage = Cage.objects.filter(pk=instance.current_cage_id).select_related("colony").first()
+    if cage is None:
+        return
+    if instance.project_id and not cage.project_id:
+        cage.project_id = instance.project_id
+        updates.append("project")
+    if instance.colony_id and not cage.colony_id:
+        cage.colony_id = instance.colony_id
+        updates.append("colony")
+    if updates:
+        updates.append("updated_at")
+        cage.save(update_fields=updates)

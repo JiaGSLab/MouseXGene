@@ -46,6 +46,12 @@
                 <option value="yes" {% if is_empty == "yes" %}selected{% endif %}>Empty Cages Only</option>
                 <option value="no" {% if is_empty == "no" %}selected{% endif %}>Non-Empty Cages Only</option>
             </select>
+            <select name="project" class="filter-control">
+                <option value="">All Projects</option>
+                {% for item in project_options %}
+                    <option value="{{ item.pk }}" {% if project == item.pk|stringformat:"s" %}selected{% endif %}>{{ item.name }}</option>
+                {% endfor %}
+            </select>
             <select name="owner" class="filter-control" aria-label="Project owner">
                 <option value="all" {% if not owner %}selected{% endif %}>All Owners</option>
                 {% for item in owner_options %}
@@ -138,6 +144,7 @@
                     {% for pr in cage.project_rows %}
                         <div class="cage-projects-cell__row">
                             <a class="link-primary" href="{% url 'project_detail' pr.project.pk %}">{{ pr.project.name }}</a>
+                            {% if pr.source == "home" and pr.n == 0 %}<span class="muted small-print"> · Assigned project</span>{% endif %}
                         </div>
                     {% empty %}
                         <span class="cell-empty">—</span>
@@ -164,4 +171,3 @@
     {% include "includes/pagination_nav.html" %}
 </section>
 {% endblock %}
-

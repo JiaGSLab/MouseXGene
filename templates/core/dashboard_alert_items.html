@@ -71,6 +71,29 @@
             <li class="dashboard-alert-empty">All clear</li>
         {% endfor %}
     </ul>
+{% elif alert.kind == "breeding_cage_mismatch" %}
+    <ul class="mini-list">
+        {% for breeding in alert.items %}
+            <li>
+                <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
+                {% if breeding.cage %}
+                    - cage <a href="{% url 'colony:cage_detail' breeding.cage.pk %}">{{ breeding.cage.cage_id }}</a>
+                {% endif %}
+                {% for row in breeding.cage_mismatch_rows %}
+                    <div class="muted small-print">
+                        {{ row.mouse.mouse_uid }} currently:
+                        {% if row.current_cage %}
+                            <a href="{% url 'colony:cage_detail' row.current_cage.pk %}">{{ row.current_cage.cage_id }}</a>
+                        {% else %}
+                            no current cage
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </li>
+        {% empty %}
+            <li class="dashboard-alert-empty">All clear</li>
+        {% endfor %}
+    </ul>
 {% elif alert.kind == "pups_no_genotype" %}
     <ul class="mini-list">
         {% for pup in alert.items %}

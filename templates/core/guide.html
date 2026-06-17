@@ -114,6 +114,7 @@
 
         <h3 class="guide-subheading">编辑、换笼、结束小鼠</h3>
         <ul class="guide-list">
+            <li>一只小鼠从出生到死亡只使用一个 <strong>Mouse UID</strong>。状态、笼位、项目或备注可以变化，但 Mouse UID 不变，也不能复用给另一只鼠。</li>
             <li><strong>Edit Mouse</strong>：修改 UID 以外的基础信息、project、strain line、parentage、notes、status 等。</li>
             <li><strong>Move Cage</strong>：活鼠换笼时使用，会更新当前笼位和笼位历史。</li>
             <li><strong>End Mouse</strong>：小鼠安乐死或进入终态时使用。系统会弹窗确认，并把它从当前笼位占用中移除。</li>
@@ -126,9 +127,9 @@
         <ul class="guide-list">
             <li>能先建笼子就先建笼子，再把小鼠放进去。</li>
             <li><strong>Room</strong>、<strong>Rack</strong>、<strong>Position</strong> 尽量用统一格式，否则以后筛选会很乱。</li>
+            <li>一个真实笼位只使用一个 <strong>Cage ID</strong>。笼子状态、用途、房间位置可以变化，但 Cage ID 不变，也不能复用给另一个笼位。</li>
             <li>Cage detail 里的 <strong>Current Mice</strong> 是当前占笼情况。鼠 UID 和 breeding 编号可以点击进入详情。</li>
             <li>普通情况下不要硬删除笼子；不用的笼子设为 inactive 或 retired 更安全。</li>
-            <li>少量空笼不会明显拖慢系统。只有历史测试数据或明显错误数据才需要清理。</li>
         </ul>
     </section>
 
@@ -256,7 +257,7 @@
         <h2>好习惯</h2>
         <ul class="guide-list">
             <li>换笼当天就记录 <strong>Move Cage</strong>。</li>
-            <li>不要重复使用 mouse UID 或 cage ID。</li>
+            <li>不要重复使用 mouse UID 或 cage ID。鼠和笼子的状态可以变，编号不变。</li>
             <li>notes 用来补充背景，结构化信息尽量填在对应字段里。</li>
             <li>breeding 结束时及时关闭并移动 breeders。</li>
             <li>查看 litters 时，把 weaned 和 not weaned 分开看。</li>
@@ -388,6 +389,7 @@
 
         <h3 class="guide-subheading">Edit, move, or end a mouse</h3>
         <ul class="guide-list">
+            <li>Each mouse keeps one <strong>Mouse UID</strong> from birth to death. Status, cage, project, and notes may change, but the Mouse UID stays the same and must not be reused for another mouse.</li>
             <li><strong>Edit Mouse</strong>: edit basic information, project, strain line, parentage, notes, status, and similar fields.</li>
             <li><strong>Move Cage</strong>: use this when a live mouse changes cage. It updates current cage and cage history.</li>
             <li><strong>End Mouse</strong>: use this when a mouse is euthanized or reaches a terminal status. The system asks for confirmation and removes the mouse from current cage occupancy.</li>
@@ -400,9 +402,9 @@
         <ul class="guide-list">
             <li>Create the cage before assigning mice whenever possible.</li>
             <li>Keep <strong>Room</strong>, <strong>Rack</strong>, and <strong>Position</strong> formats consistent, otherwise filtering becomes messy.</li>
+            <li>Each real cage position keeps one <strong>Cage ID</strong>. Status, purpose, room, rack, and position may change, but the Cage ID stays the same and must not be reused for another cage position.</li>
             <li><strong>Current Mice</strong> on cage detail is the live occupancy view. Mouse UIDs and breeding codes are clickable.</li>
             <li>Do not hard-delete normal cages. Use inactive or retired status when a cage is no longer in routine use.</li>
-            <li>A small number of empty cages does not meaningfully slow the system. Clean only historical test cages or clearly wrong data.</li>
         </ul>
     </section>
 
@@ -531,7 +533,7 @@
         <h2>Good Habits</h2>
         <ul class="guide-list">
             <li>Record <strong>Move Cage</strong> on the day a cage move happens.</li>
-            <li>Do not reuse mouse UIDs or cage IDs.</li>
+            <li>Do not reuse mouse UIDs or cage IDs. Status can change; identifiers stay the same.</li>
             <li>Use notes for background context, but keep structured information in structured fields.</li>
             <li>Close breedings and move breeders when breeding ends.</li>
             <li>Review weaned and not-weaned litters separately.</li>

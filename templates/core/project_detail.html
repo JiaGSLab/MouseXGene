@@ -29,6 +29,53 @@
     </article>
 
     <article class="card">
+        <h2>Colonies</h2>
+        <p class="muted">
+            Project-specific animal groups. Each colony combines this project with one strain line.
+        </p>
+        {% if colonies %}
+            <div class="table-wrap">
+                <table class="data-table data-table--compact data-table--striped">
+                    <thead>
+                        <tr>
+                            <th>Colony</th>
+                            <th>Strain Line</th>
+                            <th class="col-num-right">Mice</th>
+                            <th class="col-num-right">Active</th>
+                            <th class="col-num-right">Cages</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for colony in colonies %}
+                            <tr class="{% if colony.status != 'active' %}row-inactive{% endif %}">
+                                <td>{{ colony.name }}</td>
+                                <td>
+                                    <a class="link-primary" href="{% url 'colony:strain_line_detail' colony.strain_line_id %}">{{ colony.strain_line.label }}</a>
+                                </td>
+                                <td class="col-num-right">
+                                    <a class="link-primary" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}&strain_line_id={{ colony.strain_line_id }}&include_inactive=yes">{{ colony.total_mice_count }}</a>
+                                </td>
+                                <td class="col-num-right">
+                                    <a class="link-primary" href="{% url 'mice:mouse_list' %}?project_id={{ project.pk }}&strain_line_id={{ colony.strain_line_id }}">{{ colony.active_mice_count }}</a>
+                                </td>
+                                <td class="col-num-right">{{ colony.cage_count }}</td>
+                                <td>
+                                    <span class="status-pill {% if colony.status == 'active' %}status-pill--ok{% else %}status-pill--muted{% endif %}">
+                                        {{ colony.get_status_display }}
+                                    </span>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="muted">No colonies have been created for this project yet.</p>
+        {% endif %}
+    </article>
+
+    <article class="card">
         <h2>Strain lines in this project</h2>
         <p class="muted">
             Strain lines linked to this project. Mouse counts show actual mice currently assigned to this project.
@@ -39,7 +86,7 @@
                     <thead>
                         <tr>
                             <th>Name</th>
-                            <th>Owner</th>
+                            <th>Maintainer</th>
                             <th>Included loci</th>
                             <th class="col-num-right">Mice (this project)</th>
                             <th class="col-num-right">Active (this project)</th>

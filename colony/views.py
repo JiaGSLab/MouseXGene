@@ -24,9 +24,11 @@ from openpyxl import Workbook
 from .forms import (
     CageForm,
     CageImportForm,
+    CageRetireForm,
     MOUSE_BATCH_MAX_ROWS,
     MouseBatchEntryForm,
     MouseBatchSharedForm,
+    MouseEndForm,
     MouseForm,
     MouseGenotypeComponentFormSet,
     MouseImportForm,
@@ -51,7 +53,7 @@ from .breeding_pedigree import (
     resolve_breeding_for_import_cage,
 )
 from .cage_form_helpers import cage_filter_form_context
-from .models import Cage, CageMembership, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
+from .models import Cage, CageMembership, Colony, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
 from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, resolve_pdf_description, unique_pdf_description, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
@@ -103,6 +105,7 @@ from core.list_sort import (
 )
 from users.permissions import (
     authenticated_required,
+    can_archive_or_change_terminal_status,
     can_edit_project_data,
     can_import,
     ensure_can_archive_or_change_terminal_status,
@@ -110,6 +113,7 @@ from users.permissions import (
     ensure_can_edit_project_data,
     ensure_cage_status_change,
     is_admin,
+    is_manager,
     role_required,
 )
 
@@ -119,6 +123,59 @@ LIST_ALL_RESULTS_MAX = 500
 FILTER_OPTION_CACHE_TIMEOUT = 120
 
 logger = logging.getLogger(__name__)
+
+
+ADMIN_CORRECTION_FLAG = "admin_correction_unlocked"
+ADMIN_CORRECTION_REASON = "admin_correction_reason"
+
+
+def _admin_correction_unlocked(request: HttpRequest) -> bool:
+    return bool(is_admin(request.user) and (request.POST.get(ADMIN_CORRECTION_FLAG) or "") == "1")
+
+
+def _admin_correction_reason(request: HttpRequest) -> str:
+    return (request.POST.get(ADMIN_CORRECTION_REASON) or "").strip()
+
+
+def _require_admin_correction_reason(request: HttpRequest, form, changed_fields: list[str]) -> str:
+    if not changed_fields:
+        return ""
+    if not is_admin(request.user):
+        raise PermissionDenied("Only admins can change locked historical fields.")
+    reason = _admin_correction_reason(request)
+    if not reason:
+        form.add_error(
+            None,
+            "Correction reason is required when changing locked historical fields.",
+        )
+        return ""
+    return reason
+
+
+def _admin_correction_template_context(request: HttpRequest, form) -> dict:
+    return {
+        "admin_correction_available": getattr(form, "admin_correction_available", False),
+        "admin_correction_unlocked": getattr(form, "admin_correction_unlocked", False),
+        "admin_correction_reason": _admin_correction_reason(request) if request.method == "POST" else "",
+    }
+
+
+def _append_admin_correction_message(message: str, *, changed_fields: list[str], reason: str) -> str:
+    if not changed_fields:
+        return message
+    detail = f"Admin correction fields: {', '.join(changed_fields)}. Reason: {reason}"
+    return f"{message}\n{detail}" if message else detail
+
+
+def _can_retire_cage(user, cage: Cage) -> bool:
+    if cage.project_id:
+        return can_archive_or_change_terminal_status(user, cage.project)
+    return bool(is_admin(user) or is_manager(user))
+
+
+def _ensure_can_retire_cage(user, cage: Cage) -> None:
+    if not _can_retire_cage(user, cage):
+        raise PermissionDenied("Only lab admins or project managers can retire cages.")
 
 
 DEFAULT_MOUSE_IMPORT_OPTIONS = MouseImportOptions(
@@ -510,11 +567,18 @@ def paginate_queryset_for_list(
 
 
 
-def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
-    """Distinct projects (with owner label and mouse count) for mice currently in a cage."""
+def cage_projects_from_mice(mice: list[Mouse], *, cage: Cage | None = None) -> list[dict]:
+    """Distinct home/current projects for a cage, with mouse counts when present."""
     from collections import OrderedDict
 
     rows: OrderedDict[int, dict] = OrderedDict()
+    if cage is not None and getattr(cage, "project_id", None):
+        rows[cage.project_id] = {
+            "project": cage.project,
+            "owner_display": cage.project.owner_display,
+            "n": 0,
+            "source": "home",
+        }
     for m in mice:
         if not getattr(m, "project_id", None):
             continue
@@ -524,6 +588,7 @@ def cage_projects_from_mice(mice: list[Mouse]) -> list[dict]:
                 "project": m.project,
                 "owner_display": m.project.owner_display,
                 "n": 0,
+                "source": "current_mice",
             }
         rows[pid]["n"] += 1
     return list(rows.values())
@@ -540,6 +605,7 @@ def _filtered_cages_queryset(request: HttpRequest):
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     owner = resolve_project_owner_filter(request)
 
     cages = _scoped_cage_queryset(request.user)
@@ -563,11 +629,23 @@ def _filtered_cages_queryset(request: HttpRequest):
                 cages = cages.none()
             if include_inactive != "yes":
                 cages = cages.filter(status=Cage.Status.ACTIVE)
+    if project:
+        try:
+            project_pk = int(project)
+        except (TypeError, ValueError):
+            project_pk = None
+        if project_pk is None:
+            cages = cages.none()
+        else:
+            project_mice = Mouse.objects.filter(current_cage_id=OuterRef("pk"), project_id=project_pk)
+            if include_inactive != "yes":
+                project_mice = project_mice.filter(status=Mouse.Status.ACTIVE)
+            cages = cages.filter(Q(project_id=project_pk) | Exists(project_mice))
     if owner and not strain_line:
         owner_mice = Mouse.objects.filter(current_cage_id=OuterRef("pk"), project__owner_id=owner)
         if include_inactive != "yes":
             owner_mice = owner_mice.filter(status=Mouse.Status.ACTIVE)
-        cages = cages.filter(Exists(owner_mice))
+        cages = cages.filter(Q(project__owner_id=owner) | Exists(owner_mice))
     if q:
         cages = cages.filter(cage_id__icontains=q)
     if room:
@@ -588,6 +666,7 @@ def _filtered_cages_queryset(request: HttpRequest):
     return (
         cages.distinct()
         .order_by("cage_id")
+        .select_related("project", "project__owner", "project__owner__profile", "colony", "colony__strain_line")
         .prefetch_related(
             "current_mice__strain_line",
             "current_mice__project",
@@ -617,7 +696,7 @@ def _cages_export_rows_from_queryset(cages) -> list[list]:
     rows: list[list] = []
     for cage in cages:
         cage_mice = sorted(cage.current_mice.all(), key=lambda m: (m.mouse_uid or "").lower())
-        project_rows = cage_projects_from_mice(cage_mice)
+        project_rows = cage_projects_from_mice(cage_mice, cage=cage)
         projects_text = "; ".join(pr["project"].name for pr in project_rows)
         owners_text = "; ".join(pr["owner_display"] for pr in project_rows)
         rows.append(
@@ -2157,6 +2236,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     is_empty = (request.GET.get("is_empty") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
+    project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
@@ -2177,7 +2257,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     for cage in cages_page:
         cage_mice = sorted(cage.current_mice.all(), key=lambda m: (m.mouse_uid or "").lower())
         cage.current_mouse_count = len(cage_mice)
-        cage.project_rows = cage_projects_from_mice(cage_mice)
+        cage.project_rows = cage_projects_from_mice(cage_mice, cage=cage)
     context = {
         "cages": cages_page,
         "q": q,
@@ -2190,6 +2270,8 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "include_inactive": include_inactive,
         "strain_line": strain_line,
         "strain_line_filter_label": strain_line_filter_label,
+        "project": project,
+        "project_options": Project.objects.filter(is_active=True).order_by("name"),
         "owner": owner,
         "owner_options": project_owner_filter_options(),
         "room_options": _cached_cage_room_options(),
@@ -2366,6 +2448,16 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("name")
     )
+    related_colonies = list(
+        Colony.objects.filter(strain_line=line)
+        .select_related("project", "project__owner", "project__owner__profile", "strain_line")
+        .annotate(
+            active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
+            total_mice_count=Count("mice", distinct=True),
+            cage_count=Count("cages", distinct=True),
+        )
+        .order_by("project__name", "name")
+    )
     owner_rows_by_id: dict[int, dict] = {}
     for project in related_projects:
         owner = project.owner
@@ -2391,6 +2483,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "line": line,
             "usage_counts": usage_counts,
             "related_projects": related_projects,
+            "related_colonies": related_colonies,
             "owner_rows": owner_rows,
             "documents": documents,
             "pdf_count": len(documents),
@@ -2434,6 +2527,8 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 @require_POST
 def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
+    if not is_admin(request.user):
+        raise PermissionDenied("Only admins can modify strain line PDF documents.")
     line = get_object_or_404(StrainLine, pk=pk)
     next_url = (request.POST.get("next") or "").strip()
     if not next_url:
@@ -2516,6 +2611,8 @@ def strain_line_document_download(request: HttpRequest, pk: int, doc_pk: int) ->
 @authenticated_required
 @require_POST
 def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> HttpResponse:
+    if not is_admin(request.user):
+        raise PermissionDenied("Only admins can remove strain line PDF documents.")
     doc = get_object_or_404(StrainLineDocument, pk=doc_pk, strain_line_id=pk)
     next_url = (request.POST.get("next") or "").strip()
     if not next_url:
@@ -2535,47 +2632,68 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     documents = list(
         line.documents.select_related("uploaded_by", "uploaded_by__profile").order_by("created_at", "id")
     )
+    admin_unlocked = _admin_correction_unlocked(request)
     previous_active = line.is_active
     if request.method == "POST":
-        form = StrainLineForm(request.POST, instance=line, user=request.user)
+        form = StrainLineForm(
+            request.POST,
+            instance=line,
+            user=request.user,
+            admin_correction_unlocked=admin_unlocked,
+        )
         if form.is_valid():
-            if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
-                raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
-            before_editable = line.editable_loci_entries()
-            before_loci_names = [entry["locus_name"] for entry in before_editable]
-            before_name = (line.name or line.line_name or "").strip()
-            submitted_loci_names = [
-                entry["locus_name"]
-                for entry in (form.cleaned_data.get("_expected_loci_config_list") or [])
-            ]
-            line = form.save()
-            line.refresh_from_db()
-            msg = summarize_modelform_changes(form)
-            after_name = (line.name or line.line_name or "").strip()
-            loci_changed = submitted_loci_names != before_loci_names
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.UPDATE,
-                obj=line,
-                message=msg[:4000],
-            )
-            messages.success(request, "Strain line updated.")
-            if loci_changed or before_name != after_name:
-                mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
-                    line,
-                    before_entries=before_editable if loci_changed else None,
+            admin_changed_fields = form.admin_correction_changed_fields()
+            correction_reason = _require_admin_correction_reason(request, form, admin_changed_fields)
+            if admin_changed_fields and not correction_reason:
+                pass
+            elif not form.has_changed():
+                messages.info(request, "No strain line changes to save.")
+                return redirect("colony:strain_line_detail", pk=line.pk)
+            else:
+                if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
+                    raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
+                before_editable = line.editable_loci_entries()
+                before_loci_names = [entry["locus_name"] for entry in before_editable]
+                before_name = (line.name or line.line_name or "").strip()
+                submitted_loci_names = [
+                    entry["locus_name"]
+                    for entry in (form.cleaned_data.get("_expected_loci_config_list") or [])
+                ]
+                msg = summarize_modelform_changes(form)
+                msg = _append_admin_correction_message(
+                    msg,
+                    changed_fields=admin_changed_fields,
+                    reason=correction_reason,
                 )
-                if mice_updated:
-                    detail_parts = [f"synced {mice_updated} mouse(s)"]
-                    if rows_added:
-                        detail_parts.append(f"{rows_added} locus row(s) added")
-                    if rows_removed:
-                        detail_parts.append(f"{rows_removed} locus row(s) removed from mice")
-                    messages.info(
-                        request,
-                        "Definition changes applied: " + ", ".join(detail_parts) + "; genotype summaries refreshed.",
+                line = form.save()
+                line.refresh_from_db()
+                after_name = (line.name or line.line_name or "").strip()
+                loci_changed = submitted_loci_names != before_loci_names
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=line,
+                    message=msg[:4000],
+                )
+                messages.success(request, "Strain line updated.")
+                if loci_changed or before_name != after_name:
+                    mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
+                        line,
+                        before_entries=before_editable if loci_changed else None,
                     )
-            return redirect("colony:strain_line_detail", pk=line.pk)
+                    if mice_updated:
+                        detail_parts = [f"synced {mice_updated} mouse(s)"]
+                        if rows_added:
+                            detail_parts.append(f"{rows_added} locus row(s) added")
+                        if rows_removed:
+                            detail_parts.append(f"{rows_removed} locus row(s) removed from mice")
+                        messages.info(
+                            request,
+                            "Definition changes applied: "
+                            + ", ".join(detail_parts)
+                            + "; genotype summaries refreshed.",
+                        )
+                return redirect("colony:strain_line_detail", pk=line.pk)
         messages.error(request, "Could not save strain line. Please fix the errors below.")
     else:
         form = StrainLineForm(instance=line, user=request.user)
@@ -2588,9 +2706,10 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
-            "allow_pdf_upload": True,
+            "allow_pdf_upload": is_admin(request.user),
             "page_title": f"Edit Strain Line {line.line_name}",
             "submit_label": "Save Changes",
+            **_admin_correction_template_context(request, form),
         },
     )
 
@@ -2655,7 +2774,7 @@ def cage_create(request: HttpRequest) -> HttpResponse:
         request.POST.get("select_field") if request.method == "POST" else request.GET.get("select_field")
     )
     if request.method == "POST":
-        form = CageForm(request.POST)
+        form = CageForm(request.POST, user=request.user)
         if form.is_valid():
             cage = form.save()
             breeding = sync_cage_breeding_workflow(cage)
@@ -2680,7 +2799,7 @@ def cage_create(request: HttpRequest) -> HttpResponse:
                 return redirect(_cage_create_return_url(next_url, cage=cage, select_field=select_field))
             return redirect("colony:cage_detail", pk=cage.pk)
     else:
-        form = CageForm(initial=_cage_create_initial_from_query(request))
+        form = CageForm(initial=_cage_create_initial_from_query(request), user=request.user)
 
     context = {
         "form": form,
@@ -2697,36 +2816,55 @@ def cage_create(request: HttpRequest) -> HttpResponse:
 def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
     ensure_can_edit_cage(request.user, cage)
+    admin_unlocked = _admin_correction_unlocked(request)
     previous_status = cage.status
     if request.method == "POST":
-        form = CageForm(request.POST, instance=cage)
+        form = CageForm(
+            request.POST,
+            instance=cage,
+            user=request.user,
+            admin_correction_unlocked=admin_unlocked,
+        )
         if form.is_valid():
-            new_status = form.cleaned_data.get("status")
-            if new_status != previous_status:
-                ensure_cage_status_change(request.user, cage, previous_status, new_status)
-            msg = summarize_modelform_changes(form)
-            cage = form.save()
-            breeding = sync_cage_breeding_workflow(cage)
-            sync_cage_status_from_mice(cage)
-            if cage.purpose == Cage.Purpose.BREEDING:
-                if breeding:
-                    messages.success(
-                        request,
-                        f"Breeding {breeding.breeding_code} linked to cage {cage.cage_id}.",
-                    )
-                else:
-                    setup_msg = breeding_setup_message(cage)
-                    if setup_msg:
-                        messages.warning(request, setup_msg)
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.UPDATE,
-                obj=cage,
-                message=msg[:4000],
-            )
-            return redirect("colony:cage_detail", pk=cage.pk)
+            admin_changed_fields = form.admin_correction_changed_fields()
+            correction_reason = _require_admin_correction_reason(request, form, admin_changed_fields)
+            if admin_changed_fields and not correction_reason:
+                pass
+            elif not form.has_changed():
+                messages.info(request, "No cage changes to save.")
+                return redirect("colony:cage_detail", pk=cage.pk)
+            else:
+                new_status = form.cleaned_data.get("status")
+                if new_status != previous_status:
+                    ensure_cage_status_change(request.user, cage, previous_status, new_status)
+                msg = summarize_modelform_changes(form)
+                msg = _append_admin_correction_message(
+                    msg,
+                    changed_fields=admin_changed_fields,
+                    reason=correction_reason,
+                )
+                cage = form.save()
+                breeding = sync_cage_breeding_workflow(cage)
+                sync_cage_status_from_mice(cage)
+                if cage.purpose == Cage.Purpose.BREEDING:
+                    if breeding:
+                        messages.success(
+                            request,
+                            f"Breeding {breeding.breeding_code} linked to cage {cage.cage_id}.",
+                        )
+                    else:
+                        setup_msg = breeding_setup_message(cage)
+                        if setup_msg:
+                            messages.warning(request, setup_msg)
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=cage,
+                    message=msg[:4000],
+                )
+                return redirect("colony:cage_detail", pk=cage.pk)
     else:
-        form = CageForm(instance=cage)
+        form = CageForm(instance=cage, user=request.user)
 
     context = {
         "form": form,
@@ -2734,8 +2872,56 @@ def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "submit_label": "Save Changes",
         "cancel_url": "colony:cage_detail",
         "cancel_kwargs": {"pk": cage.pk},
+        **_admin_correction_template_context(request, form),
     }
     return render(request, "colony/cage_form.html", context)
+
+
+@authenticated_required
+def cage_retire(request: HttpRequest, pk: int) -> HttpResponse:
+    cage = get_object_or_404(
+        _scoped_cage_queryset(request.user).select_related("project"),
+        pk=pk,
+    )
+    _ensure_can_retire_cage(request.user, cage)
+
+    if request.method == "POST":
+        form = CageRetireForm(request.POST, cage=cage)
+        if form.is_valid():
+            retire_date = form.cleaned_data["retire_date"]
+            reason = form.cleaned_data["reason"].strip()
+            previous_status = cage.status
+            previous_purpose = cage.purpose
+            cage.status = Cage.Status.RETIRED
+            cage.purpose = Cage.Purpose.RETIRED
+            update_fields = ["status", "purpose", "updated_at"]
+            if not cage.archived_at:
+                cage.archived_at = timezone.now()
+                update_fields.append("archived_at")
+            cage.save(update_fields=update_fields)
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=cage,
+                message=(
+                    f"Retired cage {cage.cage_id} on {retire_date}. "
+                    f"Status {previous_status} -> {cage.status}; purpose {previous_purpose} -> {cage.purpose}. "
+                    f"Reason: {reason}"
+                )[:4000],
+            )
+            messages.success(request, f"Cage {cage.cage_id} retired.")
+            return redirect("colony:cage_detail", pk=cage.pk)
+    else:
+        form = CageRetireForm(cage=cage)
+
+    return render(
+        request,
+        "colony/cage_retire.html",
+        {
+            "cage": cage,
+            "form": form,
+        },
+    )
 
 
 @role_required(can_import)
@@ -2944,7 +3130,11 @@ def cage_import_template_xlsx(request: HttpRequest) -> HttpResponse:
 def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(
         _scoped_cage_queryset(request.user).select_related(
-            "created_by", "created_by__profile", "updated_by", "updated_by__profile"
+            "project",
+            "created_by",
+            "created_by__profile",
+            "updated_by",
+            "updated_by__profile",
         ),
         pk=pk,
     )
@@ -2982,7 +3172,21 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     latest_setup = (
         CageMembership.objects.filter(cage=cage, is_current=True).aggregate(setup=Max("start_date")).get("setup")
     )
-    cage_project_rows = cage_projects_from_mice(current_mice)
+    cage_project_rows = cage_projects_from_mice(current_mice, cage=cage)
+    active_breeding_count = (
+        Breeding.objects.filter(cage=cage, active=True)
+        .exclude(status=Breeding.Status.CLOSED)
+        .count()
+    )
+    can_retire_cage = _can_retire_cage(request.user, cage)
+    cage_retire_block_reason = ""
+    if can_retire_cage:
+        if cage.status != Cage.Status.ACTIVE:
+            cage_retire_block_reason = "This cage is already inactive."
+        elif current_mice:
+            cage_retire_block_reason = "Move or end all current mice before retiring this cage."
+        elif active_breeding_count:
+            cage_retire_block_reason = "End linked active breeding records before retiring this cage."
     audit_entries = audit_entries_for_object("Cage", cage.pk)
     actors = merge_actor_labels(cage, audit_entries)
     context = {
@@ -2993,6 +3197,9 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "current_mouse_count": len(current_mice),
         "cage_setup_date": latest_setup or cage.created_date,
         "cage_project_rows": cage_project_rows,
+        "active_breeding_count": active_breeding_count,
+        "can_retire_cage": can_retire_cage,
+        "cage_retire_block_reason": cage_retire_block_reason,
         "audit_entries": audit_entries,
         **actors,
     }
@@ -3169,6 +3376,9 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     mice = _filtered_mice_queryset(request).select_related(
         "project__owner",
         "project__owner__profile",
+        "colony",
+        "colony__project",
+        "colony__strain_line",
     )
     mice = mice.prefetch_related(
         "genotype_components__strain_line",
@@ -3456,6 +3666,9 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "project",
             "project__owner",
             "project__owner__profile",
+            "colony",
+            "colony__project",
+            "colony__strain_line",
             "created_by",
             "created_by__profile",
             "updated_by",
@@ -3490,6 +3703,11 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
     ]
     actors = merge_actor_labels(mouse, mouse_audit_entries)
     active_breeding_badges = _active_breeding_badges_for_mouse_ids([mouse.pk]).get(mouse.pk, [])
+    can_edit_mouse = can_edit_project_data(request.user, mouse.project)
+    can_end_mouse = (
+        mouse.status not in TERMINAL_MOUSE_STATUSES
+        and can_archive_or_change_terminal_status(request.user, mouse.project)
+    )
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
@@ -3508,6 +3726,9 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "audit_entries": mouse_audit_entries,
         "genotype_history_entries": genotype_history_entries,
         "active_breeding_badges": active_breeding_badges,
+        "can_edit_mouse": can_edit_mouse,
+        "can_move_mouse": can_edit_mouse and mouse.status == Mouse.Status.ACTIVE,
+        "can_end_mouse": can_end_mouse,
         **actors,
     }
     return render(request, "colony/mouse_detail.html", context)
@@ -3770,134 +3991,158 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
 def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
     ensure_can_edit_project_data(request.user, mouse.project)
+    admin_unlocked = _admin_correction_unlocked(request)
     previous_status = mouse.status
     original_strain = mouse.strain_line
     original_strain_id = mouse.strain_line_id
     strain_change_action = (request.POST.get("strain_change_action") or "").strip().lower() if request.method == "POST" else ""
     posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
-        form = MouseForm(request.POST, instance=mouse, user=request.user)
-        posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
+        form = MouseForm(
+            request.POST,
+            instance=mouse,
+            user=request.user,
+            admin_correction_unlocked=admin_unlocked,
+        )
         if form.is_valid():
-            before_signature = _genotype_components_signature(mouse)
-            new_project = form.cleaned_data.get("project")
-            old_project = mouse.project
-            if new_project != old_project:
-                ensure_can_edit_project_data(request.user, old_project)
-                ensure_can_edit_project_data(request.user, new_project)
+            admin_changed_fields = form.admin_correction_changed_fields()
+            correction_reason = _require_admin_correction_reason(request, form, admin_changed_fields)
+            if admin_changed_fields and not correction_reason:
+                pass
+            elif not form.has_changed():
+                messages.info(request, "No mouse changes to save.")
+                return redirect("mice:mouse_detail", pk=mouse.pk)
             else:
-                ensure_can_edit_project_data(request.user, old_project)
-            target_status = form.cleaned_data.get("status")
-            if target_status != previous_status:
-                if target_status in TERMINAL_MOUSE_STATUSES or previous_status in TERMINAL_MOUSE_STATUSES:
-                    ensure_can_archive_or_change_terminal_status(request.user, new_project)
-            new_strain = form.cleaned_data.get("strain_line")
-            strain_changed = bool(original_strain_id and new_strain and original_strain_id != new_strain.id)
-            has_truth = _mouse_has_meaningful_genotype_truth(mouse)
-            if strain_changed and has_truth and strain_change_action not in {"replace", "overlap", "cancel"}:
-                old_possible_dams = list(mouse.possible_dams.all())
-                old_loci = _resolved_template_loci_for_context(
-                    strain_line=original_strain,
+                before_signature = _genotype_components_signature(mouse)
+                new_project = form.cleaned_data.get("project")
+                old_project = mouse.project
+                if new_project != old_project:
+                    ensure_can_edit_project_data(request.user, old_project)
+                    ensure_can_edit_project_data(request.user, new_project)
+                else:
+                    ensure_can_edit_project_data(request.user, old_project)
+                target_status = form.cleaned_data.get("status")
+                if target_status != previous_status:
+                    if target_status in TERMINAL_MOUSE_STATUSES or previous_status in TERMINAL_MOUSE_STATUSES:
+                        ensure_can_archive_or_change_terminal_status(request.user, new_project)
+                new_strain = form.cleaned_data.get("strain_line")
+                strain_changed = bool(original_strain_id and new_strain and original_strain_id != new_strain.id)
+                has_truth = _mouse_has_meaningful_genotype_truth(mouse)
+                if strain_changed and has_truth and strain_change_action not in {"replace", "overlap", "cancel"}:
+                    old_possible_dams = list(mouse.possible_dams.all())
+                    old_loci = _resolved_template_loci_for_context(
+                        strain_line=original_strain,
+                        sire=mouse.sire,
+                        dam=mouse.dam,
+                        source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+                        possible_dams=old_possible_dams,
+                    )
+                    new_loci = _resolved_template_loci_for_context(
+                        strain_line=new_strain,
+                        sire=form.cleaned_data.get("sire"),
+                        dam=form.cleaned_data.get("dam"),
+                        source_breeding=form.cleaned_data.get("source_breeding"),
+                        possible_dams=list(form.cleaned_data.get("possible_dams") or []),
+                    )
+                    old_keys = {
+                        StrainLine.normalize_locus_name(x).casefold()
+                        for x in old_loci
+                        if StrainLine.normalize_locus_name(x)
+                    }
+                    new_keys = {
+                        StrainLine.normalize_locus_name(x).casefold()
+                        for x in new_loci
+                        if StrainLine.normalize_locus_name(x)
+                    }
+                    overlap = sorted(
+                        [l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() in old_keys]
+                    )
+                    to_add = sorted(
+                        [l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() not in old_keys]
+                    )
+                    to_remove = sorted(
+                        [l for l in old_loci if StrainLine.normalize_locus_name(l).casefold() not in new_keys]
+                    )
+                    post_payload: list[tuple[str, str]] = []
+                    for key, values in request.POST.lists():
+                        if key in {"csrfmiddlewaretoken", "strain_change_action"}:
+                            continue
+                        for value in values:
+                            post_payload.append((key, value))
+                    return render(
+                        request,
+                        "colony/mouse_strain_change_confirm.html",
+                        {
+                            "mouse": mouse,
+                            "old_strain": original_strain,
+                            "new_strain": new_strain,
+                            "overlap_loci": overlap,
+                            "add_loci": to_add,
+                            "remove_loci": to_remove,
+                            "post_payload": post_payload,
+                        },
+                    )
+                if strain_change_action == "cancel":
+                    messages.info(request, "Strain-line change was cancelled.")
+                    return redirect("mice:mouse_detail", pk=mouse.pk)
+                msg = summarize_modelform_changes(form)
+                msg = _append_admin_correction_message(
+                    msg,
+                    changed_fields=admin_changed_fields,
+                    reason=correction_reason,
+                )
+                mouse = form.save()
+                terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+                    mouse,
+                    reason=f"Mouse status changed to {mouse.get_status_display()} via Edit Mouse.",
+                )
+                template_loci = _resolved_template_loci_for_context(
+                    strain_line=mouse.strain_line,
                     sire=mouse.sire,
                     dam=mouse.dam,
                     source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
-                    possible_dams=old_possible_dams,
+                    possible_dams=list(mouse.possible_dams.all()),
                 )
-                new_loci = _resolved_template_loci_for_context(
-                    strain_line=new_strain,
-                    sire=form.cleaned_data.get("sire"),
-                    dam=form.cleaned_data.get("dam"),
-                    source_breeding=form.cleaned_data.get("source_breeding"),
-                    possible_dams=list(form.cleaned_data.get("possible_dams") or []),
-                )
-                old_keys = {StrainLine.normalize_locus_name(x).casefold() for x in old_loci if StrainLine.normalize_locus_name(x)}
-                new_keys = {StrainLine.normalize_locus_name(x).casefold() for x in new_loci if StrainLine.normalize_locus_name(x)}
-                overlap = sorted([l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() in old_keys])
-                to_add = sorted([l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() not in old_keys])
-                to_remove = sorted([l for l in old_loci if StrainLine.normalize_locus_name(l).casefold() not in new_keys])
-                post_payload: list[tuple[str, str]] = []
-                for key, values in request.POST.lists():
-                    if key in {"csrfmiddlewaretoken", "strain_change_action"}:
-                        continue
-                    for value in values:
-                        post_payload.append((key, value))
-                return render(
-                    request,
-                    "colony/mouse_strain_change_confirm.html",
-                    {
-                        "mouse": mouse,
-                        "old_strain": original_strain,
-                        "new_strain": new_strain,
-                        "overlap_loci": overlap,
-                        "add_loci": to_add,
-                        "remove_loci": to_remove,
-                        "post_payload": post_payload,
-                    },
-                )
-            if strain_change_action == "cancel":
-                messages.info(request, "Strain-line change was cancelled.")
-                return redirect("mice:mouse_detail", pk=mouse.pk)
-            msg = summarize_modelform_changes(form)
-            mouse = form.save()
-            terminal_cage_ids = remove_terminal_mouse_from_current_cage(
-                mouse,
-                reason=f"Mouse status changed to {mouse.get_status_display()} via Edit Mouse.",
-            )
-            template_loci = _resolved_template_loci_for_context(
-                strain_line=mouse.strain_line,
-                sire=mouse.sire,
-                dam=mouse.dam,
-                source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
-                possible_dams=list(mouse.possible_dams.all()),
-            )
-            prefilled = 0
-            filled = 0
-            if strain_changed:
-                if has_truth and strain_change_action in {"replace", "overlap"}:
-                    _apply_strain_template_resolution(mouse, mode=strain_change_action, target_loci=template_loci)
-                    if strain_change_action == "replace":
-                        messages.info(request, "Strain changed: replaced genotype loci with new template.")
+                if strain_changed:
+                    if has_truth and strain_change_action in {"replace", "overlap"}:
+                        _apply_strain_template_resolution(mouse, mode=strain_change_action, target_loci=template_loci)
+                        if strain_change_action == "replace":
+                            messages.info(request, "Strain changed: replaced genotype loci with new template.")
+                        else:
+                            messages.info(request, "Strain changed: kept overlapping loci only.")
                     else:
-                        messages.info(request, "Strain changed: kept overlapping loci only.")
-                else:
-                    # No meaningful genotype truth yet: safely replace template rows.
-                    _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
-                    messages.info(request, "Strain changed: replaced empty template loci with new template.")
-            else:
-                prefilled = mouse.ensure_template_genotype_components(
-                    extra_loci=template_loci,
-                    include_strain_template=False,
+                        _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
+                        messages.info(request, "Strain changed: replaced empty template loci with new template.")
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=mouse,
+                    message=msg[:4000],
                 )
-                filled = _apply_mouse_genotype_rows(mouse, posted_genotype_rows)
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.UPDATE,
-                obj=mouse,
-                message=msg[:4000],
-            )
-            after_signature = _genotype_components_signature(mouse)
-            _log_specific_genotype_changes(
-                user=request.user,
-                mouse=mouse,
-                before_signature=before_signature,
-                after_signature=after_signature,
-                source_label="Edit Mouse form",
-            )
-            if prefilled:
-                messages.info(
-                    request,
-                    f"Added {prefilled} missing genotype template row(s) from strain line '{mouse.strain_line}'.",
+                after_signature = _genotype_components_signature(mouse)
+                _log_specific_genotype_changes(
+                    user=request.user,
+                    mouse=mouse,
+                    before_signature=before_signature,
+                    after_signature=after_signature,
+                    source_label="Edit Mouse form",
                 )
-            if filled:
-                messages.info(request, f"Applied {filled} genotype row(s) from mouse form.")
-            if terminal_cage_ids:
-                messages.info(
-                    request,
-                    f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.",
-                )
-            return redirect("mice:mouse_detail", pk=mouse.pk)
+                if terminal_cage_ids:
+                    messages.info(
+                        request,
+                        f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.",
+                    )
+                return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MouseForm(instance=mouse, user=request.user)
+
+    expected_loci = _resolved_template_loci_for_context(
+        strain_line=mouse.strain_line,
+        sire=mouse.sire,
+        dam=mouse.dam,
+        source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+        possible_dams=list(mouse.possible_dams.all()),
+    )
 
     context = {
         "form": form,
@@ -3913,7 +4158,8 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
             if (c.locus_name or "").strip()
         },
         "posted_genotype_rows": posted_genotype_rows,
-        **cage_filter_form_context(),
+        "expected_loci": expected_loci,
+        **_admin_correction_template_context(request, form),
     }
     return render(request, "colony/mouse_form.html", context)
 
@@ -3925,6 +4171,9 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
         pk=pk,
     )
     ensure_can_edit_project_data(request.user, mouse.project)
+    if mouse.status != Mouse.Status.ACTIVE:
+        messages.error(request, "Only active mice can be moved. Reactivate the mouse first if this is a data correction.")
+        return redirect("mice:mouse_detail", pk=mouse.pk)
 
     if request.method == "POST":
         form = MoveCageForm(request.POST, mouse=mouse)
@@ -3968,6 +4217,10 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
                     f"to {destination_cage.cage_id} on {move_date}."
                 ),
             )
+            messages.success(
+                request,
+                f"Moved {mouse_locked.mouse_uid} from {source_label} to {destination_cage.cage_id}.",
+            )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MoveCageForm(mouse=mouse)
@@ -3985,34 +4238,51 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
     ensure_can_edit_project_data(request.user, mouse.project)
     ensure_can_archive_or_change_terminal_status(request.user, mouse.project)
-    if request.method != "POST":
-        raise PermissionDenied("Use POST to end/euthanize a mouse.")
+    if request.method == "POST":
+        form = MouseEndForm(request.POST, mouse=mouse)
+        if form.is_valid():
+            previous_status = mouse.status
+            terminal_status = form.cleaned_data["terminal_status"]
+            end_date = form.cleaned_data["end_date"]
+            reason = form.cleaned_data["reason"].strip()
+            mouse.status = terminal_status
+            mouse.death_date = end_date
+            if terminal_status in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
+                mouse.euthanasia_date = end_date
+            else:
+                mouse.euthanasia_date = None
+            mouse.death_reason = reason
+            mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+            terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+                mouse,
+                exit_date=end_date,
+                reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
+            )
 
-    previous_status = mouse.status
-    today = timezone.localdate()
-    mouse.status = Mouse.Status.EUTHANIZED
-    if not mouse.euthanasia_date:
-        mouse.euthanasia_date = today
-    if not mouse.death_date:
-        mouse.death_date = today
-    if not mouse.death_reason:
-        mouse.death_reason = "Marked as ended via workflow action."
-    mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
-    terminal_cage_ids = remove_terminal_mouse_from_current_cage(
-        mouse,
-        reason="Mouse marked as euthanized via End Mouse workflow.",
-    )
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=mouse,
+                message=(
+                    f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status} "
+                    f"on {end_date}. Reason: {reason}"
+                )[:4000],
+            )
+            if terminal_cage_ids:
+                messages.info(request, f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.")
+            messages.success(request, f"Mouse {mouse.mouse_uid} marked as {mouse.get_status_display()}.")
+            return redirect("mice:mouse_detail", pk=mouse.pk)
+    else:
+        form = MouseEndForm(mouse=mouse)
 
-    log_audit_event(
-        user=request.user,
-        action=AuditLog.Action.UPDATE,
-        obj=mouse,
-        message=f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status}.",
+    return render(
+        request,
+        "colony/mouse_end.html",
+        {
+            "mouse": mouse,
+            "form": form,
+        },
     )
-    if terminal_cage_ids:
-        messages.info(request, f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.")
-    messages.success(request, f"Mouse {mouse.mouse_uid} marked as euthanized.")
-    return redirect("mice:mouse_detail", pk=mouse.pk)
 
 
 @authenticated_required

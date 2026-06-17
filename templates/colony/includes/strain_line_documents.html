@@ -42,6 +42,33 @@
             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
             <input type="hidden" name="next" value="{{ request.path }}">
 
+            <template id="strain-pdf-upload-row-template">
+                <div class="strain-pdf-upload-row" data-pdf-row>
+                    <div class="form-row">
+                        <label>PDF description</label>
+                        <select name="pdf_description_kinds" class="filter-control" data-pdf-kind required>
+                            <option value="strain_line_info">Strain line info</option>
+                            <option value="genotype_info">Genotype info</option>
+                            <option value="husbandry">Husbandry</option>
+                            <option value="genetics">Genetics</option>
+                            <option value="colony_notes">Colony notes</option>
+                            <option value="protocol">Protocol</option>
+                            <option value="other">Other</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-row" data-pdf-custom-row hidden>
+                        <label>Custom description</label>
+                        <input type="text" name="pdf_description_customs" maxlength="255" placeholder="Enter a short label for this PDF" data-pdf-custom>
+                    </div>
+                    <div class="form-row">
+                        <label>PDF file</label>
+                        <input type="file" name="pdf_files" accept="application/pdf,.pdf" required>
+                    </div>
+                    <button type="button" class="button button-light button-small strain-pdf-remove-row" data-remove-pdf-row hidden>Remove row</button>
+                </div>
+            </template>
+
             <div id="strain-pdf-upload-rows" class="strain-pdf-upload-rows">
                 <div class="strain-pdf-upload-row" data-pdf-row>
                     <div class="form-row">
@@ -78,11 +105,23 @@
         (() => {
             const rowsContainer = document.getElementById("strain-pdf-upload-rows");
             const addButton = document.getElementById("add-strain-pdf-row");
-            if (!rowsContainer || !addButton) return;
+            const rowTemplate = document.getElementById("strain-pdf-upload-row-template");
+            if (!rowsContainer || !addButton || !rowTemplate) return;
             const maxRows = Number.parseInt(addButton.dataset.maxRows || "1", 10) || 1;
 
             function rows() {
                 return Array.from(rowsContainer.querySelectorAll("[data-pdf-row]"));
+            }
+
+            function buildRow() {
+                const node = rowTemplate.content.firstElementChild.cloneNode(true);
+                node.querySelectorAll("input").forEach((input) => {
+                    input.value = "";
+                    if (input.type === "file") input.required = true;
+                });
+                const select = node.querySelector("[data-pdf-kind]");
+                if (select) select.value = "strain_line_info";
+                return node;
             }
 
             function syncRow(row) {
@@ -119,13 +158,7 @@
             addButton.addEventListener("click", () => {
                 const currentRows = rows();
                 if (currentRows.length >= maxRows) return;
-                const clone = currentRows[0].cloneNode(true);
-                clone.querySelectorAll("input").forEach((input) => {
-                    input.value = "";
-                    if (input.type === "file") input.required = true;
-                });
-                const select = clone.querySelector("[data-pdf-kind]");
-                if (select) select.value = "strain_line_info";
+                const clone = buildRow();
                 rowsContainer.appendChild(clone);
                 syncRow(clone);
                 syncButtons();

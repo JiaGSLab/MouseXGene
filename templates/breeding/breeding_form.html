@@ -47,8 +47,7 @@
                 </div>
                 <div class="form-row">
                     <label for="id_mouse_strain_filter">Filter by strain line</label>
-                    <select id="id_mouse_strain_filter" class="filter-control">
-                        <option value="">All strain lines</option>
+                    <select id="id_mouse_strain_filter" class="filter-control" multiple size="4" data-empty-label="All strain lines">
                         {% for strain in cage_strain_line_options %}
                             <option value="{{ strain.id }}">{{ strain.line_name }}</option>
                         {% endfor %}
@@ -353,7 +352,7 @@
         const filters = {
             owner_ids: selectedValues(ownerFilter),
             project_ids: selectedValues(projectFilter),
-            strain_line_id: strainFilter.value,
+            strain_line_ids: selectedValues(strainFilter),
             selected_ids: selectedMouseIds().join(","),
         };
         if (excludeBreedingId) {
@@ -452,6 +451,7 @@
     }
     bindMultiFilter(ownerFilter, ownerFilter.dataset.emptyLabel || "All users");
     bindMultiFilter(projectFilter, projectFilter.dataset.emptyLabel || "All projects");
+    bindMultiFilter(strainFilter, strainFilter.dataset.emptyLabel || "All strain lines");
     tableBody.addEventListener("change", onTableChange);
     ownerFilter.addEventListener("change", reloadMice);
     projectFilter.addEventListener("change", reloadMice);

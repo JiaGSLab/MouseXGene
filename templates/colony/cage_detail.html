@@ -15,6 +15,13 @@
             <a class="button button-export" href="{% url 'colony:cage_inventory_export' cage.pk %}">Export Inventory (CSV)</a>
             <a class="button button-export" href="{% url 'colony:cage_inventory_export_xlsx' cage.pk %}">Export Inventory (Excel)</a>
         {% endif %}
+        {% if can_retire_cage %}
+            {% if cage_retire_block_reason %}
+                <span class="muted small-print">{{ cage_retire_block_reason }}</span>
+            {% else %}
+                <a class="button button-danger" href="{% url 'colony:cage_retire' cage.pk %}">Retire Cage</a>
+            {% endif %}
+        {% endif %}
         <a class="button button-light" href="{% url 'colony:cage_print' cage.pk %}">Print Cage Card</a>
         <a class="button button-light" href="{% url 'colony:cage_history' cage.pk %}">View Cage History</a>
     </div>
@@ -32,13 +39,30 @@
             <dt>Cage Type</dt><dd>{{ cage.get_cage_type_display }}</dd>
             <dt>Purpose</dt><dd>{{ cage.get_purpose_display }}</dd>
             <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
+            <dt>Home Project</dt>
+            <dd>
+                {% if cage.project %}
+                    <a class="link-primary" href="{% url 'project_detail' cage.project_id %}">{{ cage.project.name }}</a>
+                    <span class="muted"> · {{ cage.project.owner_display }}</span>
+                {% else %}
+                    <span class="muted">Not assigned</span>
+                {% endif %}
+            </dd>
+            <dt>Default Colony / Intended Line</dt>
+            <dd>
+                {% if cage.colony %}
+                    {{ cage.colony.name }}
+                {% else %}
+                    <span class="muted">Mixed / not assigned</span>
+                {% endif %}
+            </dd>
             <dt>Current Occupancy</dt><dd>{{ current_mouse_count }}</dd>
         </dl>
     </article>
 
     <article class="card">
-        <h2>Projects in this cage</h2>
-        <p class="muted small-print">From current mice; a cage may include multiple projects.</p>
+        <h2>Project Use</h2>
+        <p class="muted small-print">Assigned project comes from the cage record; current project use comes from current mice.</p>
         {% if cage_project_rows %}
             <ul class="cage-project-list">
                 {% for pr in cage_project_rows %}
@@ -48,7 +72,13 @@
                             · Owner:
                             <a class="link-primary" href="{% url 'accounts:user_detail' pr.project.owner_id %}">{{ pr.owner_display }}</a>
                         </span>
-                        <span class="muted"> ({{ pr.n }} mouse{% if pr.n != 1 %}s{% endif %})</span>
+                        <span class="muted">
+                            {% if pr.n %}
+                                ({{ pr.n }} mouse{% if pr.n != 1 %}s{% endif %})
+                            {% else %}
+                                (assigned project)
+                            {% endif %}
+                        </span>
                     </li>
                 {% endfor %}
             </ul>

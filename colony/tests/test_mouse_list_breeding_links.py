@@ -55,6 +55,19 @@ class MouseListBreedingLinksTests(TestCase):
         self.assertContains(response, self.breeding.breeding_code)
         self.assertContains(response, f'href="{reverse("breeding:breeding_detail", args=[self.breeding.pk])}"')
 
+    def test_mouse_list_strain_line_links_to_strain_line_detail(self):
+        response = self.client.get(reverse("mice:mouse_list"), {"q": self.sire.mouse_uid})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'href="{reverse("colony:strain_line_detail", args=[self.strain.pk])}"')
+        self.assertNotContains(response, f'href="{reverse("mice:mouse_list")}?strain_line_id={self.strain.pk}"')
+
+    def test_mouse_list_does_not_include_move_cage_action(self):
+        response = self.client.get(reverse("mice:mouse_list"), {"q": self.sire.mouse_uid})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, f'href="{reverse("mice:mouse_move", args=[self.sire.pk])}"')
+
     def test_cage_detail_current_mice_breeding_badge_links_to_breeding_detail(self):
         response = self.client.get(reverse("colony:cage_detail", args=[self.cage.pk]))
 

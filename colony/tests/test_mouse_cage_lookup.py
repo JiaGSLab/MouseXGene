@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from breeding.models import Breeding
 from colony.forms import MouseForm
 from colony.models import Cage, Mouse, StrainLine
 from core.models import Project, ProjectMembership
@@ -108,3 +109,136 @@ class MouseCageLookupTests(TestCase):
         self.assertIn('id="id_move_cage_project_filter"', html)
         self.assertIn('id="id_move_cage_lookup"', html)
         self.assertNotIn("MC-CAGE-2 (", html)
+
+    def test_mouse_detail_shows_move_cage_for_editable_active_mouse(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-MOVE-DETAIL",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mice:mouse_detail", args=[mouse.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'href="{reverse("mice:mouse_move", args=[mouse.pk])}"')
+        self.assertContains(response, "Move Cage")
+
+    def test_edit_mouse_keeps_current_cage_read_only(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-EDIT-CAGE-LOCKED",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mice:mouse_edit", args=[mouse.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Use the dedicated Move Cage workflow")
+        self.assertContains(response, f'href="{reverse("mice:mouse_move", args=[mouse.pk])}"')
+        self.assertNotContains(response, 'id="id_current_cage_lookup"')
+        self.assertNotContains(response, 'name="current_cage"')
+
+    def test_edit_mouse_cannot_spoof_current_cage_change(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-EDIT-CAGE-SPOOF",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mice:mouse_edit", args=[mouse.pk]),
+            {
+                "mouse_uid": mouse.mouse_uid,
+                "sex": mouse.sex,
+                "birth_date": "",
+                "death_date": "",
+                "euthanasia_date": "",
+                "death_reason": "",
+                "status": Mouse.Status.ACTIVE,
+                "strain_line": self.strain.pk,
+                "current_cage": self.other_cage.pk,
+                "current_cage_lookup": self.other_cage.cage_id,
+                "sire": "",
+                "dam": "",
+                "project": self.project.pk,
+                "ear_tag": "",
+                "toe_tag": "",
+                "origin": "",
+                "coat_color": "",
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_detail", args=[mouse.pk]))
+        mouse.refresh_from_db()
+        self.assertEqual(mouse.current_cage_id, self.cage.pk)
+
+    def test_inactive_mouse_cannot_open_move_cage_page(self):
+        mouse = Mouse.objects.create(
+            mouse_uid="M-MOVE-INACTIVE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.EUTHANIZED,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mice:mouse_move", args=[mouse.pk]))
+
+        self.assertRedirects(response, reverse("mice:mouse_detail", args=[mouse.pk]))
+
+    def test_move_cage_blocks_active_breeder_outside_breeding_cage(self):
+        sire = Mouse.objects.create(
+            mouse_uid="M-MOVE-ACTIVE-SIRE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        dam = Mouse.objects.create(
+            mouse_uid="M-MOVE-ACTIVE-DAM",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        breeding = Breeding.objects.create(
+            breeding_code="MC-MOVE-BR",
+            cage=self.cage,
+            male=sire,
+            female_1=dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mice:mouse_move", args=[sire.pk]),
+            {
+                "destination_cage": self.other_cage.pk,
+                "move_date": "2026-01-02",
+                "reason": "test",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, breeding.breeding_code)
+        self.assertContains(response, "Move it only to the breeding cage")
+        sire.refresh_from_db()
+        self.assertEqual(sire.current_cage_id, self.cage.pk)

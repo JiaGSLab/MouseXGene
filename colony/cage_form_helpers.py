@@ -31,16 +31,26 @@ def filter_active_cage_choices_payload(
     if project_id:
         cages = cages.annotate(
             _matches_project=Exists(mice_for_cage.filter(project_id=project_id)),
-        ).filter(Q(_has_current_mice=False) | Q(_matches_project=True))
+        ).filter(Q(project_id=project_id) | Q(_has_current_mice=False, project_id__isnull=True) | Q(_matches_project=True))
     if owner_id:
         cages = cages.annotate(
             _matches_owner=Exists(mice_for_cage.filter(project__owner_id=owner_id)),
-        ).filter(Q(_has_current_mice=False) | Q(_matches_owner=True))
+        ).filter(
+            Q(project__owner_id=owner_id)
+            | Q(_has_current_mice=False, project_id__isnull=True)
+            | Q(_matches_owner=True)
+        )
     if strain_line_id:
         cages = cages.annotate(
             _matches_strain=Exists(mice_for_cage.filter(strain_line_id=strain_line_id)),
-        ).filter(Q(_has_current_mice=False) | Q(_matches_strain=True))
-    cages = cages.prefetch_related(
+        ).filter(Q(colony__strain_line_id=strain_line_id) | Q(_has_current_mice=False) | Q(_matches_strain=True))
+    cages = cages.select_related(
+        "project",
+        "project__owner",
+        "project__owner__profile",
+        "colony",
+        "colony__strain_line",
+    ).prefetch_related(
         "current_mice__project",
         "current_mice__project__owner",
         "current_mice__strain_line",
@@ -53,7 +63,8 @@ def filter_active_cage_choices_payload(
                 (m.project_id, m.project.name)
                 for m in mice
                 if m.project_id and getattr(m, "project", None)
-            },
+            }
+            | ({(cage.project_id, cage.project.name)} if cage.project_id and cage.project else set()),
             key=lambda item: item[1].lower(),
         )
         strain_pairs = sorted(
@@ -61,7 +72,12 @@ def filter_active_cage_choices_payload(
                 (m.strain_line_id, m.strain_line.line_name)
                 for m in mice
                 if m.strain_line_id and getattr(m, "strain_line", None)
-            },
+            }
+            | (
+                {(cage.colony.strain_line_id, cage.colony.strain_line.line_name)}
+                if cage.colony_id and cage.colony and cage.colony.strain_line_id
+                else set()
+            ),
             key=lambda item: item[1].lower(),
         )
         sex_values = sorted({m.sex for m in mice if m.sex})
@@ -72,6 +88,7 @@ def filter_active_cage_choices_payload(
         project_ids = [pid for pid, _name in project_pairs]
         owner_ids = sorted(
             {m.project.owner_id for m in mice if getattr(m, "project_id", None) and m.project.owner_id}
+            | ({cage.project.owner_id} if cage.project_id and cage.project.owner_id else set())
         )
         strain_line_ids = [sid for sid, _name in strain_pairs]
         payload.append(
@@ -82,6 +99,10 @@ def filter_active_cage_choices_payload(
                 "purpose_label": cage.get_purpose_display(),
                 "cage_type": cage.cage_type,
                 "cage_type_label": cage.get_cage_type_display(),
+                "home_project_id": cage.project_id,
+                "home_project_name": cage.project.name if cage.project_id else "",
+                "colony_id": cage.colony_id,
+                "colony_name": cage.colony.name if cage.colony_id else "",
                 "is_empty": not mice,
                 "mouse_count": len(mice),
                 "mouse_uids": [m.mouse_uid for m in mice[:8]],

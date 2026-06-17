@@ -12,19 +12,11 @@
     <div class="action-links">
         <a class="button" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
         <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
-        {% if can_import %}
+        {% if can_move_mouse %}
             <a class="button" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
-            {% if mouse.status != "euthanized" and mouse.status != "archived" %}
-                <form
-                    method="post"
-                    action="{% url 'mice:mouse_end' mouse.pk %}"
-                    class="action-inline-form"
-                    onsubmit="return confirm('End / euthanize mouse {{ mouse.mouse_uid|escapejs }}? This will mark it euthanized and remove it from current cage occupancy.');"
-                >
-                    {% csrf_token %}
-                    <button type="submit" class="button">End / Euthanize Mouse</button>
-                </form>
-            {% endif %}
+        {% endif %}
+        {% if can_end_mouse %}
+            <a class="button button-danger" href="{% url 'mice:mouse_end' mouse.pk %}">End / Euthanize Mouse</a>
         {% endif %}
         <a class="button" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
     </div>
@@ -63,6 +55,15 @@
                 <a class="link-primary" href="{% url 'accounts:user_detail' mouse.project.owner_id %}">{{ mouse.project.owner_display }}</a>
             {% else %}
                 —
+            {% endif %}
+        </dd>
+        <dt>Colony</dt>
+        <dd>
+            {% if mouse.colony %}
+                {{ mouse.colony.name }}
+                <span class="muted small-print"> · {{ mouse.colony.strain_line.label }}</span>
+            {% else %}
+                <span class="muted">Not assigned</span>
             {% endif %}
         </dd>
         <dt>Current Cage</dt>

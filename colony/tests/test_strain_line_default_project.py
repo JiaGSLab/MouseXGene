@@ -12,8 +12,12 @@ from users.models import UserProfile
 
 class StrainLineProjectsTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username="strainproj", password="x")
-        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
+        self.user = get_user_model().objects.create_superuser(
+            username="strainproj",
+            email="strainproj@example.test",
+            password="x",
+        )
+        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.ADMIN)
         self.client = Client()
         self.client.login(username="strainproj", password="x")
         self.strain = StrainLine.objects.create(line_name="DP-Line", name="DP-Line")
@@ -52,7 +56,7 @@ class StrainLineProjectsTests(TestCase):
             "is_active": "on",
             "notes": "",
         }
-        form = StrainLineForm(data, instance=self.strain, user=self.user)
+        form = StrainLineForm(data, instance=self.strain, user=self.user, admin_correction_unlocked=True)
         self.assertTrue(form.is_valid(), form.errors)
         saved = form.save()
         self.assertEqual(list(saved.projects.values_list("pk", flat=True)), [self.project_a.pk])

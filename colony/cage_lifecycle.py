@@ -372,12 +372,59 @@ def sync_breeding_member_cages(breeding: Breeding | None) -> int:
     if breeding is None or not breeding.cage_id:
         return 0
     moved = 0
-    for mouse in breeding.member_mice():
-        if mouse.current_cage_id == breeding.cage_id:
-            continue
-        mouse.current_cage_id = breeding.cage_id
-        mouse.save(update_fields=["current_cage", "updated_at"])
-        moved += 1
+    move_date = breeding.start_date or timezone.localdate()
+    with transaction.atomic():
+        breeding_cage = Cage.objects.select_for_update().get(pk=breeding.cage_id)
+        for member in breeding.member_mice():
+            mouse = Mouse.objects.select_for_update().get(pk=member.pk)
+            if mouse.current_cage_id == breeding_cage.pk:
+                if not CageMembership.objects.filter(mouse=mouse, cage=breeding_cage, is_current=True).exists():
+                    for membership in (
+                        CageMembership.objects.select_for_update()
+                        .filter(mouse=mouse, is_current=True)
+                        .exclude(cage=breeding_cage)
+                    ):
+                        membership_end_date = move_date
+                        if membership.start_date and membership_end_date < membership.start_date:
+                            membership_end_date = membership.start_date
+                        membership.end_date = membership_end_date
+                        membership.is_current = False
+                        membership.reason = f"Moved to breeding cage: {breeding.breeding_code}"[:128]
+                        membership.save(
+                            update_fields=["end_date", "is_current", "reason", "updated_at"]
+                        )
+                    CageMembership.objects.create(
+                        mouse=mouse,
+                        cage=breeding_cage,
+                        start_date=move_date,
+                        is_current=True,
+                        reason=f"Breeding setup: {breeding.breeding_code}"[:128],
+                    )
+                continue
+
+            current_memberships = list(
+                CageMembership.objects.select_for_update().filter(mouse=mouse, is_current=True)
+            )
+            for membership in current_memberships:
+                membership_end_date = move_date
+                if membership.start_date and membership_end_date < membership.start_date:
+                    membership_end_date = membership.start_date
+                membership.end_date = membership_end_date
+                membership.is_current = False
+                membership.reason = f"Moved to breeding cage: {breeding.breeding_code}"[:128]
+                membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+
+            mouse.current_cage = breeding_cage
+            mouse.save(update_fields=["current_cage", "updated_at"])
+            CageMembership.objects.create(
+                mouse=mouse,
+                cage=breeding_cage,
+                start_date=move_date,
+                end_date=None,
+                is_current=True,
+                reason=f"Breeding setup: {breeding.breeding_code}"[:128],
+            )
+            moved += 1
     return moved
 
 

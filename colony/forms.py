@@ -9,12 +9,13 @@ from django.utils import timezone
 from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
+from users.permissions import is_admin
 from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
 from .id_uniqueness import normalize_identifier, validate_cage_id_available, validate_mouse_uid_available
-from .models import Cage, Mouse, MouseGenotypeComponent, StrainLine
+from .models import Cage, Colony, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
     CUSTOM_SELECT_VALUE,
     choice_field_with_custom,
@@ -23,7 +24,83 @@ from .strain_line_choices import (
 )
 
 
-class CageForm(forms.ModelForm):
+def _append_widget_class(field, css_class: str) -> None:
+    existing = field.widget.attrs.get("class", "")
+    classes = existing.split()
+    if css_class not in classes:
+        classes.append(css_class)
+    field.widget.attrs["class"] = " ".join(classes).strip()
+
+
+def _mark_admin_correction_field(field) -> None:
+    field.widget.attrs["data-admin-correction-field"] = "1"
+    _append_widget_class(field, "admin-correction-field")
+
+
+def _lock_field(field) -> None:
+    field.disabled = True
+    field.widget.attrs["aria-disabled"] = "true"
+    field.widget.attrs["title"] = "Locked after creation. Admins can unlock correction mode."
+    _append_widget_class(field, "input-locked")
+
+
+def _cage_project_queryset_for_user(user):
+    projects = Project.objects.filter(is_active=True).order_by("name")
+    if user is None or is_admin(user):
+        return projects
+    if not getattr(user, "is_authenticated", False):
+        return Project.objects.none()
+    return projects.filter(Q(owner=user) | Q(memberships__user=user)).distinct()
+
+
+def _default_cage_project_for_user(user, project_queryset):
+    if user is None or is_admin(user) or not getattr(user, "is_authenticated", False):
+        return None
+    owned_projects = Project.objects.filter(owner=user, is_active=True).order_by("name")
+    if owned_projects.count() == 1:
+        return owned_projects.first()
+    if project_queryset.count() == 1:
+        return project_queryset.first()
+    return None
+
+
+class AdminCorrectionFormMixin:
+    admin_correction_frozen_fields: set[str] = set()
+
+    def _configure_admin_correction(self, *, user=None, admin_correction_unlocked: bool = False) -> None:
+        if user is None:
+            self.admin_correction_is_admin = False
+            self.admin_correction_unlocked = False
+            self.admin_correction_available = False
+            return
+        self.admin_correction_is_admin = is_admin(user) if user is not None else False
+        self.admin_correction_unlocked = bool(self.admin_correction_is_admin and admin_correction_unlocked)
+        self.admin_correction_available = bool(self.instance and self.instance.pk and self.admin_correction_is_admin)
+        if not (self.instance and self.instance.pk):
+            return
+        for name in self.admin_correction_frozen_fields:
+            field = self.fields.get(name)
+            if field is None:
+                continue
+            _mark_admin_correction_field(field)
+            if not self.admin_correction_unlocked:
+                _lock_field(field)
+
+    def admin_correction_changed_fields(self) -> list[str]:
+        return [name for name in self.changed_data if name in self.admin_correction_frozen_fields]
+
+
+class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
+    admin_correction_frozen_fields = {
+        "cage_id",
+        "created_date",
+        "project",
+        "colony",
+        "cage_type",
+        "purpose",
+        "status",
+    }
+
     room = forms.ChoiceField(
         required=False,
         choices=[],
@@ -47,6 +124,8 @@ class CageForm(forms.ModelForm):
         fields = [
             "cage_id",
             "created_date",
+            "project",
+            "colony",
             "rack",
             "position",
             "cage_type",
@@ -56,11 +135,18 @@ class CageForm(forms.ModelForm):
         ]
         widgets = {
             "created_date": forms.DateInput(attrs={"type": "date"}),
+            "project": forms.Select(attrs={"class": "filter-control"}),
+            "colony": forms.Select(attrs={"class": "filter-control"}),
             "rack": forms.TextInput(attrs={"placeholder": "e.g. R1 or Rack-A"}),
             "position": forms.TextInput(attrs={"placeholder": "e.g. A1"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
+        labels = {
+            "colony": "Default Colony / Intended Line",
+        }
         help_texts = {
+            "project": "Home project for this cage. This makes empty cages filterable by owner/project.",
+            "colony": "Optional intended project + strain line for this cage. Leave blank for mixed-use or uncertain cages.",
             "rack": "Use a consistent rack label, for example R1 or Rack-A.",
             "position": "Use a consistent position label, for example A1.",
         }
@@ -72,6 +158,8 @@ class CageForm(forms.ModelForm):
         ]
 
     def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop("user", None)
+        admin_correction_unlocked = kwargs.pop("admin_correction_unlocked", False)
         super().__init__(*args, **kwargs)
         self.fields["room"].choices = self._room_choices()
         known_rooms = {value for value, _label in self.fields["room"].choices if value and value != CUSTOM_SELECT_VALUE}
@@ -81,8 +169,34 @@ class CageForm(forms.ModelForm):
             self.initial.setdefault("room_custom", stored)
         elif stored:
             self.initial.setdefault("room", stored)
+        project_queryset = _cage_project_queryset_for_user(self.user)
+        self.fields["project"].queryset = project_queryset
+        is_existing = bool(self.instance and self.instance.pk)
+        self._project_required_for_new_cage = bool(self.user is not None and not is_admin(self.user) and not is_existing)
+        self._single_available_project = None
+        self.fields["project"].required = False
+        if self._project_required_for_new_cage:
+            self.fields["project"].help_text = (
+                "Required for new cages so they stay visible in owner/project filters."
+            )
+            project_count = project_queryset.count()
+            self._single_available_project = _default_cage_project_for_user(self.user, project_queryset)
+            if self._single_available_project is not None:
+                if not self.is_bound and "project" not in self.initial:
+                    self.initial["project"] = self._single_available_project
+            elif project_count > 1:
+                self.fields["project"].widget.attrs["required"] = "required"
+        self.fields["colony"].queryset = Colony.objects.select_related("project", "strain_line").order_by(
+            "project__name",
+            "strain_line__line_name",
+        )
+        self.fields["colony"].required = False
         self.fields["cage_id"].help_text = (
             "Must be unique across the entire system. Retired or archived cage IDs cannot be reused."
+        )
+        self._configure_admin_correction(
+            user=self.user,
+            admin_correction_unlocked=admin_correction_unlocked,
         )
 
     def clean_cage_id(self):
@@ -106,14 +220,89 @@ class CageForm(forms.ModelForm):
             cleaned["room"] = selected
         else:
             cleaned["room"] = ""
+        project = cleaned.get("project")
+        colony = cleaned.get("colony")
+        if colony and project and colony.project_id != project.pk:
+            self.add_error("colony", "Colony must belong to the selected home project.")
+        if colony and not project:
+            cleaned["project"] = colony.project
+            project = colony.project
+        if self._project_required_for_new_cage and not project:
+            project_queryset = self.fields["project"].queryset
+            if self._single_available_project is not None:
+                cleaned["project"] = self._single_available_project
+            elif not project_queryset.exists():
+                self.add_error(
+                    "project",
+                    "Project is required for new cages. Ask an admin to create or assign you to a project first.",
+                )
+            else:
+                self.add_error(
+                    "project",
+                    "Project is required for new cages. Select the project this cage belongs to.",
+                )
         return cleaned
 
     def save(self, commit=True):
         obj = super().save(commit=False)
         obj.room = (self.cleaned_data.get("room") or "").strip()
+        if obj.colony_id and not obj.project_id:
+            obj.project_id = obj.colony.project_id
         if commit:
             obj.save()
         return obj
+
+
+class CageRetireForm(forms.Form):
+    retire_date = forms.DateField(
+        label="Retire Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=[
+            ("Empty cage no longer used", "Empty cage no longer used"),
+            ("Cage card / ID retired", "Cage card / ID retired"),
+            ("Room or rack cleanup", "Room or rack cleanup"),
+            ("Historical test data cleanup", "Historical test data cleanup"),
+            ("Duplicate or incorrect cage record", "Duplicate or incorrect cage record"),
+            ("Other", "Other"),
+        ],
+        initial="Empty cage no longer used",
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    confirm = forms.BooleanField(
+        label="I confirm this cage has no current mice and should be removed from active cage pickers.",
+    )
+
+    def __init__(self, *args, cage: Cage, **kwargs):
+        self.cage = cage
+        super().__init__(*args, **kwargs)
+
+    def clean_retire_date(self):
+        retire_date = self.cleaned_data["retire_date"]
+        if retire_date > timezone.localdate():
+            raise forms.ValidationError("Retire date cannot be in the future.")
+        return retire_date
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.cage.status != Cage.Status.ACTIVE:
+            self.add_error(None, "Only active cages can be retired through this workflow.")
+        if self.cage.current_mice.exists():
+            self.add_error(None, "Move or end all current mice before retiring this cage.")
+
+        from breeding.models import Breeding
+
+        active_breeding_exists = (
+            Breeding.objects.filter(cage=self.cage, active=True)
+            .exclude(status=Breeding.Status.CLOSED)
+            .exists()
+        )
+        if active_breeding_exists:
+            self.add_error(None, "End linked active breeding records before retiring this cage.")
+        return cleaned
 
 
 def _coerce_positive_int(value) -> int | None:
@@ -339,7 +528,25 @@ def _clean_mouse_parentage(form, cleaned_data: dict) -> dict:
     return cleaned_data
 
 
-class MouseForm(forms.ModelForm):
+class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
+    admin_correction_frozen_fields = {
+        "mouse_uid",
+        "sex",
+        "birth_date",
+        "death_date",
+        "euthanasia_date",
+        "death_reason",
+        "status",
+        "strain_line",
+        "sire",
+        "dam",
+        "source_breeding",
+        "possible_dams",
+        "parentage_mode",
+        "project",
+        "origin",
+    }
+
     parentage_mode = forms.ChoiceField(
         choices=MOUSE_PARENTAGE_CHOICES,
         required=False,
@@ -397,6 +604,7 @@ class MouseForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         self.user = kwargs.pop("user", None)
+        admin_correction_unlocked = kwargs.pop("admin_correction_unlocked", False)
         super().__init__(*args, **kwargs)
         active_strains = self.fields["strain_line"].queryset.filter(is_active=True)
         if self.instance and self.instance.pk and self.instance.strain_line_id:
@@ -416,7 +624,12 @@ class MouseForm(forms.ModelForm):
         self.fields["current_cage"].queryset = current_cage_qs.distinct().order_by("cage_id")
         self.fields["current_cage"].required = False
         if self.instance.pk and self.instance.current_cage_id:
+            self.fields["current_cage"].initial = self.instance.current_cage_id
             self.fields["current_cage_lookup"].initial = self.instance.current_cage.cage_id
+        if self.instance.pk:
+            self.fields["current_cage"].disabled = True
+            self.fields["current_cage_lookup"].disabled = True
+            self.fields["current_cage"].help_text = "Use Move Cage to change cage assignment and preserve movement history."
         self.fields["sire"].queryset = _selected_mouse_queryset(
             self.data.get("sire") if self.is_bound else self.initial.get("sire"),
             self.instance.sire_id if self.instance and self.instance.pk else None,
@@ -433,6 +646,10 @@ class MouseForm(forms.ModelForm):
         self.fields["mouse_uid"].help_text = (
             "Must be unique across the entire system. Dead, culled, or archived mouse UIDs cannot be reused."
         )
+        self._configure_admin_correction(
+            user=self.user,
+            admin_correction_unlocked=admin_correction_unlocked,
+        )
 
     def clean_mouse_uid(self):
         mouse_uid = normalize_identifier(self.cleaned_data.get("mouse_uid"))
@@ -444,6 +661,11 @@ class MouseForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        if self.instance and self.instance.pk:
+            cleaned_data["current_cage"] = self.instance.current_cage
+            _clean_mouse_parentage(self, cleaned_data)
+            return cleaned_data
+
         lookup = (cleaned_data.get("current_cage_lookup") or "").strip()
         if lookup:
             resolved, err = resolve_cage_from_lookup(lookup)
@@ -595,7 +817,85 @@ class MoveCageForm(forms.Form):
         destination_cage = self.cleaned_data["destination_cage"]
         if self.mouse.current_cage_id and destination_cage.id == self.mouse.current_cage_id:
             raise forms.ValidationError("Destination cage cannot be the same as current cage.")
+        from breeding.consistency import active_breedings_for_mouse
+
+        active_breedings = list(active_breedings_for_mouse(self.mouse))
+        off_target = [
+            breeding
+            for breeding in active_breedings
+            if breeding.cage_id and breeding.cage_id != destination_cage.id
+        ]
+        if off_target:
+            codes = ", ".join(breeding.breeding_code for breeding in off_target)
+            cages = ", ".join(
+                breeding.cage.cage_id
+                for breeding in off_target
+                if breeding.cage_id and breeding.cage is not None
+            )
+            raise forms.ValidationError(
+                f"{self.mouse.mouse_uid} is in active breeding(s) {codes}. "
+                f"Move it only to the breeding cage ({cages}), or end the breeding first."
+            )
         return destination_cage
+
+
+class MouseEndForm(forms.Form):
+    terminal_status = forms.ChoiceField(
+        label="Final Status",
+        choices=[
+            (Mouse.Status.EUTHANIZED, Mouse.Status.EUTHANIZED.label),
+            (Mouse.Status.DEAD, Mouse.Status.DEAD.label),
+            (Mouse.Status.CULLED, Mouse.Status.CULLED.label),
+        ],
+        initial=Mouse.Status.EUTHANIZED,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    end_date = forms.DateField(
+        label="End Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=[
+            ("Scheduled endpoint", "Scheduled endpoint"),
+            ("Experimental endpoint", "Experimental endpoint"),
+            ("Health/welfare endpoint", "Health/welfare endpoint"),
+            ("Found dead", "Found dead"),
+            ("Breeding colony management", "Breeding colony management"),
+            ("Other", "Other"),
+        ],
+        initial="Scheduled endpoint",
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    confirm = forms.BooleanField(
+        label="I confirm this mouse should be removed from current cage occupancy.",
+    )
+
+    def __init__(self, *args, mouse: Mouse, **kwargs):
+        self.mouse = mouse
+        super().__init__(*args, **kwargs)
+
+    def clean_end_date(self):
+        end_date = self.cleaned_data["end_date"]
+        if end_date > timezone.localdate():
+            raise forms.ValidationError("End date cannot be in the future.")
+        birth_date = self.mouse.birth_date
+        if birth_date and end_date < birth_date:
+            raise forms.ValidationError("End date cannot be earlier than birth date.")
+        return end_date
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.mouse.status in {
+            Mouse.Status.EUTHANIZED,
+            Mouse.Status.DEAD,
+            Mouse.Status.CULLED,
+            Mouse.Status.TRANSFERRED,
+            Mouse.Status.ARCHIVED,
+        }:
+            self.add_error(None, "This mouse is already in a terminal or archived status.")
+        return cleaned
 
 
 class CageImportForm(forms.Form):
@@ -695,7 +995,23 @@ class MouseImportForm(forms.Form):
         return cleaned
 
 
-class StrainLineForm(forms.ModelForm):
+class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
+    admin_correction_frozen_fields = {
+        "name",
+        "owner",
+        "projects",
+        "species",
+        "source",
+        "category",
+        "category_custom",
+        "background",
+        "background_custom",
+        "expected_loci_template",
+        "expected_loci_config",
+        "is_active",
+        "notes",
+    }
+
     expected_loci_config = forms.CharField(required=False, widget=forms.HiddenInput())
     category = forms.ChoiceField(
         choices=[],
@@ -754,10 +1070,9 @@ class StrainLineForm(forms.ModelForm):
         }
         help_texts = {
             "name": "Breeding-line template name. Example: Lyz2-Cre x Tet2 flox x Gpr82 KO. Example: CA/TA/RA KI mice.",
-            "owner": "Lab contact (shown on Strain Lines list). Defaults to the creating user; you can change it here.",
+            "owner": "Maintainer for the strain-line definition, PDFs, and genotype template. Animal ownership comes from projects.",
             "projects": (
-                "Projects this strain line belongs to or can be used in. New Mouse auto-selects the project "
-                "only when exactly one project is linked."
+                "Usually inferred from mice/colonies. Use this only to pre-link a project before mice exist."
             ),
             "species": "Species for this strain line record.",
             "source": "Optional source or vendor reference.",
@@ -770,8 +1085,8 @@ class StrainLineForm(forms.ModelForm):
         }
         labels = {
             "name": "Strain line name",
-            "owner": "Owner",
-            "projects": "Projects",
+            "owner": "Maintainer",
+            "projects": "Assigned projects (optional)",
             "expected_loci_template": "Included loci",
         }
 
@@ -791,6 +1106,7 @@ class StrainLineForm(forms.ModelForm):
 
     def __init__(self, *args, user=None, **kwargs):
         self._actor_user = user
+        admin_correction_unlocked = kwargs.pop("admin_correction_unlocked", False)
         super().__init__(*args, **kwargs)
         self.fields["category"].choices = choice_field_with_custom(StrainLine.Category)
         self.fields["background"].choices = choice_field_with_custom(StrainLine.BackgroundPreset)
@@ -835,6 +1151,10 @@ class StrainLineForm(forms.ModelForm):
                 "name",
                 (self.instance.name or self.instance.display_name or self.instance.line_name or "").strip(),
             )
+        self._configure_admin_correction(
+            user=user,
+            admin_correction_unlocked=admin_correction_unlocked,
+        )
 
     def clean(self):
         cleaned = super().clean()

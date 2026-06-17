@@ -11,8 +11,12 @@ from users.models import UserProfile
 
 class StrainLineEditViewTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username="strainedit", password="x")
-        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
+        self.user = get_user_model().objects.create_superuser(
+            username="strainedit",
+            email="strainedit@example.test",
+            password="x",
+        )
+        UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.ADMIN)
         self.client = Client()
         self.client.login(username="strainedit", password="x")
         self.project = Project.objects.create(name="Edit Default Project", owner=self.user)
@@ -55,6 +59,8 @@ class StrainLineEditViewTests(TestCase):
             "expected_loci_config": json.dumps(config),
             "is_active": "on",
             "notes": "updated notes",
+            "admin_correction_unlocked": "1",
+            "admin_correction_reason": "test correction",
         }
         data.update(overrides)
         return data
@@ -72,6 +78,15 @@ class StrainLineEditViewTests(TestCase):
         self.assertEqual(self.line.background, StrainLine.BackgroundPreset.BALB_C)
         self.assertEqual(list(self.line.projects.values_list("pk", flat=True)), [self.project.pk])
         self.assertEqual(self.line.expected_loci_list(), ["LocusA", "LocusB"])
+
+    def test_edit_view_requires_reason_for_admin_correction(self):
+        url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        response = self.client.post(url, self._post_data(admin_correction_reason=""))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Correction reason is required")
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.name, "EditMe")
+        self.assertEqual(self.line.expected_loci_list(), ["LocusA"])
 
     def test_edit_view_uses_project_dropdown_multiselect(self):
         response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))

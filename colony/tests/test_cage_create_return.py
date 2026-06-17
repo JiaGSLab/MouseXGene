@@ -5,6 +5,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from colony.models import Cage
+from core.models import Project
 from users.models import UserProfile
 
 
@@ -12,6 +13,7 @@ class CageCreateReturnTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="cagereturn", password="x")
         UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MANAGER)
+        self.project = Project.objects.create(name="Cage Return Project", owner=self.user)
         self.client = Client()
         self.client.login(username="cagereturn", password="x")
 

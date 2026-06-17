@@ -74,6 +74,35 @@ class MousePickerApiTests(TestCase):
         self.assertIn(other_mouse.mouse_uid, uids)
         self.assertNotIn("PICK-EXCLUDED-PROJECT", uids)
 
+    def test_mouse_picker_accepts_multiple_strain_line_filters(self):
+        other_strain = StrainLine.objects.create(line_name="Picker Other Strain", is_active=True)
+        other_mouse = Mouse.objects.create(
+            mouse_uid="PICK-OTHER-STRAIN",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            project=self.project,
+            strain_line=other_strain,
+        )
+        excluded_strain = StrainLine.objects.create(line_name="Picker Excluded Strain", is_active=True)
+        Mouse.objects.create(
+            mouse_uid="PICK-EXCLUDED-STRAIN",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            project=self.project,
+            strain_line=excluded_strain,
+        )
+
+        response = self.client.get(
+            reverse("mice:mouse_picker_api"),
+            {"strain_line_ids": [str(self.strain.pk), str(other_strain.pk)]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        uids = {row["uid"] for row in response.json()["mice"]}
+        self.assertIn(self.active_mouse.mouse_uid, uids)
+        self.assertIn(other_mouse.mouse_uid, uids)
+        self.assertNotIn("PICK-EXCLUDED-STRAIN", uids)
+
     def test_mouse_picker_keeps_selected_ids_outside_current_filters(self):
         other_user = get_user_model().objects.create_user(username="picker_selected_other")
         other_project = Project.objects.create(name="Picker Selected Other", owner=other_user)

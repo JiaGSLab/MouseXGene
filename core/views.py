@@ -9,10 +9,11 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
 
-from colony.models import Cage, Mouse, StrainLine
+from colony.models import Cage, Colony, Mouse, StrainLine
 from breeding.models import Breeding, Litter
 from breeding.models import LitterPup
 from breeding.analytics import breeding_litter_timing_alert
+from breeding.consistency import active_breeding_cage_mismatches
 from core.audit import log_audit_event
 from core.list_sort import PROJECT_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
@@ -171,6 +172,8 @@ def home(request: HttpRequest) -> HttpResponse:
             b.litter_timing_alert = alert
             breeding_overdue_all.append(b)
     breeding_overdue_count = len(breeding_overdue_all)
+    breeding_cage_mismatch_all = active_breeding_cage_mismatches(breedings_queryset)
+    breeding_cage_mismatch_count = len(breeding_cage_mismatch_all)
 
     weaning_due_soon = list(weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit])
     mice_without_cage = list(mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit])
@@ -178,6 +181,7 @@ def home(request: HttpRequest) -> HttpResponse:
     cages_without_mice = list(cages_without_mice_qs[:dashboard_list_limit])
     breeding_without_litter = list(breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit])
     breeding_overdue = breeding_overdue_all[:dashboard_list_limit]
+    breeding_cage_mismatches = breeding_cage_mismatch_all[:dashboard_list_limit]
     pups_lacking_genotype = list(pups_lacking_genotype_qs[:dashboard_list_limit])
     empty_active_cages_long = list(empty_active_cages_long_qs[:dashboard_list_limit])
 
@@ -225,6 +229,13 @@ def home(request: HttpRequest) -> HttpResponse:
             "items": breeding_overdue,
         },
         {
+            "kind": "breeding_cage_mismatch",
+            "title": "Breeding Cage Mismatch",
+            "list_url": "breeding:breeding_list",
+            "count": breeding_cage_mismatch_count,
+            "items": breeding_cage_mismatches,
+        },
+        {
             "kind": "pups_no_genotype",
             "title": "Tail-tagged Pups Missing Genotype",
             "list_url": "litters:litter_list",
@@ -247,6 +258,7 @@ def home(request: HttpRequest) -> HttpResponse:
         "mice_no_genotype": 40,
         "weaning": 50,
         "pups_no_genotype": 60,
+        "breeding_cage_mismatch": 65,
         "breeding_no_litter": 70,
         "breeding_overdue": 80,
     }
@@ -270,11 +282,13 @@ def home(request: HttpRequest) -> HttpResponse:
         "breeding_without_litter_count": breeding_without_litter_count,
         "pups_lacking_genotype_count": pups_lacking_genotype_count,
         "empty_active_cages_long_count": empty_active_cages_long_count,
+        "breeding_cage_mismatch_count": breeding_cage_mismatch_count,
         "mice_without_cage": mice_without_cage,
         "mice_without_genotype": mice_without_genotype,
         "cages_without_mice": cages_without_mice,
         "weaning_due_soon": weaning_due_soon,
         "breeding_without_litter": breeding_without_litter,
+        "breeding_cage_mismatches": breeding_cage_mismatches,
         "pups_lacking_genotype": pups_lacking_genotype,
         "empty_active_cages_long": empty_active_cages_long,
         "dashboard_alerts": dashboard_alerts,
@@ -389,6 +403,16 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .distinct()
         .order_by("name", "line_name")
     )
+    colonies = list(
+        Colony.objects.filter(project=project)
+        .select_related("strain_line")
+        .annotate(
+            active_mice_count=Count("mice", filter=Q(mice__status=Mouse.Status.ACTIVE), distinct=True),
+            total_mice_count=Count("mice", distinct=True),
+            cage_count=Count("cages", distinct=True),
+        )
+        .order_by("strain_line__line_name", "name")
+    )
     audit_entries = audit_entries_for_object("Project", project.pk)
     actors = merge_actor_labels(project, audit_entries)
     return render(
@@ -398,6 +422,7 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "project": project,
             "memberships": memberships,
             "strain_lines": strain_lines,
+            "colonies": colonies,
             "can_manage": can_manage,
             "audit_entries": audit_entries,
             **actors,

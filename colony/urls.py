@@ -13,6 +13,7 @@ from .views import (
     cage_inventory_export_xlsx,
     cage_list,
     cage_print,
+    cage_retire,
     cages_export,
     cages_export_xlsx,
     strain_line_create,
@@ -56,5 +57,6 @@ urlpatterns = [
     path("<int:pk>/print/", cage_print, name="cage_print"),
     path("<int:pk>/history/", cage_history, name="cage_history"),
     path("<int:pk>/edit/", cage_edit, name="cage_edit"),
+    path("<int:pk>/retire/", cage_retire, name="cage_retire"),
     path("<int:pk>/", cage_detail, name="cage_detail"),
 ]
