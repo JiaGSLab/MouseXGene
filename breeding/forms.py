@@ -9,6 +9,7 @@ from django.utils import timezone
 from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
 from colony.models import Cage, Mouse
 from core.models import format_project_owner_label
+from .consistency import active_breedings_for_mouse
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
 
 CAGE_LOOKUP_MATCH_LIMIT = 20
@@ -439,6 +440,33 @@ class EndBreedingForm(forms.Form):
                 if self.breeding.cage_id and destination.pk == self.breeding.cage_id:
                     self.add_error(destination_name, "Choose a cage other than the breeding cage being ended.")
                     continue
+                other_active_qs = active_breedings_for_mouse(mouse).exclude(pk=self.breeding.pk)
+                if self.breeding.cage_id:
+                    other_active_qs = other_active_qs.exclude(cage_id=self.breeding.cage_id)
+                other_active_breedings = list(other_active_qs.select_related("cage").order_by("breeding_code"))
+                if other_active_breedings:
+                    other_codes = ", ".join(b.breeding_code for b in other_active_breedings)
+                    other_cage_ids = {b.cage_id for b in other_active_breedings if b.cage_id}
+                    if len(other_cage_ids) != 1:
+                        self.add_error(
+                            destination_name,
+                            (
+                                f"{mouse.mouse_uid} is still assigned to active breeding(s) {other_codes}. "
+                                "Resolve those breeding records before moving this mouse."
+                            ),
+                        )
+                        continue
+                    other_cage_id = next(iter(other_cage_ids))
+                    if destination.pk != other_cage_id:
+                        other_cage = next(b.cage for b in other_active_breedings if b.cage_id == other_cage_id)
+                        self.add_error(
+                            destination_name,
+                            (
+                                f"{mouse.mouse_uid} is still assigned to active breeding(s) {other_codes}. "
+                                f"Move it to that breeding cage ({other_cage.cage_id}), or end that breeding first."
+                            ),
+                        )
+                        continue
                 self.destination_map[mouse.pk] = destination
                 if mouse.status == Mouse.Status.ACTIVE:
                     proposed_by_cage.setdefault(destination.pk, []).append(mouse)

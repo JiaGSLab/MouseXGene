@@ -1,6 +1,8 @@
 from datetime import date, timedelta
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -125,6 +127,27 @@ class BreedingCageSyncTests(TestCase):
         self.assertContains(response, self.sire.mouse_uid)
         self.assertContains(response, self.old_cage.cage_id)
         self.assertContains(response, self.new_cage.cage_id)
+
+    def test_sync_active_breeding_cages_command_repairs_mismatches(self):
+        Breeding.objects.create(
+            breeding_code="BR-SYNC-COMMAND",
+            cage=self.new_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+
+        out = StringIO()
+        call_command("sync_active_breeding_cages", stdout=out)
+
+        self.sire.refresh_from_db()
+        self.dam.refresh_from_db()
+        self.assertEqual(self.sire.current_cage_id, self.new_cage.pk)
+        self.assertEqual(self.dam.current_cage_id, self.new_cage.pk)
+        self.assertTrue(CageMembership.objects.filter(mouse=self.sire, cage=self.new_cage, is_current=True).exists())
+        self.assertTrue(CageMembership.objects.filter(mouse=self.dam, cage=self.new_cage, is_current=True).exists())
+        self.assertIn("Repaired 2 breeder cage assignment(s).", out.getvalue())
 
     def test_dashboard_warns_when_active_breeding_cage_mismatch_exists(self):
         Breeding.objects.create(

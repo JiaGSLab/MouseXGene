@@ -121,6 +121,47 @@ class BreedingEndWorkflowTests(TestCase):
         self.assertEqual(self.sire.current_cage_id, self.breeding_cage.pk)
         self.assertEqual(self.dam.current_cage_id, self.breeding_cage.pk)
 
+    def test_end_breeding_rejects_moving_mouse_still_in_other_active_breeding(self):
+        other_cage = Cage.objects.create(
+            cage_id="END-OTHER-BR-CAGE",
+            cage_type=Cage.CageType.BREEDING,
+            purpose=Cage.Purpose.BREEDING,
+        )
+        other_dam = Mouse.objects.create(
+            mouse_uid="END-OTHER-DAM",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=other_cage,
+        )
+        Breeding.objects.create(
+            breeding_code="BR-END-OTHER",
+            cage=other_cage,
+            male=self.sire,
+            female_1=other_dam,
+            start_date="2026-01-15",
+            active=True,
+        )
+
+        response = self.client.post(
+            reverse("breeding:breeding_end", args=[self.breeding.pk]),
+            {
+                "end_date": "2026-02-01",
+                f"member_action_{self.sire.pk}": "move",
+                f"destination_cage_{self.sire.pk}": self.male_cage.pk,
+                f"member_action_{self.dam.pk}": "move",
+                f"destination_cage_{self.dam.pk}": self.female_cage.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "still assigned to active breeding(s) BR-END-OTHER")
+        self.assertContains(response, other_cage.cage_id)
+        self.breeding.refresh_from_db()
+        self.sire.refresh_from_db()
+        self.assertTrue(self.breeding.active)
+        self.assertEqual(self.sire.current_cage_id, self.breeding_cage.pk)
+
     def test_end_breeding_can_mark_breeder_terminal(self):
         response = self.client.post(
             reverse("breeding:breeding_end", args=[self.breeding.pk]),
