@@ -14,6 +14,7 @@ from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
+from .cage_lifecycle import validate_active_sex_compatible_with_cage
 from .id_uniqueness import normalize_identifier, validate_cage_id_available, validate_mouse_uid_available
 from .models import Cage, Colony, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
@@ -674,6 +675,13 @@ class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
             elif resolved is not None:
                 cleaned_data["current_cage"] = resolved
 
+        current_cage = cleaned_data.get("current_cage")
+        if current_cage is not None and cleaned_data.get("status") == Mouse.Status.ACTIVE:
+            try:
+                validate_active_sex_compatible_with_cage(current_cage, [cleaned_data.get("sex")])
+            except ValidationError as exc:
+                self.add_error("current_cage", exc)
+
         _clean_mouse_parentage(self, cleaned_data)
         return cleaned_data
 
@@ -836,6 +844,11 @@ class MoveCageForm(forms.Form):
                 f"{self.mouse.mouse_uid} is in active breeding(s) {codes}. "
                 f"Move it only to the breeding cage ({cages}), or end the breeding first."
             )
+        validate_active_sex_compatible_with_cage(
+            destination_cage,
+            [self.mouse.sex] if self.mouse.status == Mouse.Status.ACTIVE else [],
+            exclude_mouse_ids=[self.mouse.pk],
+        )
         return destination_cage
 
 

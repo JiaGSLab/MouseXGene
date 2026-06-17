@@ -242,3 +242,37 @@ class MouseCageLookupTests(TestCase):
         self.assertContains(response, "Move it only to the breeding cage")
         sire.refresh_from_db()
         self.assertEqual(sire.current_cage_id, self.cage.pk)
+
+    def test_move_cage_rejects_mixed_sex_holding_cage(self):
+        male = Mouse.objects.create(
+            mouse_uid="M-MOVE-MIX-MALE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        Mouse.objects.create(
+            mouse_uid="M-MOVE-MIX-FEMALE",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.other_cage,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mice:mouse_move", args=[male.pk]),
+            {
+                "destination_cage": self.other_cage.pk,
+                "move_date": "2026-01-02",
+                "reason": "test",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "cannot be housed together")
+        male.refresh_from_db()
+        self.assertEqual(male.current_cage_id, self.cage.pk)

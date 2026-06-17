@@ -6,6 +6,7 @@ from django.db import IntegrityError, OperationalError, ProgrammingError, transa
 from django.db.models import Q
 from django.utils import timezone
 
+from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
 from colony.models import Cage, Mouse
 from core.models import format_project_owner_label
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
@@ -136,6 +137,11 @@ class BreedingForm(forms.ModelForm):
             dams_initial = [x for x in [self.instance.female_1_id, self.instance.female_2_id, *extra_ids] if x]
             self.fields["sire"].initial = self.instance.male_id
             self.fields["dams"].initial = dams_initial
+            if not self.is_bound:
+                selected_ids = [x for x in [self.instance.male_id, *dams_initial] if x]
+                selected_mice = Mouse.objects.filter(pk__in=selected_ids)
+                self.fields["sire"].queryset = selected_mice.filter(sex=Mouse.Sex.MALE)
+                self.fields["dams"].queryset = selected_mice.filter(sex=Mouse.Sex.FEMALE)
 
     def _generate_breeding_code(self) -> str:
         prefix = timezone.localdate().strftime("BR-%Y%m%d")
@@ -340,6 +346,21 @@ class BreedingForm(forms.ModelForm):
 
 
 class EndBreedingForm(forms.Form):
+    class MemberAction:
+        MOVE = "move"
+
+    TERMINAL_ACTIONS = {
+        Mouse.Status.EUTHANIZED,
+        Mouse.Status.CULLED,
+        Mouse.Status.DEAD,
+    }
+    ACTION_CHOICES = [
+        (MemberAction.MOVE, "Move to another cage"),
+        (Mouse.Status.EUTHANIZED, "Euthanized"),
+        (Mouse.Status.CULLED, "Culled"),
+        (Mouse.Status.DEAD, "Found dead"),
+    ]
+
     end_date = forms.DateField(
         initial=timezone.localdate,
         widget=forms.DateInput(attrs={"type": "date"}),
@@ -355,13 +376,20 @@ class EndBreedingForm(forms.Form):
         self.breeding = breeding
         self.members = list(members)
         self.destination_map: dict[int, Cage | None] = {}
+        self.action_map: dict[int, str] = {}
         super().__init__(*args, **kwargs)
         cage_queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
         if self.breeding.cage_id:
             cage_queryset = cage_queryset.exclude(pk=self.breeding.cage_id)
         for mouse in self.members:
+            action_name = self.action_field_name(mouse)
             destination_name = self.destination_field_name(mouse)
-            no_cage_name = self.no_cage_field_name(mouse)
+            self.fields[action_name] = forms.ChoiceField(
+                choices=self.ACTION_CHOICES,
+                initial=self.MemberAction.MOVE,
+                label=f"{mouse.mouse_uid} action",
+            )
+            self.fields[action_name].widget.attrs.update({"class": "filter-control end-breeding-action"})
             self.fields[destination_name] = forms.ModelChoiceField(
                 queryset=cage_queryset,
                 required=False,
@@ -369,72 +397,64 @@ class EndBreedingForm(forms.Form):
                 empty_label="Select destination cage",
             )
             self.fields[destination_name].widget.attrs.update({"class": "filter-control"})
-            self.fields[no_cage_name] = forms.BooleanField(
-                required=False,
-                label="No current cage after ending",
-            )
         self.member_rows = [
             {
                 "mouse": mouse,
+                "action": self[self.action_field_name(mouse)],
                 "destination": self[self.destination_field_name(mouse)],
-                "no_cage": self[self.no_cage_field_name(mouse)],
             }
             for mouse in self.members
         ]
 
     @staticmethod
-    def destination_field_name(mouse: Mouse) -> str:
-        return f"destination_cage_{mouse.pk}"
+    def action_field_name(mouse: Mouse) -> str:
+        return f"member_action_{mouse.pk}"
 
     @staticmethod
-    def no_cage_field_name(mouse: Mouse) -> str:
-        return f"no_cage_{mouse.pk}"
+    def destination_field_name(mouse: Mouse) -> str:
+        return f"destination_cage_{mouse.pk}"
 
     def clean(self):
         cleaned_data = super().clean()
         self.destination_map = {}
+        self.action_map = {}
         if not self.members:
             raise forms.ValidationError("This breeding has no breeder members to move.")
 
         member_ids = [mouse.pk for mouse in self.members]
         proposed_by_cage: dict[int, list[Mouse]] = {}
-        destination_labels: dict[int, str] = {}
         for mouse in self.members:
+            action_name = self.action_field_name(mouse)
             destination_name = self.destination_field_name(mouse)
-            no_cage_name = self.no_cage_field_name(mouse)
+            action = cleaned_data.get(action_name) or self.MemberAction.MOVE
             destination = cleaned_data.get(destination_name)
-            no_cage = bool(cleaned_data.get(no_cage_name))
-            if destination and no_cage:
-                self.add_error(destination_name, "Choose a destination cage or no current cage, not both.")
+            if action not in {self.MemberAction.MOVE, *self.TERMINAL_ACTIONS}:
+                self.add_error(action_name, "Choose how to handle this breeder.")
                 continue
-            if not destination and not no_cage:
-                self.add_error(destination_name, "Select a destination cage, or check no current cage.")
-                continue
-            if destination and self.breeding.cage_id and destination.pk == self.breeding.cage_id:
-                self.add_error(destination_name, "Choose a cage other than the breeding cage being ended.")
-                continue
-            self.destination_map[mouse.pk] = destination if destination else None
-            if destination and mouse.status == Mouse.Status.ACTIVE:
-                proposed_by_cage.setdefault(destination.pk, []).append(mouse)
-                destination_labels[destination.pk] = destination.cage_id
+            self.action_map[mouse.pk] = action
+            if action == self.MemberAction.MOVE:
+                if not destination:
+                    self.add_error(destination_name, "Select a destination cage, or choose a terminal outcome.")
+                    continue
+                if self.breeding.cage_id and destination.pk == self.breeding.cage_id:
+                    self.add_error(destination_name, "Choose a cage other than the breeding cage being ended.")
+                    continue
+                self.destination_map[mouse.pk] = destination
+                if mouse.status == Mouse.Status.ACTIVE:
+                    proposed_by_cage.setdefault(destination.pk, []).append(mouse)
+            else:
+                if destination:
+                    self.add_error(destination_name, "Leave destination cage empty when the mouse is terminal.")
+                    continue
+                self.destination_map[mouse.pk] = None
 
         for cage_id, moving_mice in proposed_by_cage.items():
-            sexes = {
-                mouse.sex
-                for mouse in moving_mice
-                if mouse.sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}
-            }
-            existing_sexes = set(
-                Mouse.objects.filter(current_cage_id=cage_id, status=Mouse.Status.ACTIVE)
-                .exclude(pk__in=member_ids)
-                .values_list("sex", flat=True)
+            cage = self.destination_map.get(moving_mice[0].pk) or Cage.objects.filter(pk=cage_id).first()
+            validate_active_sex_compatible_with_cage(
+                cage,
+                [mouse.sex for mouse in moving_mice],
+                exclude_mouse_ids=member_ids,
             )
-            sexes.update(sex for sex in existing_sexes if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE})
-            if Mouse.Sex.MALE in sexes and Mouse.Sex.FEMALE in sexes:
-                raise forms.ValidationError(
-                    f"Destination cage {destination_labels.get(cage_id, cage_id)} would contain active male and female mice. "
-                    "Use same-sex holding cages when ending a breeding."
-                )
         return cleaned_data
 
 
@@ -457,6 +477,27 @@ class LitterForm(forms.ModelForm):
         widgets = {
             "birth_date": forms.DateInput(attrs={"type": "date"}),
             "wean_date": forms.DateInput(attrs={"type": "date"}),
+            "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
+            "notes": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class LitterRecordForm(forms.ModelForm):
+    class Meta:
+        model = Litter
+        fields = [
+            "litter_code",
+            "birth_date",
+            "total_born",
+            "alive_count",
+            "dead_count",
+            "male_count",
+            "female_count",
+            "tail_tag_date",
+            "notes",
+        ]
+        widgets = {
+            "birth_date": forms.DateInput(attrs={"type": "date"}),
             "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
@@ -724,6 +765,16 @@ class WeanLitterForm(forms.Form):
             and male_cage.pk == female_cage.pk
         ):
             self.add_error("female_cage", "Male and female pups must be placed in different cages.")
+        if self.pup_male_count > 0 and male_cage is not None:
+            try:
+                validate_active_sex_compatible_with_cage(male_cage, [Mouse.Sex.MALE])
+            except forms.ValidationError as exc:
+                self.add_error("male_cage", exc)
+        if self.pup_female_count > 0 and female_cage is not None:
+            try:
+                validate_active_sex_compatible_with_cage(female_cage, [Mouse.Sex.FEMALE])
+            except forms.ValidationError as exc:
+                self.add_error("female_cage", exc)
         cleaned_data["male_cage"] = male_cage
         cleaned_data["female_cage"] = female_cage
         return cleaned_data

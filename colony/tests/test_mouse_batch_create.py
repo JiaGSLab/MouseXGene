@@ -20,7 +20,13 @@ class MouseBatchCreateTests(TestCase):
             user=self.user,
             role=ProjectMembership.Role.MANAGER,
         )
-        self.cage = Cage.objects.create(cage_id="BATCH-C1", status=Cage.Status.ACTIVE)
+        self.cage = Cage.objects.create(
+            cage_id="BATCH-C1",
+            status=Cage.Status.ACTIVE,
+            cage_type=Cage.CageType.BREEDING,
+            purpose=Cage.Purpose.BREEDING,
+        )
+        self.holding_cage = Cage.objects.create(cage_id="BATCH-HOLD", status=Cage.Status.ACTIVE)
 
     def _shared_payload(self) -> dict[str, str]:
         return {
@@ -95,6 +101,16 @@ class MouseBatchCreateTests(TestCase):
 
         self.assertRedirects(response, reverse("mice:mouse_list"))
         self.assertEqual(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).count(), 2)
+
+    def test_mixed_sex_batch_rejects_non_breeding_cage(self):
+        payload = self._shared_payload()
+        payload["current_cage"] = str(self.holding_cage.pk)
+
+        response = self.client.post(reverse("mice:mouse_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "cannot be housed together")
+        self.assertFalse(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).exists())
 
     def test_save_draft_stores_session(self):
         payload = self._shared_payload()

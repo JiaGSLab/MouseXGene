@@ -71,9 +71,11 @@ from colony.mouse_age import mouse_list_age_band
 from colony.cage_lifecycle import (
     TERMINAL_MOUSE_STATUSES,
     breeding_setup_message,
+    close_active_breedings_for_terminal_mouse,
     remove_terminal_mouse_from_current_cage,
     sync_cage_breeding_workflow,
     sync_cage_status_from_mice,
+    validate_active_sex_compatible_with_cage,
 )
 from colony.strain_line_usage import (
     compute_strain_line_usage_counts_bulk,
@@ -176,6 +178,14 @@ def _can_retire_cage(user, cage: Cage) -> bool:
 def _ensure_can_retire_cage(user, cage: Cage) -> None:
     if not _can_retire_cage(user, cage):
         raise PermissionDenied("Only lab admins or project managers can retire cages.")
+
+
+def _can_upload_strain_line_pdf(user) -> bool:
+    return bool(is_admin(user) or is_manager(user))
+
+
+def _can_delete_strain_line_pdf(user) -> bool:
+    return bool(is_admin(user))
 
 
 DEFAULT_MOUSE_IMPORT_OPTIONS = MouseImportOptions(
@@ -1191,6 +1201,26 @@ def _validate_batch_shared_sex_linked_genotype(
         ),
     )
     return False
+
+
+def _validate_batch_current_cage_sex_compatibility(
+    *,
+    shared_form: MouseBatchSharedForm,
+    entry_forms: list[MouseBatchEntryForm],
+) -> bool:
+    current_cage = shared_form.cleaned_data.get("current_cage")
+    status = shared_form.cleaned_data.get("status") or Mouse.Status.ACTIVE
+    if current_cage is None or status != Mouse.Status.ACTIVE:
+        return True
+    try:
+        validate_active_sex_compatible_with_cage(
+            current_cage,
+            [form.cleaned_data.get("sex") for form in entry_forms],
+        )
+    except ValidationError as exc:
+        shared_form.add_error("current_cage", exc)
+        return False
+    return True
 
 
 def _create_mice_from_batch(
@@ -2489,6 +2519,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
             "allow_pdf_upload": False,
+            "allow_pdf_delete": False,
             "audit_entries": audit_entries,
             **actors,
         },
@@ -2527,8 +2558,8 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 @require_POST
 def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
-    if not is_admin(request.user):
-        raise PermissionDenied("Only admins can modify strain line PDF documents.")
+    if not _can_upload_strain_line_pdf(request.user):
+        raise PermissionDenied("Only managers or admins can upload strain line PDF documents.")
     line = get_object_or_404(StrainLine, pk=pk)
     next_url = (request.POST.get("next") or "").strip()
     if not next_url:
@@ -2611,7 +2642,7 @@ def strain_line_document_download(request: HttpRequest, pk: int, doc_pk: int) ->
 @authenticated_required
 @require_POST
 def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> HttpResponse:
-    if not is_admin(request.user):
+    if not _can_delete_strain_line_pdf(request.user):
         raise PermissionDenied("Only admins can remove strain line PDF documents.")
     doc = get_object_or_404(StrainLineDocument, pk=doc_pk, strain_line_id=pk)
     next_url = (request.POST.get("next") or "").strip()
@@ -2706,7 +2737,8 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
             "documents": documents,
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
-            "allow_pdf_upload": is_admin(request.user),
+            "allow_pdf_upload": _can_upload_strain_line_pdf(request.user),
+            "allow_pdf_delete": _can_delete_strain_line_pdf(request.user),
             "page_title": f"Edit Strain Line {line.line_name}",
             "submit_label": "Save Changes",
             **_admin_correction_template_context(request, form),
@@ -3931,7 +3963,11 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                     entry_forms=active_entry_forms,
                     genotype_rows=posted_genotype_rows,
                 )
-                if genotype_ok and all(form.is_valid() for form in active_entry_forms):
+                cage_ok = _validate_batch_current_cage_sex_compatibility(
+                    shared_form=shared_form,
+                    entry_forms=active_entry_forms,
+                )
+                if genotype_ok and cage_ok and all(form.is_valid() for form in active_entry_forms):
                     created = _create_mice_from_batch(
                         shared=shared_form.cleaned_data,
                         entry_forms=active_entry_forms,
@@ -4096,6 +4132,10 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     mouse,
                     reason=f"Mouse status changed to {mouse.get_status_display()} via Edit Mouse.",
                 )
+                closed_breeding_codes = close_active_breedings_for_terminal_mouse(
+                    mouse,
+                    reason=f"Mouse status changed to {mouse.get_status_display()} via Edit Mouse.",
+                )
                 template_loci = _resolved_template_loci_for_context(
                     strain_line=mouse.strain_line,
                     sire=mouse.sire,
@@ -4131,6 +4171,11 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     messages.info(
                         request,
                         f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.",
+                    )
+                if closed_breeding_codes:
+                    messages.info(
+                        request,
+                        f"Closed active breeding(s) because this mouse is no longer active: {', '.join(closed_breeding_codes)}.",
                     )
                 return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
@@ -4258,6 +4303,11 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
                 exit_date=end_date,
                 reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
             )
+            closed_breeding_codes = close_active_breedings_for_terminal_mouse(
+                mouse,
+                end_date=end_date,
+                reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
+            )
 
             log_audit_event(
                 user=request.user,
@@ -4270,6 +4320,11 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
             )
             if terminal_cage_ids:
                 messages.info(request, f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.")
+            if closed_breeding_codes:
+                messages.info(
+                    request,
+                    f"Closed active breeding(s) because this mouse is no longer active: {', '.join(closed_breeding_codes)}.",
+                )
             messages.success(request, f"Mouse {mouse.mouse_uid} marked as {mouse.get_status_display()}.")
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:

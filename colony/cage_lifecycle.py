@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from breeding.models import Breeding, BreedingExtraFemale
@@ -99,6 +101,17 @@ def sync_cage_status_from_mice(cage: Cage | None) -> bool:
     return True
 
 
+def sync_cage_after_occupancy_change(cage: Cage | None) -> bool:
+    """Close an active cage once it has no active current occupants."""
+    if cage is None or cage.status != Cage.Status.ACTIVE:
+        return False
+    if cage.current_mice.filter(status=Mouse.Status.ACTIVE).exists():
+        return False
+    cage.status = Cage.Status.CLOSED
+    cage.save(update_fields=["status", "updated_at"])
+    return True
+
+
 def _terminal_mouse_exit_date(mouse: Mouse, fallback: date | None = None) -> date:
     return mouse.euthanasia_date or mouse.death_date or fallback or timezone.localdate()
 
@@ -108,13 +121,101 @@ def _sync_cage_after_terminal_mouse_exit(cage: Cage | None) -> bool:
         return False
     if sync_cage_status_from_mice(cage):
         return True
-    if cage.status != Cage.Status.ACTIVE:
-        return False
-    if cage.current_mice.exists():
-        return False
-    cage.status = Cage.Status.CLOSED
-    cage.save(update_fields=["status", "updated_at"])
-    return True
+    return sync_cage_after_occupancy_change(cage)
+
+
+def _active_breeding_q_for_mouse(mouse: Mouse) -> Q:
+    return (
+        Q(male_id=mouse.pk)
+        | Q(female_1_id=mouse.pk)
+        | Q(female_2_id=mouse.pk)
+        | Q(extra_female_links__mouse_id=mouse.pk)
+        | Q(breeding_members__mouse_id=mouse.pk)
+    )
+
+
+def close_active_breedings_for_terminal_mouse(
+    mouse: Mouse,
+    *,
+    end_date: date | None = None,
+    reason: str = "",
+    exclude_breeding_id: int | None = None,
+) -> tuple[str, ...]:
+    """Close active breeding records that still reference a terminal mouse."""
+    if mouse.status not in TERMINAL_MOUSE_STATUSES:
+        return ()
+    qs = (
+        Breeding.objects.select_for_update()
+        .filter(active=True)
+        .exclude(status=Breeding.Status.CLOSED)
+        .filter(_active_breeding_q_for_mouse(mouse))
+        .distinct()
+    )
+    if exclude_breeding_id:
+        qs = qs.exclude(pk=exclude_breeding_id)
+    closed_codes: list[str] = []
+    affected_cages: list[Cage] = []
+    with transaction.atomic():
+        for breeding in qs.select_related("cage"):
+            breeding.status = Breeding.Status.CLOSED
+            breeding.active = False
+            if not breeding.archived_at:
+                breeding.archived_at = timezone.now()
+            breeding.save(update_fields=["status", "active", "archived_at"])
+            closed_codes.append(breeding.breeding_code)
+            if breeding.cage_id:
+                affected_cages.append(breeding.cage)
+        for cage in affected_cages:
+            sync_cage_after_occupancy_change(cage)
+    return tuple(closed_codes)
+
+
+def cage_allows_mixed_active_sexes(cage: Cage | None) -> bool:
+    if cage is None:
+        return True
+    return cage.purpose == Cage.Purpose.BREEDING or cage.cage_type == Cage.CageType.BREEDING
+
+
+def active_mixed_sex_cage_error(
+    cage: Cage | None,
+    incoming_sexes,
+    *,
+    exclude_mouse_ids=None,
+) -> str:
+    """Return a user-facing error if a non-breeding cage would mix active male and female mice."""
+    if cage is None or cage_allows_mixed_active_sexes(cage):
+        return ""
+    sexes = {sex for sex in incoming_sexes if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}}
+    exclude_mouse_ids = [pk for pk in (exclude_mouse_ids or []) if pk]
+    existing_qs = Mouse.objects.filter(current_cage=cage, status=Mouse.Status.ACTIVE)
+    if exclude_mouse_ids:
+        existing_qs = existing_qs.exclude(pk__in=exclude_mouse_ids)
+    sexes.update(
+        sex
+        for sex in existing_qs.values_list("sex", flat=True)
+        if sex in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}
+    )
+    if Mouse.Sex.MALE in sexes and Mouse.Sex.FEMALE in sexes:
+        return (
+            f"Cage {cage.cage_id} is not a breeding cage. Active male and female mice "
+            "cannot be housed together there. Use a breeding cage or choose separate same-sex cages."
+        )
+    return ""
+
+
+def validate_active_sex_compatible_with_cage(
+    cage: Cage | None,
+    incoming_sexes,
+    *,
+    exclude_mouse_ids=None,
+) -> None:
+    error = active_mixed_sex_cage_error(
+        cage,
+        incoming_sexes,
+        exclude_mouse_ids=exclude_mouse_ids,
+    )
+    if error:
+        raise ValidationError(error)
 
 
 def remove_terminal_mouse_from_current_cage(

@@ -23,7 +23,7 @@
                         · {{ doc.created_at|date:"Y-m-d" }}
                         {% if doc.uploaded_by %}· {{ doc.uploaded_by.get_username }}{% endif %}
                     </span>
-                    {% if allow_pdf_upload %}
+                    {% if allow_pdf_delete %}
                         <form method="post" action="{% url 'colony:strain_line_document_delete' line.pk doc.pk %}" class="strain-pdf-delete-form">
                             <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
                             <input type="hidden" name="next" value="{{ request.path }}">

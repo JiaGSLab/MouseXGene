@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from breeding.models import Breeding
+from breeding.models import Breeding, Litter
 from colony.models import Cage, Mouse, StrainLine
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
@@ -84,3 +84,31 @@ class LitterCreateFromBreedingTests(TestCase):
         response = self.client.get(reverse("litters:litter_create_from_breeding"), {"include_closed": "yes"})
         self.assertContains(response, "BR-LITTER-A")
         self.assertContains(response, "BR-LITTER-B")
+
+    def test_record_litter_form_does_not_wean_litter(self):
+        url = reverse("breeding:litter_create", args=[self.active_breeding.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Wean date")
+        self.assertNotContains(response, "Litter status")
+
+        response = self.client.post(
+            url,
+            {
+                "litter_code": "LP-LITTER-1",
+                "birth_date": "2026-01-20",
+                "total_born": "6",
+                "alive_count": "6",
+                "dead_count": "0",
+                "male_count": "3",
+                "female_count": "3",
+                "wean_date": "2026-02-10",
+                "litter_status": Litter.LitterStatus.WEANED,
+                "tail_tag_date": "",
+                "notes": "",
+            },
+        )
+        litter = Litter.objects.get(litter_code="LP-LITTER-1")
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[litter.pk]))
+        self.assertIsNone(litter.wean_date)
+        self.assertEqual(litter.litter_status, Litter.LitterStatus.ACTIVE)

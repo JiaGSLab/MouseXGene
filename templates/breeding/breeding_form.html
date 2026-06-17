@@ -27,7 +27,7 @@
 
         <div class="card card-nested">
             <h2>Breeder Selection</h2>
-            <p class="muted small-print">Choose sire and dams first. Use User / Project / Strain filters to narrow down mice.</p>
+            <p class="muted small-print">Choose sire and dams first. Set a user, project, strain line, or UID search, then apply filters to load mice.</p>
             <div class="filter-grid">
                 <div class="form-row">
                     <label for="id_mouse_owner_filter">Filter by user</label>
@@ -53,6 +53,14 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div class="form-row">
+                    <label for="id_mouse_uid_filter">Search mouse UID</label>
+                    <input type="search" id="id_mouse_uid_filter" class="filter-control" placeholder="Partial UID / ear tag / toe tag" autocomplete="off">
+                </div>
+            </div>
+            <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                <button type="button" class="button button-light" id="breeder-filter-apply">Apply filters</button>
+                <span class="muted small-print" id="breeder-filter-status">Select at least one filter, then apply.</span>
             </div>
             <div style="display:none;">
                 {{ form.sire }}
@@ -74,7 +82,7 @@
                         </tr>
                     </thead>
                     <tbody id="breeder-picker-body">
-                        <tr><td colspan="7" class="muted">Loading mice...</td></tr>
+                        <tr><td colspan="9" class="muted">Select at least one filter, then click Apply filters.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -215,11 +223,14 @@
     const projectFilter = document.getElementById("id_mouse_project_filter");
     const ownerFilter = document.getElementById("id_mouse_owner_filter");
     const strainFilter = document.getElementById("id_mouse_strain_filter");
+    const uidFilter = document.getElementById("id_mouse_uid_filter");
+    const applyFilterBtn = document.getElementById("breeder-filter-apply");
+    const filterStatus = document.getElementById("breeder-filter-status");
     const sireSelect = document.getElementById("id_sire");
     const damsSelect = document.getElementById("id_dams");
     const tableBody = document.getElementById("breeder-picker-body");
     const breedingForm = document.getElementById("breeding-form");
-    if (!projectFilter || !ownerFilter || !strainFilter || !sireSelect || !damsSelect || !tableBody || !breedingForm || !window.MXGPicker) return;
+    if (!projectFilter || !ownerFilter || !strainFilter || !uidFilter || !applyFilterBtn || !sireSelect || !damsSelect || !tableBody || !breedingForm || !window.MXGPicker) return;
 
     let mice = [];
     let selectedSireId = sireSelect.value || "";
@@ -353,6 +364,7 @@
             owner_ids: selectedValues(ownerFilter),
             project_ids: selectedValues(projectFilter),
             strain_line_ids: selectedValues(strainFilter),
+            q: uidFilter.value.trim(),
             selected_ids: selectedMouseIds().join(","),
         };
         if (excludeBreedingId) {
@@ -360,6 +372,19 @@
             filters.include_inactive = "1";
         }
         return filters;
+    }
+    function hasActivePickerFilter() {
+        return Boolean(
+            selectedValues(ownerFilter).length
+            || selectedValues(projectFilter).length
+            || selectedValues(strainFilter).length
+            || uidFilter.value.trim()
+        );
+    }
+    function setFilterStatus(message, isError = false) {
+        if (!filterStatus) return;
+        filterStatus.textContent = message;
+        filterStatus.className = isError ? "field-error small-print" : "muted small-print";
     }
     function ensureHiddenOption(selectEl, mouse) {
         if (!mouse) return;
@@ -422,13 +447,34 @@
         tableBody.innerHTML = rows.join("");
     }
     async function reloadMice() {
+        if (!hasActivePickerFilter()) {
+            mice = [];
+            tableBody.innerHTML = '<tr><td colspan="9" class="muted">Select at least one filter, then click Apply filters.</td></tr>';
+            setFilterStatus("Select at least one filter before loading mice.", true);
+            return;
+        }
         tableBody.innerHTML = '<tr><td colspan="9" class="muted">Loading mice...</td></tr>';
+        applyFilterBtn.disabled = true;
+        setFilterStatus("Loading mice...");
         try {
             mice = await MXGPicker.loadMice(mouseApiUrl, pickerFilters());
             renderBreederTable();
             syncHiddenSelects();
+            setFilterStatus(`Showing ${mice.length} mouse(s).`);
         } catch (err) {
             tableBody.innerHTML = `<tr><td colspan="9" class="field-error">Failed to load mice: ${escapeHtml(err.message)}</td></tr>`;
+            setFilterStatus(`Failed to load mice: ${err.message}`, true);
+        } finally {
+            applyFilterBtn.disabled = false;
+        }
+    }
+    function markFiltersChanged() {
+        if (hasActivePickerFilter()) {
+            setFilterStatus("Filters changed. Click Apply filters to load mice.");
+        } else {
+            setFilterStatus("Select at least one filter, then apply.");
+            mice = [];
+            tableBody.innerHTML = '<tr><td colspan="9" class="muted">Select at least one filter, then click Apply filters.</td></tr>';
         }
     }
     function onTableChange(event) {
@@ -453,11 +499,19 @@
     bindMultiFilter(projectFilter, projectFilter.dataset.emptyLabel || "All projects");
     bindMultiFilter(strainFilter, strainFilter.dataset.emptyLabel || "All strain lines");
     tableBody.addEventListener("change", onTableChange);
-    ownerFilter.addEventListener("change", reloadMice);
-    projectFilter.addEventListener("change", reloadMice);
-    strainFilter.addEventListener("change", reloadMice);
+    applyFilterBtn.addEventListener("click", reloadMice);
+    uidFilter.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            reloadMice();
+        }
+    });
+    ownerFilter.addEventListener("change", markFiltersChanged);
+    projectFilter.addEventListener("change", markFiltersChanged);
+    strainFilter.addEventListener("change", markFiltersChanged);
+    uidFilter.addEventListener("input", markFiltersChanged);
     breedingForm.addEventListener("submit", syncHiddenSelects);
-    reloadMice();
+    syncHiddenSelects();
 })();
 
 (() => {

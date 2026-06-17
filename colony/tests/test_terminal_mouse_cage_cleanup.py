@@ -5,6 +5,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from breeding.models import Breeding
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
@@ -170,3 +171,47 @@ class TerminalMouseCageCleanupTests(TestCase):
         self.assertEqual(membership.start_date, timezone.localdate())
         self.assertEqual(membership.end_date, timezone.localdate())
         self.assertEqual(cage.status, Cage.Status.CLOSED)
+
+    def test_end_mouse_closes_active_breeding_for_terminal_breeder(self):
+        dam = Mouse.objects.create(
+            mouse_uid="TERM-DAM-1",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        CageMembership.objects.create(
+            mouse=dam,
+            cage=self.cage,
+            start_date=self.start_date,
+            is_current=True,
+        )
+        breeding = Breeding.objects.create(
+            breeding_code="TERM-BR-1",
+            cage=self.cage,
+            male=self.mouse,
+            female_1=dam,
+            start_date=self.start_date,
+            active=True,
+        )
+
+        response = self.client.post(
+            reverse("mice:mouse_end", args=[self.mouse.pk]),
+            {
+                "terminal_status": Mouse.Status.EUTHANIZED,
+                "end_date": timezone.localdate().isoformat(),
+                "reason": "Scheduled endpoint",
+                "confirm": "on",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "Closed active breeding")
+        breeding.refresh_from_db()
+        self.mouse.refresh_from_db()
+        self.cage.refresh_from_db()
+        self.assertFalse(breeding.active)
+        self.assertEqual(breeding.status, Breeding.Status.CLOSED)
+        self.assertIsNone(self.mouse.current_cage_id)
+        self.assertEqual(self.cage.status, Cage.Status.ACTIVE)

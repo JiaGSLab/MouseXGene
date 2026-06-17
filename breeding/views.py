@@ -17,10 +17,14 @@ from openpyxl import Workbook
 
 from colony.cage_form_helpers import cage_filter_form_context
 from colony.cage_lifecycle import (
+    TERMINAL_MOUSE_STATUSES,
+    close_active_breedings_for_terminal_mouse,
     enrich_pending_breeding_cage,
     mark_cage_as_breeding,
     pending_breeding_cages_queryset,
+    remove_terminal_mouse_from_current_cage,
     sync_breeding_member_cages,
+    sync_cage_after_occupancy_change,
     sync_cage_status_from_mice,
 )
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
@@ -28,7 +32,7 @@ from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import breeding_age_tier
 
-from .forms import EndBreedingForm, BreedingForm, LitterForm, LitterPupFormSet, PupEntryForm, WeanLitterForm, WeanPupEntryForm
+from .forms import EndBreedingForm, BreedingForm, LitterForm, LitterPupFormSet, LitterRecordForm, PupEntryForm, WeanLitterForm, WeanPupEntryForm
 from .consistency import breeding_cage_mismatch_rows
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
@@ -44,6 +48,7 @@ from core.owner_filters import (
 )
 from users.permissions import (
     authenticated_required,
+    ensure_can_archive_or_change_terminal_status,
     ensure_can_edit_mice_projects,
     ensure_can_edit_project_data,
 )
@@ -1199,11 +1204,15 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = EndBreedingForm(request.POST, breeding=breeding, members=members)
         if form.is_valid():
+            for member in members:
+                if form.action_map.get(member.pk) in EndBreedingForm.TERMINAL_ACTIONS:
+                    ensure_can_archive_or_change_terminal_status(request.user, member.project)
             end_date = form.cleaned_data["end_date"]
             notes = (form.cleaned_data.get("notes") or "").strip()
             reason = f"Breeding ended: {breeding.breeding_code}"
             affected_cage_ids: set[int] = {breeding.cage_id} if breeding.cage_id else set()
             move_messages: list[str] = []
+            closed_cage_ids: set[str] = set()
 
             with transaction.atomic():
                 locked_breeding = Breeding.objects.select_for_update().get(pk=breeding.pk)
@@ -1222,12 +1231,46 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
 
                 for member in members:
                     mouse = locked_mice[member.pk]
+                    action = form.action_map.get(member.pk, EndBreedingForm.MemberAction.MOVE)
                     destination = destinations.get(member.pk)
                     origin_cage = Cage.objects.filter(pk=mouse.current_cage_id).first() if mouse.current_cage_id else None
                     if origin_cage:
                         affected_cage_ids.add(origin_cage.pk)
                     if destination:
                         affected_cage_ids.add(destination.pk)
+
+                    if action in EndBreedingForm.TERMINAL_ACTIONS:
+                        mouse.status = action
+                        if action in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
+                            mouse.euthanasia_date = end_date
+                            mouse.death_date = None
+                        elif action == Mouse.Status.DEAD:
+                            mouse.death_date = end_date
+                            mouse.euthanasia_date = None
+                        mouse.death_reason = notes or reason
+                        mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+                        terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+                            mouse,
+                            exit_date=end_date,
+                            reason=f"{reason}: {mouse.get_status_display()}",
+                        )
+                        closed_other_codes = close_active_breedings_for_terminal_mouse(
+                            mouse,
+                            end_date=end_date,
+                            reason=reason,
+                            exclude_breeding_id=locked_breeding.pk,
+                        )
+                        if terminal_cage_ids:
+                            closed_cage_ids.update(terminal_cage_ids)
+                        status_label = mouse.get_status_display()
+                        move_messages.append(
+                            f"{mouse.mouse_uid}: {origin_cage.cage_id if origin_cage else 'No cage'} -> {status_label}"
+                        )
+                        if closed_other_codes:
+                            move_messages.append(
+                                f"{mouse.mouse_uid}: also closed active breeding(s) {', '.join(closed_other_codes)}"
+                            )
+                        continue
 
                     if origin_cage and destination and origin_cage.pk == destination.pk:
                         move_messages.append(f"{mouse.mouse_uid}: kept in {destination.cage_id}")
@@ -1284,9 +1327,12 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
                         if cage_updates:
                             cage_updates.append("updated_at")
                             breeding_cage.save(update_fields=cage_updates)
+                        if sync_cage_after_occupancy_change(breeding_cage):
+                            closed_cage_ids.add(breeding_cage.cage_id)
 
                 for cage in Cage.objects.filter(pk__in=affected_cage_ids):
-                    sync_cage_status_from_mice(cage)
+                    if sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage):
+                        closed_cage_ids.add(cage.cage_id)
 
             log_audit_event(
                 user=request.user,
@@ -1298,6 +1344,8 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
                 )[:4000],
             )
             messages.success(request, f"Breeding {breeding.breeding_code} ended and breeder cages updated.")
+            if closed_cage_ids:
+                messages.info(request, f"Closed empty cage(s): {', '.join(sorted(closed_cage_ids))}.")
             return redirect("breeding:breeding_detail", pk=breeding.pk)
     else:
         form = EndBreedingForm(breeding=breeding, members=members)
@@ -1742,7 +1790,7 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
     breeding = get_object_or_404(_scoped_breedings(request.user), pk=breeding_pk)
     ensure_can_edit_mice_projects(request.user, _breeding_member_mice(breeding))
     if request.method == "POST":
-        form = LitterForm(request.POST)
+        form = LitterRecordForm(request.POST)
         if form.is_valid():
             litter = form.save(commit=False)
             litter.breeding = breeding
@@ -1759,7 +1807,7 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
             messages.success(request, f"Litter {litter.litter_code or litter.pk} created.")
             return redirect("litters:litter_detail", pk=litter.pk)
     else:
-        form = LitterForm()
+        form = LitterRecordForm()
 
     context = {
         "form": form,

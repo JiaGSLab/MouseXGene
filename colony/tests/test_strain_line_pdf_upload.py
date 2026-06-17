@@ -92,6 +92,39 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertEqual(len(docs), 2)
         self.assertEqual([doc.description for doc in docs], ["Colony notes batch A", "Husbandry"])
 
+    def test_manager_can_upload_but_not_delete_pdf(self):
+        manager = get_user_model().objects.create_user(username="pdfmanager", password="x")
+        UserProfile.objects.filter(user=manager).update(role=UserProfile.Role.MANAGER)
+        client = Client(enforce_csrf_checks=True)
+        client.login(username="pdfmanager", password="x")
+        edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
+        page = client.get(edit_url)
+        self.assertContains(page, 'class="strain-pdf-upload-form"')
+        self.assertNotContains(page, 'class="strain-pdf-delete-form"')
+        token = self._upload_form_token(page)
+        upload_url = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
+        response = client.post(
+            upload_url,
+            {
+                "csrfmiddlewaretoken": token,
+                "next": edit_url,
+                "pdf_file": SimpleUploadedFile("manager.pdf", b"%PDF-1.4 manager", content_type="application/pdf"),
+                "pdf_description_kind": "husbandry",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        doc = StrainLineDocument.objects.get(strain_line=self.line)
+        delete_url = reverse("colony:strain_line_document_delete", args=[self.line.pk, doc.pk])
+        delete_response = client.post(
+            delete_url,
+            {
+                "csrfmiddlewaretoken": token,
+                "next": edit_url,
+            },
+        )
+        self.assertIn(delete_response.status_code, {302, 403})
+        self.assertTrue(StrainLineDocument.objects.filter(pk=doc.pk).exists())
+
 
 class StrainLineRelatedRecordLinkTests(TestCase):
     def setUp(self):

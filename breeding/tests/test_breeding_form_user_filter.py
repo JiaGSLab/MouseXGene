@@ -53,6 +53,9 @@ class BreedingFormUserFilterTests(TestCase):
         self.assertIn('id="id_cage_lookup"', html)
         self.assertIn('id="id_mouse_strain_filter" class="filter-control" multiple', html)
         self.assertIn('data-empty-label="All strain lines"', html)
+        self.assertIn('id="id_mouse_uid_filter"', html)
+        self.assertIn('id="breeder-filter-apply"', html)
+        self.assertIn("Select at least one filter, then click Apply filters.", html)
 
     def test_create_page_includes_project_owner_without_mice(self):
         owner_only = get_user_model().objects.create_user(username="breedowneronly", password="x")

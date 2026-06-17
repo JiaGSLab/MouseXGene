@@ -10,7 +10,7 @@
 {% block content %}
 <section class="page-header">
     <h1>End Breeding {{ breeding.breeding_code }}</h1>
-    <p class="muted">Close this breeding setup and move each breeder to its next cage.</p>
+    <p class="muted">Close this breeding setup and record what happens to each breeder.</p>
 </section>
 
 <section class="card">
@@ -115,6 +115,7 @@
                     <col class="end-breeding-col-mouse">
                     <col class="end-breeding-col-sex">
                     <col class="end-breeding-col-current">
+                    <col class="end-breeding-col-action">
                     <col class="end-breeding-col-destination">
                 </colgroup>
                 <thead>
@@ -122,6 +123,7 @@
                         <th>Mouse</th>
                         <th>Sex</th>
                         <th>Current Cage</th>
+                        <th>Action</th>
                         <th>Destination Cage</th>
                     </tr>
                 </thead>
@@ -141,6 +143,12 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {{ row.action }}
+                                {% if row.action.errors %}
+                                    <div class="field-error">{% for error in row.action.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                                {% endif %}
+                            </td>
+                            <td>
                                 {{ row.destination }}
                                 <div class="end-cage-row-actions">
                                     <a
@@ -150,22 +158,13 @@
                                     >Create New Cage</a>
                                 </div>
                                 <p class="muted small-print end-cage-selected-summary" data-cage-summary-for="{{ row.destination.id_for_label }}" aria-live="polite"></p>
-                                <div class="end-cage-exception">
-                                    <label class="checkbox-inline">
-                                        {{ row.no_cage }}
-                                        <span>Exception: no current cage</span>
-                                    </label>
-                                </div>
                                 {% if row.destination.errors %}
                                     <div class="field-error">{% for error in row.destination.errors %}<div>{{ error }}</div>{% endfor %}</div>
-                                {% endif %}
-                                {% if row.no_cage.errors %}
-                                    <div class="field-error">{% for error in row.no_cage.errors %}<div>{{ error }}</div>{% endfor %}</div>
                                 {% endif %}
                             </td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="4" class="empty-row">No breeder members recorded.</td></tr>
+                        <tr><td colspan="5" class="empty-row">No breeder members recorded.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -180,7 +179,7 @@
         </div>
 
         <div class="form-actions">
-            <button type="submit" class="button">End Breeding and Move Breeders</button>
+            <button type="submit" class="button">End Breeding and Resolve Breeders</button>
             <a href="{% url 'breeding:breeding_detail' breeding.pk %}" class="button button-light">Cancel</a>
         </div>
     </form>
@@ -199,6 +198,8 @@
     const form = document.getElementById("breeding-end-form");
     if (!form || !window.MXGPicker) return;
 
+    const MOVE_ACTION = "move";
+    const actionSelects = Array.from(form.querySelectorAll("select[name^='member_action_']"));
     const cageSelects = Array.from(form.querySelectorAll("select[name^='destination_cage_']"));
     const createCageLinks = Array.from(form.querySelectorAll(".end-create-cage-link"));
     const storageKey = `mxg:end-breeding:${"{{ breeding.pk|escapejs }}"}`;
@@ -277,8 +278,8 @@
             select.appendChild(opt);
         }
         const row = select.closest("tr");
-        const noCage = row?.querySelector("input[type='checkbox'][name^='no_cage_']");
-        if (noCage) noCage.checked = false;
+        const action = row?.querySelector("select[name^='member_action_']");
+        if (action) action.value = MOVE_ACTION;
         select.disabled = false;
         select.value = createdCageId;
         saveFormState();
@@ -331,13 +332,19 @@
         summary.className = "muted small-print end-cage-selected-summary";
     }
 
-    function syncNoCageState() {
+    function syncActionState() {
         cageSelects.forEach((select) => {
             const row = select.closest("tr");
-            const noCage = row?.querySelector("input[type='checkbox'][name^='no_cage_']");
-            if (!noCage) return;
-            select.disabled = noCage.checked;
-            if (noCage.checked) {
+            const action = row?.querySelector("select[name^='member_action_']");
+            const createLink = row?.querySelector(".end-create-cage-link");
+            const shouldMove = !action || action.value === MOVE_ACTION;
+            select.disabled = !shouldMove;
+            if (createLink) {
+                createLink.classList.toggle("is-disabled", !shouldMove);
+                createLink.setAttribute("aria-disabled", shouldMove ? "false" : "true");
+                createLink.tabIndex = shouldMove ? 0 : -1;
+            }
+            if (!shouldMove) {
                 select.value = "";
                 selectedByName[select.name] = "";
                 updateSelectedSummary(select);
@@ -359,7 +366,7 @@
             MXGPicker.renderCageSelect(select, cages, current);
             updateSelectedSummary(select);
         });
-        syncNoCageState();
+        syncActionState();
     }
 
     async function reloadCages(extra = {}) {
@@ -417,7 +424,13 @@
     }
 
     createCageLinks.forEach((link) => {
-        link.addEventListener("click", saveFormState);
+        link.addEventListener("click", (event) => {
+            if (link.getAttribute("aria-disabled") === "true") {
+                event.preventDefault();
+                return;
+            }
+            saveFormState();
+        });
     });
     form.addEventListener("change", saveFormState);
     form.addEventListener("input", MXGPicker.debounce(saveFormState, 200));
@@ -433,10 +446,10 @@
             updateSelectedSummary(select);
             saveFormState();
         });
-        const row = select.closest("tr");
-        const noCage = row?.querySelector("input[type='checkbox'][name^='no_cage_']");
-        noCage?.addEventListener("change", () => {
-            syncNoCageState();
+    });
+    actionSelects.forEach((select) => {
+        select.addEventListener("change", () => {
+            syncActionState();
             saveFormState();
         });
     });

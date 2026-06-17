@@ -62,22 +62,25 @@ class BreedingEndWorkflowTests(TestCase):
     def test_end_page_requires_breeder_destinations(self):
         response = self.client.get(reverse("breeding:breeding_end", args=[self.breeding.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "End Breeding and Move Breeders")
+        self.assertContains(response, "End Breeding and Resolve Breeders")
         self.assertContains(response, "END-SIRE")
         self.assertContains(response, "END-DAM")
+        self.assertContains(response, "Action")
         self.assertContains(response, "Destination Cage Filter")
         self.assertContains(response, "Create New Cage")
         self.assertContains(response, f"select_field=destination_cage_{self.sire.pk}")
         self.assertContains(response, "purpose=holding")
-        self.assertContains(response, "Exception: no current cage")
-        self.assertNotContains(response, "<th>No Cage</th>", html=True)
+        self.assertContains(response, "Euthanized")
+        self.assertNotContains(response, "Exception: no current cage")
 
     def test_end_breeding_moves_breeders_and_closes_breeding(self):
         response = self.client.post(
             reverse("breeding:breeding_end", args=[self.breeding.pk]),
             {
                 "end_date": "2026-02-01",
+                f"member_action_{self.sire.pk}": "move",
                 f"destination_cage_{self.sire.pk}": self.male_cage.pk,
+                f"member_action_{self.dam.pk}": "move",
                 f"destination_cage_{self.dam.pk}": self.female_cage.pk,
                 "notes": "Split after breeding.",
             },
@@ -103,15 +106,42 @@ class BreedingEndWorkflowTests(TestCase):
             reverse("breeding:breeding_end", args=[self.breeding.pk]),
             {
                 "end_date": "2026-02-01",
+                f"member_action_{self.sire.pk}": "move",
                 f"destination_cage_{self.sire.pk}": self.male_cage.pk,
+                f"member_action_{self.dam.pk}": "move",
                 f"destination_cage_{self.dam.pk}": self.male_cage.pk,
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "would contain active male and female mice")
+        self.assertContains(response, "cannot be housed together")
         self.breeding.refresh_from_db()
         self.sire.refresh_from_db()
         self.dam.refresh_from_db()
         self.assertTrue(self.breeding.active)
         self.assertEqual(self.sire.current_cage_id, self.breeding_cage.pk)
         self.assertEqual(self.dam.current_cage_id, self.breeding_cage.pk)
+
+    def test_end_breeding_can_mark_breeder_terminal(self):
+        response = self.client.post(
+            reverse("breeding:breeding_end", args=[self.breeding.pk]),
+            {
+                "end_date": "2026-02-01",
+                f"member_action_{self.sire.pk}": Mouse.Status.EUTHANIZED,
+                f"destination_cage_{self.sire.pk}": "",
+                f"member_action_{self.dam.pk}": "move",
+                f"destination_cage_{self.dam.pk}": self.female_cage.pk,
+                "notes": "Sire euthanized after breeding.",
+            },
+        )
+        self.assertRedirects(response, reverse("breeding:breeding_detail", args=[self.breeding.pk]))
+        self.breeding.refresh_from_db()
+        self.sire.refresh_from_db()
+        self.dam.refresh_from_db()
+        self.breeding_cage.refresh_from_db()
+        self.assertFalse(self.breeding.active)
+        self.assertEqual(self.breeding.status, Breeding.Status.CLOSED)
+        self.assertEqual(self.sire.status, Mouse.Status.EUTHANIZED)
+        self.assertEqual(str(self.sire.euthanasia_date), "2026-02-01")
+        self.assertIsNone(self.sire.current_cage_id)
+        self.assertEqual(self.dam.current_cage_id, self.female_cage.pk)
+        self.assertEqual(self.breeding_cage.status, Cage.Status.CLOSED)
