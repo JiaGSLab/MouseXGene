@@ -163,18 +163,19 @@
         },
         describeCage(cage) {
             if (!cage) return "";
+            const useLabel = cage.cage_use_label || cage.purpose_label;
             const count = cageMouseCount(cage);
             if (!count) {
                 const emptyPieces = [`${cage.cage_id} is empty`];
                 if (cage.home_project_name) emptyPieces.push(`Home project: ${cage.home_project_name}`);
                 if (cage.colony_name) emptyPieces.push(`Colony: ${cage.colony_name}`);
-                if (cage.purpose_label) emptyPieces.push(`Purpose: ${cage.purpose_label}`);
+                if (useLabel) emptyPieces.push(`Use: ${useLabel}`);
                 return `${emptyPieces.join(". ")}.`;
             }
             const pieces = [cageOptionLabel(cage)];
             if (cage.home_project_name) pieces.push(`Home project: ${cage.home_project_name}`);
             if (cage.colony_name) pieces.push(`Colony: ${cage.colony_name}`);
-            if (cage.purpose_label) pieces.push(`Purpose: ${cage.purpose_label}`);
+            if (useLabel) pieces.push(`Use: ${useLabel}`);
             const projects = compactList(cage.project_names || []);
             const mice = compactList(cage.mouse_uids || []);
             if (projects) pieces.push(`Projects: ${projects}`);
@@ -218,9 +219,9 @@
         },
         cagePurposeWarning(cage, expectedPurpose, expectedLabel) {
             if (!cage || !expectedPurpose || !cage.purpose || cage.purpose === expectedPurpose) return "";
-            const current = cage.purpose_label || cage.purpose;
+            const current = cage.cage_use_label || cage.purpose_label || cage.purpose;
             const target = expectedLabel || expectedPurpose;
-            return `selected cage purpose is ${current}; saving will mark it as ${target}`;
+            return `selected cage use is ${current}; saving will mark it as ${target}`;
         },
     };
 })();

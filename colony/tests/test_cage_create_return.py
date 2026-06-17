@@ -24,8 +24,7 @@ class CageCreateReturnTests(TestCase):
             {
                 "next": next_url,
                 "select_field": "destination_cage_123",
-                "purpose": Cage.Purpose.HOLDING,
-                "cage_type": Cage.CageType.STANDARD,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
             },
         )
@@ -42,8 +41,7 @@ class CageCreateReturnTests(TestCase):
                 "room": "",
                 "rack": "",
                 "position": "",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.HOLDING,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
                 "notes": "",
                 "next": next_url,

@@ -405,6 +405,14 @@ class Cage(ActorStampedModel):
         EXPERIMENT = "experiment", "Experiment"
         RETIRED = "retired", "Retired"
 
+    class CageUse(models.TextChoices):
+        HOLDING = "holding", "Holding"
+        BREEDING = "breeding", "Breeding"
+        WEANING = "weaning", "Weaning"
+        EXPERIMENT = "experiment", "Experiment"
+        QUARANTINE = "quarantine", "Quarantine"
+        RETIRED = "retired", "Retired"
+
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         CLOSED = "closed", "Closed"
@@ -450,6 +458,54 @@ class Cage(ActorStampedModel):
     @property
     def owner_display(self) -> str:
         return self.project.owner_display if self.project_id else "—"
+
+    @classmethod
+    def cage_use_choices(cls, *, include_retired: bool = True) -> list[tuple[str, str]]:
+        choices = list(cls.CageUse.choices)
+        if not include_retired:
+            choices = [choice for choice in choices if choice[0] != cls.CageUse.RETIRED]
+        return choices
+
+    @classmethod
+    def cage_use_from_parts(cls, *, cage_type: str = "", purpose: str = "") -> str:
+        if purpose == cls.Purpose.RETIRED:
+            return cls.CageUse.RETIRED
+        if purpose == cls.Purpose.BREEDING or cage_type == cls.CageType.BREEDING:
+            return cls.CageUse.BREEDING
+        if cage_type == cls.CageType.WEANING:
+            return cls.CageUse.WEANING
+        if purpose == cls.Purpose.EXPERIMENT:
+            return cls.CageUse.EXPERIMENT
+        if cage_type == cls.CageType.QUARANTINE:
+            return cls.CageUse.QUARANTINE
+        return cls.CageUse.HOLDING
+
+    @property
+    def cage_use(self) -> str:
+        return self.cage_use_from_parts(cage_type=self.cage_type, purpose=self.purpose)
+
+    def get_cage_use_display(self) -> str:
+        return self.CageUse(self.cage_use).label
+
+    def set_cage_use(self, cage_use: str) -> None:
+        if cage_use == self.CageUse.BREEDING:
+            self.cage_type = self.CageType.BREEDING
+            self.purpose = self.Purpose.BREEDING
+        elif cage_use == self.CageUse.WEANING:
+            self.cage_type = self.CageType.WEANING
+            self.purpose = self.Purpose.HOLDING
+        elif cage_use == self.CageUse.EXPERIMENT:
+            self.cage_type = self.CageType.STANDARD
+            self.purpose = self.Purpose.EXPERIMENT
+        elif cage_use == self.CageUse.QUARANTINE:
+            self.cage_type = self.CageType.QUARANTINE
+            self.purpose = self.Purpose.HOLDING
+        elif cage_use == self.CageUse.RETIRED:
+            self.cage_type = self.CageType.STANDARD
+            self.purpose = self.Purpose.RETIRED
+        else:
+            self.cage_type = self.CageType.STANDARD
+            self.purpose = self.Purpose.HOLDING
 
     def save(self, *args, **kwargs):
         if self.colony_id and not self.project_id:

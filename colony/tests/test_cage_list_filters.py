@@ -65,6 +65,20 @@ class CageListOwnerFilterTests(TestCase):
         self.assertContains(response, f'value="{self.user_a.pk}"')
         self.assertContains(response, f'value="{self.user_b.pk}"')
 
+    def test_cage_list_filters_by_cage_use(self):
+        breeding_cage = Cage.objects.create(
+            cage_id="OWN-BREEDING-CAGE",
+            project=self.project_a,
+            cage_type=Cage.CageType.BREEDING,
+            purpose=Cage.Purpose.BREEDING,
+        )
+
+        response = self.client.get(reverse("colony:cage_list"), {"cage_use": Cage.CageUse.BREEDING})
+
+        self.assertContains(response, breeding_cage.cage_id)
+        self.assertNotContains(response, "OWN-CAGE-A")
+        self.assertContains(response, "Cage Use")
+
 
 class CageFormRoomTests(TestCase):
     def test_save_existing_room_from_dropdown(self):
@@ -74,8 +88,7 @@ class CageFormRoomTests(TestCase):
                 "cage_id": "ROOM-NEW",
                 "room": "Lab-A",
                 "room_custom": "",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.HOLDING,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
                 "rack": "",
                 "position": "",
@@ -92,8 +105,7 @@ class CageFormRoomTests(TestCase):
                 "cage_id": "ROOM-CUSTOM",
                 "room": "__custom__",
                 "room_custom": "Basement-3",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.HOLDING,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
                 "rack": "",
                 "position": "",
@@ -124,8 +136,7 @@ class CageCreateProjectAssignmentTests(TestCase):
             "room_custom": "",
             "rack": "",
             "position": "",
-            "cage_type": Cage.CageType.STANDARD,
-            "purpose": Cage.Purpose.HOLDING,
+            "cage_use": Cage.CageUse.HOLDING,
             "status": Cage.Status.ACTIVE,
             "notes": "",
         }
@@ -203,8 +214,7 @@ class CageEditFreezeTests(TestCase):
                 "room_custom": "NewRoom",
                 "rack": "R2",
                 "position": "A1",
-                "cage_type": Cage.CageType.BREEDING,
-                "purpose": Cage.Purpose.BREEDING,
+                "cage_use": Cage.CageUse.BREEDING,
                 "status": Cage.Status.RETIRED,
                 "notes": "location corrected",
             },
@@ -230,8 +240,7 @@ class CageEditFreezeTests(TestCase):
                 "room_custom": "",
                 "rack": "",
                 "position": "",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.HOLDING,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
                 "notes": "",
             },
@@ -254,8 +263,7 @@ class CageEditFreezeTests(TestCase):
                 "room_custom": "",
                 "rack": "",
                 "position": "",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.HOLDING,
+                "cage_use": Cage.CageUse.HOLDING,
                 "status": Cage.Status.ACTIVE,
                 "notes": "",
             },

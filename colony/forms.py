@@ -97,8 +97,7 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
         "created_date",
         "project",
         "colony",
-        "cage_type",
-        "purpose",
+        "cage_use",
         "status",
     }
 
@@ -119,6 +118,13 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
         ),
         label="Custom room",
     )
+    cage_use = forms.ChoiceField(
+        label="Cage Use",
+        choices=[],
+        initial=Cage.CageUse.HOLDING,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+        help_text="Current workflow use of this cage. Breeding and weaning uses apply the correct internal cage settings automatically.",
+    )
 
     class Meta:
         model = Cage
@@ -129,8 +135,7 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
             "colony",
             "rack",
             "position",
-            "cage_type",
-            "purpose",
+            "cage_use",
             "status",
             "notes",
         ]
@@ -170,9 +175,21 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
             self.initial.setdefault("room_custom", stored)
         elif stored:
             self.initial.setdefault("room", stored)
+        is_existing = bool(self.instance and self.instance.pk)
+        current_use = self.instance.cage_use if is_existing else ""
+        self.fields["cage_use"].choices = Cage.cage_use_choices(
+            include_retired=current_use == Cage.CageUse.RETIRED
+        )
+        if not self.is_bound:
+            if is_existing:
+                self.initial.setdefault("cage_use", current_use)
+            elif "cage_use" not in self.initial:
+                self.initial["cage_use"] = Cage.cage_use_from_parts(
+                    cage_type=self.initial.get("cage_type", ""),
+                    purpose=self.initial.get("purpose", ""),
+                )
         project_queryset = _cage_project_queryset_for_user(self.user)
         self.fields["project"].queryset = project_queryset
-        is_existing = bool(self.instance and self.instance.pk)
         self._project_required_for_new_cage = bool(self.user is not None and not is_admin(self.user) and not is_existing)
         self._single_available_project = None
         self.fields["project"].required = False
@@ -247,6 +264,7 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
     def save(self, commit=True):
         obj = super().save(commit=False)
         obj.room = (self.cleaned_data.get("room") or "").strip()
+        obj.set_cage_use(self.cleaned_data.get("cage_use") or Cage.CageUse.HOLDING)
         if obj.colony_id and not obj.project_id:
             obj.project_id = obj.colony.project_id
         if commit:
@@ -849,6 +867,62 @@ class MoveCageForm(forms.Form):
             [self.mouse.sex] if self.mouse.status == Mouse.Status.ACTIVE else [],
             exclude_mouse_ids=[self.mouse.pk],
         )
+        return destination_cage
+
+
+class MouseRestoreForm(forms.Form):
+    destination_cage = forms.ModelChoiceField(
+        queryset=Cage.objects.none(),
+        label="Restore to Cage",
+    )
+    restore_date = forms.DateField(
+        label="Restore Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    reason = forms.CharField(
+        max_length=255,
+        initial="Correct mistaken terminal status",
+        widget=forms.TextInput(attrs={"class": "filter-control"}),
+    )
+    confirm = forms.BooleanField(
+        label="I confirm this mouse is alive and should be restored to active cage occupancy.",
+    )
+
+    def __init__(self, *args, mouse: Mouse, **kwargs):
+        self.mouse = mouse
+        super().__init__(*args, **kwargs)
+        selected_id = _coerce_positive_int(
+            self.data.get("destination_cage") if self.is_bound else self.initial.get("destination_cage")
+        )
+        qs = Cage.objects.none()
+        if selected_id:
+            qs = Cage.objects.filter(
+                pk=selected_id,
+                status__in=[Cage.Status.ACTIVE, Cage.Status.CLOSED],
+            )
+        self.fields["destination_cage"].queryset = qs.order_by("cage_id")
+        self.fields["destination_cage"].widget.attrs.update({"class": "filter-control"})
+
+    def clean_restore_date(self):
+        restore_date = self.cleaned_data["restore_date"]
+        if restore_date > timezone.localdate():
+            raise forms.ValidationError("Restore date cannot be in the future.")
+        birth_date = self.mouse.birth_date
+        if birth_date and restore_date < birth_date:
+            raise forms.ValidationError("Restore date cannot be earlier than birth date.")
+        return restore_date
+
+    def clean_destination_cage(self):
+        destination_cage = self.cleaned_data["destination_cage"]
+        try:
+            validate_active_sex_compatible_with_cage(
+                destination_cage,
+                [self.mouse.sex],
+                exclude_mouse_ids=[self.mouse.pk],
+            )
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages) from exc
         return destination_cage
 
 

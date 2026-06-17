@@ -100,8 +100,7 @@ class CageLifecycleTests(TestCase):
                 "admin_correction_reason": "convert existing cage to breeding setup",
                 "cage_id": holding_cage.cage_id,
                 "created_date": "",
-                "cage_type": Cage.CageType.STANDARD,
-                "purpose": Cage.Purpose.BREEDING,
+                "cage_use": Cage.CageUse.BREEDING,
                 "status": Cage.Status.ACTIVE,
                 "room": "",
                 "rack": "",
@@ -129,6 +128,17 @@ class CageLifecycleTests(TestCase):
         self.assertContains(response, "PEND-CAGE")
         self.assertContains(response, "Pending setup")
         self.assertContains(response, "Need sire")
+
+    def test_breeding_cage_detail_has_warm_visual_treatment(self):
+        client = Client()
+        client.login(username="lifecycle", password="x")
+
+        response = client.get(reverse("colony:cage_detail", args=[self.cage.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "cage-detail--breeding")
+        self.assertContains(response, "Breeding cage")
+        self.assertContains(response, "cage-purpose-pill--breeding")
 
     def test_project_manager_can_retire_empty_cage(self):
         client = Client()

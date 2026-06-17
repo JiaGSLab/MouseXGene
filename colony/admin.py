@@ -31,6 +31,7 @@ class CageAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
         "room",
         "rack",
         "position",
+        "cage_use_display",
         "cage_type",
         "purpose",
         "status",
@@ -38,6 +39,10 @@ class CageAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
     )
     search_fields = ("cage_id", "room", "rack", "position", "notes")
     list_filter = ("project", "colony", "cage_type", "purpose", "status")
+
+    @admin.display(description="Cage use", ordering="purpose")
+    def cage_use_display(self, obj):
+        return obj.get_cage_use_display()
 
 
 @admin.register(Colony)

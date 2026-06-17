@@ -32,6 +32,7 @@ from .forms import (
     MouseForm,
     MouseGenotypeComponentFormSet,
     MouseImportForm,
+    MouseRestoreForm,
     MoveCageForm,
     StrainLineForm,
 )
@@ -604,11 +605,43 @@ def cage_projects_from_mice(mice: list[Mouse], *, cage: Cage | None = None) -> l
     return list(rows.values())
 
 
+def _valid_cage_use(value: str) -> str:
+    cage_use = (value or "").strip()
+    return cage_use if cage_use in {choice[0] for choice in Cage.CageUse.choices} else ""
+
+
+def _filter_cages_by_use(cages, cage_use: str):
+    if cage_use == Cage.CageUse.BREEDING:
+        return cages.filter(Q(purpose=Cage.Purpose.BREEDING) | Q(cage_type=Cage.CageType.BREEDING)).exclude(
+            purpose=Cage.Purpose.RETIRED
+        )
+    if cage_use == Cage.CageUse.WEANING:
+        return cages.filter(cage_type=Cage.CageType.WEANING).exclude(
+            Q(purpose=Cage.Purpose.RETIRED) | Q(purpose=Cage.Purpose.BREEDING)
+        )
+    if cage_use == Cage.CageUse.EXPERIMENT:
+        return cages.filter(purpose=Cage.Purpose.EXPERIMENT).exclude(
+            Q(cage_type=Cage.CageType.BREEDING) | Q(cage_type=Cage.CageType.WEANING)
+        )
+    if cage_use == Cage.CageUse.QUARANTINE:
+        return cages.filter(cage_type=Cage.CageType.QUARANTINE).exclude(
+            Q(purpose=Cage.Purpose.RETIRED)
+            | Q(purpose=Cage.Purpose.BREEDING)
+            | Q(purpose=Cage.Purpose.EXPERIMENT)
+        )
+    if cage_use == Cage.CageUse.RETIRED:
+        return cages.filter(purpose=Cage.Purpose.RETIRED)
+    if cage_use == Cage.CageUse.HOLDING:
+        return cages.filter(cage_type=Cage.CageType.STANDARD, purpose=Cage.Purpose.HOLDING)
+    return cages
+
+
 def _filtered_cages_queryset(request: HttpRequest):
     """Apply the same GET filters as the cage list page."""
     q = (request.GET.get("q") or "").strip()
     room = (request.GET.get("room") or "").strip()
     rack = (request.GET.get("rack") or "").strip()
+    cage_use = _valid_cage_use(request.GET.get("cage_use") or "")
     cage_type = (request.GET.get("cage_type") or "").strip()
     purpose = (request.GET.get("purpose") or "").strip()
     status = (request.GET.get("status") or "").strip()
@@ -662,9 +695,13 @@ def _filtered_cages_queryset(request: HttpRequest):
         cages = cages.filter(room=room)
     if rack:
         cages = cages.filter(rack=rack)
-    if cage_type:
+    if cage_use:
+        cages = _filter_cages_by_use(cages, cage_use)
+    elif cage_type:
         cages = cages.filter(cage_type=cage_type)
-    if purpose:
+        if purpose:
+            cages = cages.filter(purpose=purpose)
+    elif purpose:
         cages = cages.filter(purpose=purpose)
     if status:
         cages = cages.filter(status=status)
@@ -2260,6 +2297,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     q = (request.GET.get("q") or "").strip()
     room = (request.GET.get("room") or "").strip()
     rack = (request.GET.get("rack") or "").strip()
+    cage_use = _valid_cage_use(request.GET.get("cage_use") or "")
     cage_type = (request.GET.get("cage_type") or "").strip()
     purpose = (request.GET.get("purpose") or "").strip()
     status = (request.GET.get("status") or "").strip()
@@ -2293,6 +2331,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "q": q,
         "room": room,
         "rack": rack,
+        "cage_use": cage_use,
         "cage_type": cage_type,
         "purpose": purpose,
         "status": status,
@@ -2306,6 +2345,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "owner_options": project_owner_filter_options(),
         "room_options": _cached_cage_room_options(),
         "rack_options": _cached_cage_rack_options(),
+        "cage_use_options": Cage.cage_use_choices(include_retired=True),
         "cage_type_options": Cage.CageType.choices,
         "purpose_options": Cage.Purpose.choices,
         "status_options": Cage.Status.choices,
@@ -2771,11 +2811,17 @@ def _safe_cage_create_select_field(raw_field: str | None) -> str:
 
 def _cage_create_initial_from_query(request: HttpRequest) -> dict[str, str]:
     choices = {
-        "cage_type": set(Cage.CageType.values),
-        "purpose": set(Cage.Purpose.values),
         "status": set(Cage.Status.values),
     }
     initial: dict[str, str] = {}
+    cage_use = _valid_cage_use(request.GET.get("cage_use") or "")
+    if cage_use:
+        initial["cage_use"] = cage_use
+    else:
+        cage_type = (request.GET.get("cage_type") or "").strip()
+        purpose = (request.GET.get("purpose") or "").strip()
+        if cage_type in set(Cage.CageType.values) or purpose in set(Cage.Purpose.values):
+            initial["cage_use"] = Cage.cage_use_from_parts(cage_type=cage_type, purpose=purpose)
     for field_name, allowed_values in choices.items():
         value = (request.GET.get(field_name) or "").strip()
         if value in allowed_values:
@@ -2923,10 +2969,10 @@ def cage_retire(request: HttpRequest, pk: int) -> HttpResponse:
             retire_date = form.cleaned_data["retire_date"]
             reason = form.cleaned_data["reason"].strip()
             previous_status = cage.status
-            previous_purpose = cage.purpose
+            previous_use = cage.get_cage_use_display()
             cage.status = Cage.Status.RETIRED
-            cage.purpose = Cage.Purpose.RETIRED
-            update_fields = ["status", "purpose", "updated_at"]
+            cage.set_cage_use(Cage.CageUse.RETIRED)
+            update_fields = ["status", "cage_type", "purpose", "updated_at"]
             if not cage.archived_at:
                 cage.archived_at = timezone.now()
                 update_fields.append("archived_at")
@@ -2937,7 +2983,7 @@ def cage_retire(request: HttpRequest, pk: int) -> HttpResponse:
                 obj=cage,
                 message=(
                     f"Retired cage {cage.cage_id} on {retire_date}. "
-                    f"Status {previous_status} -> {cage.status}; purpose {previous_purpose} -> {cage.purpose}. "
+                    f"Status {previous_status} -> {cage.status}; cage use {previous_use} -> {cage.get_cage_use_display()}. "
                     f"Reason: {reason}"
                 )[:4000],
             )
@@ -3210,6 +3256,11 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         .exclude(status=Breeding.Status.CLOSED)
         .count()
     )
+    is_breeding_cage = (
+        cage.purpose == Cage.Purpose.BREEDING
+        or cage.cage_type == Cage.CageType.BREEDING
+        or active_breeding_count > 0
+    )
     can_retire_cage = _can_retire_cage(request.user, cage)
     cage_retire_block_reason = ""
     if can_retire_cage:
@@ -3230,6 +3281,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "cage_setup_date": latest_setup or cage.created_date,
         "cage_project_rows": cage_project_rows,
         "active_breeding_count": active_breeding_count,
+        "is_breeding_cage": is_breeding_cage,
         "can_retire_cage": can_retire_cage,
         "cage_retire_block_reason": cage_retire_block_reason,
         "audit_entries": audit_entries,
@@ -3740,6 +3792,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         mouse.status not in TERMINAL_MOUSE_STATUSES
         and can_archive_or_change_terminal_status(request.user, mouse.project)
     )
+    can_restore_mouse = mouse.status in TERMINAL_MOUSE_STATUSES and is_admin(request.user)
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
@@ -3761,6 +3814,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "can_edit_mouse": can_edit_mouse,
         "can_move_mouse": can_edit_mouse and mouse.status == Mouse.Status.ACTIVE,
         "can_end_mouse": can_end_mouse,
+        "can_restore_mouse": can_restore_mouse,
         **actors,
     }
     return render(request, "colony/mouse_detail.html", context)
@@ -4336,6 +4390,138 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "mouse": mouse,
             "form": form,
+        },
+    )
+
+
+def _latest_cage_membership(mouse: Mouse) -> CageMembership | None:
+    return (
+        CageMembership.objects.select_related("cage")
+        .filter(mouse=mouse)
+        .order_by("-is_current", "-end_date", "-start_date", "-created_at", "-pk")
+        .first()
+    )
+
+
+@authenticated_required
+def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
+    mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
+    if not is_admin(request.user):
+        raise PermissionDenied("Only lab admins can restore a terminal mouse to active status.")
+    if mouse.status not in TERMINAL_MOUSE_STATUSES:
+        messages.info(request, f"Mouse {mouse.mouse_uid} is already active/non-terminal.")
+        return redirect("mice:mouse_detail", pk=mouse.pk)
+
+    latest_membership = _latest_cage_membership(mouse)
+    initial = {
+        "destination_cage": mouse.current_cage_id or (latest_membership.cage_id if latest_membership else None),
+        "restore_date": timezone.localdate(),
+    }
+
+    if request.method == "POST":
+        form = MouseRestoreForm(request.POST, mouse=mouse, initial=initial)
+        if form.is_valid():
+            destination_cage = form.cleaned_data["destination_cage"]
+            restore_date = form.cleaned_data["restore_date"]
+            reason = form.cleaned_data["reason"].strip() or "Correct mistaken terminal status"
+            reopened_existing_membership = False
+
+            with transaction.atomic():
+                mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
+                if mouse_locked.status not in TERMINAL_MOUSE_STATUSES:
+                    messages.info(request, f"Mouse {mouse_locked.mouse_uid} is already active/non-terminal.")
+                    return redirect("mice:mouse_detail", pk=mouse_locked.pk)
+
+                destination_cage = Cage.objects.select_for_update().get(pk=destination_cage.pk)
+                previous_status = mouse_locked.status
+                previous_cage_ids = set(
+                    CageMembership.objects.filter(mouse=mouse_locked, is_current=True).values_list("cage_id", flat=True)
+                )
+                current_memberships = list(
+                    CageMembership.objects.select_for_update().filter(mouse=mouse_locked, is_current=True)
+                )
+                for membership in current_memberships:
+                    if membership.cage_id == destination_cage.pk:
+                        continue
+                    membership_end_date = restore_date
+                    if membership.start_date and membership_end_date < membership.start_date:
+                        membership_end_date = membership.start_date
+                    membership.end_date = membership_end_date
+                    membership.is_current = False
+                    membership.reason = "Closed by restore correction"[:128]
+                    membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+
+                membership = (
+                    CageMembership.objects.select_for_update()
+                    .filter(mouse=mouse_locked, cage=destination_cage)
+                    .order_by("-is_current", "-end_date", "-start_date", "-created_at", "-pk")
+                    .first()
+                )
+                if membership is not None:
+                    membership.end_date = None
+                    membership.is_current = True
+                    membership.reason = reason[:128]
+                    membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+                    reopened_existing_membership = True
+                else:
+                    CageMembership.objects.create(
+                        mouse=mouse_locked,
+                        cage=destination_cage,
+                        start_date=restore_date,
+                        is_current=True,
+                        reason=reason[:128],
+                    )
+
+                if destination_cage.status == Cage.Status.CLOSED:
+                    destination_cage.status = Cage.Status.ACTIVE
+                    destination_cage.save(update_fields=["status", "updated_at"])
+
+                mouse_locked.status = Mouse.Status.ACTIVE
+                mouse_locked.death_date = None
+                mouse_locked.euthanasia_date = None
+                mouse_locked.death_reason = ""
+                mouse_locked.current_cage = destination_cage
+                mouse_locked.save(
+                    update_fields=[
+                        "status",
+                        "death_date",
+                        "euthanasia_date",
+                        "death_reason",
+                        "current_cage",
+                        "updated_at",
+                    ]
+                )
+                sync_cage_status_from_mice(destination_cage)
+                for cage_id in previous_cage_ids - {destination_cage.pk}:
+                    sync_cage_status_from_mice(Cage.objects.filter(pk=cage_id).first())
+
+            membership_action = "reopened previous cage membership" if reopened_existing_membership else "created cage membership"
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=mouse_locked,
+                message=(
+                    f"Restored mouse {mouse_locked.mouse_uid} from {previous_status} to active "
+                    f"on {restore_date}; {membership_action} in cage {destination_cage.cage_id}. "
+                    f"Reason: {reason}"
+                )[:4000],
+            )
+            messages.success(
+                request,
+                f"Restored {mouse_locked.mouse_uid} to Active in cage {destination_cage.cage_id}.",
+            )
+            return redirect("mice:mouse_detail", pk=mouse_locked.pk)
+    else:
+        form = MouseRestoreForm(mouse=mouse, initial=initial)
+
+    return render(
+        request,
+        "colony/mouse_restore.html",
+        {
+            "mouse": mouse,
+            "form": form,
+            "latest_membership": latest_membership,
+            **cage_filter_form_context(),
         },
     )
 

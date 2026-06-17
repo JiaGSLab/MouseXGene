@@ -288,6 +288,41 @@ class LitterWeanPageTests(TestCase):
         self.assertEqual(male_pup.current_cage_id, self.male_cage.pk)
         self.assertEqual(female_pup.current_cage_id, self.female_cage.pk)
 
+    def test_wean_auto_creates_separate_sex_cages(self):
+        response = self._wean_post(
+            male_pup_count="1",
+            female_pup_count="1",
+            male_cage_assignment_mode="auto",
+            male_auto_cage_id="AUTO-WEAN-M",
+            female_cage_assignment_mode="auto",
+            female_auto_cage_id="AUTO-WEAN-F",
+            **{
+                "pups-0-mouse_uid": "M-WEAN-AUTO-M",
+                "pups-0-sex": "M",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+                "pups-1-mouse_uid": "M-WEAN-AUTO-F",
+                "pups-1-sex": "F",
+                "pups-1-ear_tag": "",
+                "pups-1-coat_color": "",
+                "pups-1-notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        male_pup = Mouse.objects.get(mouse_uid="M-WEAN-AUTO-M")
+        female_pup = Mouse.objects.get(mouse_uid="M-WEAN-AUTO-F")
+        male_cage = Cage.objects.get(cage_id="AUTO-WEAN-M")
+        female_cage = Cage.objects.get(cage_id="AUTO-WEAN-F")
+        self.assertEqual(male_pup.current_cage_id, male_cage.pk)
+        self.assertEqual(female_pup.current_cage_id, female_cage.pk)
+        self.assertNotEqual(male_cage.pk, female_cage.pk)
+        self.assertEqual(male_cage.cage_type, Cage.CageType.WEANING)
+        self.assertEqual(female_cage.cage_type, Cage.CageType.WEANING)
+        self.assertEqual(male_cage.project_id, self.project.pk)
+        self.assertEqual(female_cage.project_id, self.project.pk)
+
     def test_wean_trio_uses_breeding_cage_possible_dams_by_default(self):
         dam2 = Mouse.objects.create(
             mouse_uid="M-WEAN-D2",

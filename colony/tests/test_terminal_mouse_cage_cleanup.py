@@ -69,6 +69,50 @@ class TerminalMouseCageCleanupTests(TestCase):
         self.assertContains(response, "End / Euthanize Mouse")
         self.assertContains(response, reverse("mice:mouse_end", args=[self.mouse.pk]))
 
+    def test_admin_can_restore_terminal_mouse_to_previous_cage(self):
+        end_date = timezone.localdate() - timedelta(days=1)
+        self.mouse.status = Mouse.Status.EUTHANIZED
+        self.mouse.death_date = end_date
+        self.mouse.euthanasia_date = end_date
+        self.mouse.death_reason = "Mistaken endpoint"
+        self.mouse.current_cage = None
+        self.mouse.save(update_fields=["status", "death_date", "euthanasia_date", "death_reason", "current_cage"])
+        self.membership.end_date = end_date
+        self.membership.is_current = False
+        self.membership.reason = "Mouse marked as Euthanized via End Mouse workflow."
+        self.membership.save(update_fields=["end_date", "is_current", "reason"])
+        self.cage.status = Cage.Status.CLOSED
+        self.cage.save(update_fields=["status"])
+
+        detail = self.client.get(reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.assertContains(detail, "Restore Mouse")
+        self.assertContains(detail, reverse("mice:mouse_restore", args=[self.mouse.pk]))
+
+        response = self.client.post(
+            reverse("mice:mouse_restore", args=[self.mouse.pk]),
+            {
+                "destination_cage": self.cage.pk,
+                "restore_date": timezone.localdate().isoformat(),
+                "reason": "Wrong mouse was ended.",
+                "confirm": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.mouse.refresh_from_db()
+        self.membership.refresh_from_db()
+        self.cage.refresh_from_db()
+
+        self.assertEqual(self.mouse.status, Mouse.Status.ACTIVE)
+        self.assertEqual(self.mouse.current_cage_id, self.cage.pk)
+        self.assertIsNone(self.mouse.death_date)
+        self.assertIsNone(self.mouse.euthanasia_date)
+        self.assertEqual(self.mouse.death_reason, "")
+        self.assertTrue(self.membership.is_current)
+        self.assertIsNone(self.membership.end_date)
+        self.assertEqual(self.membership.reason, "Wrong mouse was ended.")
+        self.assertEqual(self.cage.status, Cage.Status.ACTIVE)
+
     def test_project_manager_can_open_end_mouse_form(self):
         manager = get_user_model().objects.create_user(username="terminal-manager", password="x")
         UserProfile.objects.filter(user=manager).update(role=UserProfile.Role.MEMBER)
@@ -85,6 +129,23 @@ class TerminalMouseCageCleanupTests(TestCase):
         response = self.client.get(reverse("mice:mouse_end", args=[self.mouse.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Confirm End Mouse")
+
+    def test_project_manager_does_not_get_restore_mouse_action(self):
+        self.mouse.status = Mouse.Status.EUTHANIZED
+        self.mouse.current_cage = None
+        self.mouse.save(update_fields=["status", "current_cage"])
+        manager = get_user_model().objects.create_user(username="terminal-manager-restore", password="x")
+        UserProfile.objects.filter(user=manager).update(role=UserProfile.Role.MEMBER)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=manager,
+            role=ProjectMembership.Role.MANAGER,
+        )
+        self.client.logout()
+        self.client.login(username="terminal-manager-restore", password="x")
+
+        detail = self.client.get(reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.assertNotContains(detail, "Restore Mouse")
 
     def test_end_mouse_requires_confirmation(self):
         response = self.client.post(

@@ -32,6 +32,7 @@ from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from colony.mouse_age import breeding_age_tier
 
+from .cage_autocreate import colony_for_project_and_strain, create_auto_cage
 from .forms import EndBreedingForm, BreedingForm, LitterForm, LitterPupFormSet, LitterRecordForm, PupEntryForm, WeanLitterForm, WeanPupEntryForm
 from .consistency import breeding_cage_mismatch_rows
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
@@ -1025,6 +1026,14 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                     ],
                 )
                 breeding = form.save()
+                if form.created_auto_cage is not None:
+                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.CREATE,
+                        obj=form.created_auto_cage,
+                        message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                    )
                 mark_cage_as_breeding(breeding.cage)
                 moved = sync_breeding_member_cages(breeding)
                 if moved:
@@ -1077,6 +1086,14 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     ],
                 )
                 breeding = form.save()
+                if form.created_auto_cage is not None:
+                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.CREATE,
+                        obj=form.created_auto_cage,
+                        message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                    )
                 mark_cage_as_breeding(breeding.cage)
                 moved = sync_breeding_member_cages(breeding)
                 if moved:
@@ -2148,7 +2165,44 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         wean_form.add_error("strain_assignment_mode", strain_err)
                 if not wean_form.errors:
                     created_uids: list[str] = []
+                    created_auto_cages: list[Cage] = []
                     with transaction.atomic():
+                        source_cage = parent_source_breeding.cage if parent_source_breeding.cage_id else None
+                        pup_colony = colony_for_project_and_strain(inherited_project, pup_strain_line)
+                        if (
+                            male_pup_count > 0
+                            and wean_form.cleaned_data.get("male_cage_assignment_mode")
+                            == WeanLitterForm.CageAssignmentMode.AUTO
+                        ):
+                            male_cage = create_auto_cage(
+                                prefix="CAGE-WM",
+                                requested_cage_id=wean_form.cleaned_data.get("male_auto_cage_id") or "",
+                                cage_type=Cage.CageType.WEANING,
+                                purpose=Cage.Purpose.HOLDING,
+                                created_date=wean_date,
+                                project=inherited_project,
+                                colony=pup_colony,
+                                source_cage=source_cage,
+                                notes=f"Auto-created for male pups weaned from {litter.litter_id_display}.",
+                            )
+                            created_auto_cages.append(male_cage)
+                        if (
+                            female_pup_count > 0
+                            and wean_form.cleaned_data.get("female_cage_assignment_mode")
+                            == WeanLitterForm.CageAssignmentMode.AUTO
+                        ):
+                            female_cage = create_auto_cage(
+                                prefix="CAGE-WF",
+                                requested_cage_id=wean_form.cleaned_data.get("female_auto_cage_id") or "",
+                                cage_type=Cage.CageType.WEANING,
+                                purpose=Cage.Purpose.HOLDING,
+                                created_date=wean_date,
+                                project=inherited_project,
+                                colony=pup_colony,
+                                source_cage=source_cage,
+                                notes=f"Auto-created for female pups weaned from {litter.litter_id_display}.",
+                            )
+                            created_auto_cages.append(female_cage)
                         weaned_entries: list[tuple[Mouse, Cage]] = []
                         for form in pup_forms:
                             pup_sex = form.cleaned_data["sex"]
@@ -2216,6 +2270,19 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         request,
                         f"Weaned {len(created_uids)} pups: {', '.join(created_uids)}.",
                     )
+                    if created_auto_cages:
+                        cage_codes = ", ".join(cage.cage_id for cage in created_auto_cages)
+                        messages.info(request, f"Created weaning cage(s): {cage_codes}.")
+                        for cage in created_auto_cages:
+                            log_audit_event(
+                                user=request.user,
+                                action=AuditLog.Action.CREATE,
+                                obj=cage,
+                                message=(
+                                    f"Auto-created cage {cage.cage_id} during wean of "
+                                    f"litter {litter.litter_code or litter.pk}."
+                                ),
+                            )
                     log_audit_event(
                         user=request.user,
                         action=AuditLog.Action.WEAN,

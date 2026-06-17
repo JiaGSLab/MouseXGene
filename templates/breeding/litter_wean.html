@@ -143,7 +143,7 @@
         </div>
 
         {% for field in wean_form %}
-            {% if field.name == "parentage_mode" or field.name == "parent_breeding" or field.name == "wean_sire" or field.name == "wean_possible_dams" or field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
+            {% if field.name == "parentage_mode" or field.name == "parent_breeding" or field.name == "wean_sire" or field.name == "wean_possible_dams" or field.name == "male_cage_assignment_mode" or field.name == "male_auto_cage_id" or field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage_assignment_mode" or field.name == "female_auto_cage_id" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
                 {# Rendered in dedicated blocks below #}
             {% elif field.name == "new_strain_line_name" %}
                 <div class="form-row" id="wean-new-strain-row">
@@ -279,74 +279,106 @@
             <div id="wean-male-cage-section" hidden>
                 <h3>Male pups cage <span class="muted" id="wean-male-count-label"></span></h3>
                 <div class="form-row">
-                    <label for="id_male_cage">{{ wean_form.male_cage.label }}</label>
-                    <select name="male_cage" id="id_male_cage">
-                        <option value="">---------</option>
-                    </select>
-                    {% if wean_form.male_cage.errors %}
-                        <div class="field-error">
-                            {% for error in wean_form.male_cage.errors %}
-                                <div>{{ error }}</div>
-                            {% endfor %}
-                        </div>
+                    <label>{{ wean_form.male_cage_assignment_mode.label }}</label>
+                    {{ wean_form.male_cage_assignment_mode }}
+                    {% if wean_form.male_cage_assignment_mode.errors %}
+                        <div class="field-error">{% for error in wean_form.male_cage_assignment_mode.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div class="form-row">
-                    <label for="id_male_cage_lookup">{{ wean_form.male_cage_lookup.label }}</label>
-                    {{ wean_form.male_cage_lookup }}
-                    {% if wean_form.male_cage_lookup.help_text %}
-                        <small class="muted">{{ wean_form.male_cage_lookup.help_text }}</small>
+                <div class="form-row" id="wean-male-auto-cage-row">
+                    <label for="{{ wean_form.male_auto_cage_id.id_for_label }}">{{ wean_form.male_auto_cage_id.label }}</label>
+                    {{ wean_form.male_auto_cage_id }}
+                    {% if wean_form.male_auto_cage_id.help_text %}
+                        <small class="muted">{{ wean_form.male_auto_cage_id.help_text }}</small>
                     {% endif %}
-                    <p class="muted small-print" id="wean-male-cage-lookup-status" aria-live="polite"></p>
-                    <p class="muted small-print" id="wean-male-cage-selected-summary" aria-live="polite"></p>
-                    {% if wean_form.male_cage_lookup.errors %}
-                        <div class="field-error">
-                            {% for error in wean_form.male_cage_lookup.errors %}
-                                <div>{{ error }}</div>
-                            {% endfor %}
-                        </div>
+                    {% if wean_form.male_auto_cage_id.errors %}
+                        <div class="field-error">{% for error in wean_form.male_auto_cage_id.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
+                </div>
+                <div id="wean-male-existing-cage-fields">
+                    <div class="form-row">
+                        <label for="id_male_cage">{{ wean_form.male_cage.label }}</label>
+                        <select name="male_cage" id="id_male_cage">
+                            <option value="">---------</option>
+                        </select>
+                        {% if wean_form.male_cage.errors %}
+                            <div class="field-error">
+                                {% for error in wean_form.male_cage.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <label for="id_male_cage_lookup">{{ wean_form.male_cage_lookup.label }}</label>
+                        {{ wean_form.male_cage_lookup }}
+                        {% if wean_form.male_cage_lookup.help_text %}
+                            <small class="muted">{{ wean_form.male_cage_lookup.help_text }}</small>
+                        {% endif %}
+                        <p class="muted small-print" id="wean-male-cage-lookup-status" aria-live="polite"></p>
+                        <p class="muted small-print" id="wean-male-cage-selected-summary" aria-live="polite"></p>
+                        {% if wean_form.male_cage_lookup.errors %}
+                            <div class="field-error">
+                                {% for error in wean_form.male_cage_lookup.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
 
             <div id="wean-female-cage-section" hidden>
                 <h3>Female pups cage <span class="muted" id="wean-female-count-label"></span></h3>
                 <div class="form-row">
-                    <label for="id_female_cage">{{ wean_form.female_cage.label }}</label>
-                    <select name="female_cage" id="id_female_cage">
-                        <option value="">---------</option>
-                    </select>
-                    {% if wean_form.female_cage.errors %}
-                        <div class="field-error">
-                            {% for error in wean_form.female_cage.errors %}
-                                <div>{{ error }}</div>
-                            {% endfor %}
-                        </div>
+                    <label>{{ wean_form.female_cage_assignment_mode.label }}</label>
+                    {{ wean_form.female_cage_assignment_mode }}
+                    {% if wean_form.female_cage_assignment_mode.errors %}
+                        <div class="field-error">{% for error in wean_form.female_cage_assignment_mode.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div class="form-row">
-                    <label for="id_female_cage_lookup">{{ wean_form.female_cage_lookup.label }}</label>
-                    {{ wean_form.female_cage_lookup }}
-                    {% if wean_form.female_cage_lookup.help_text %}
-                        <small class="muted">{{ wean_form.female_cage_lookup.help_text }}</small>
+                <div class="form-row" id="wean-female-auto-cage-row">
+                    <label for="{{ wean_form.female_auto_cage_id.id_for_label }}">{{ wean_form.female_auto_cage_id.label }}</label>
+                    {{ wean_form.female_auto_cage_id }}
+                    {% if wean_form.female_auto_cage_id.help_text %}
+                        <small class="muted">{{ wean_form.female_auto_cage_id.help_text }}</small>
                     {% endif %}
-                    <p class="muted small-print" id="wean-female-cage-lookup-status" aria-live="polite"></p>
-                    <p class="muted small-print" id="wean-female-cage-selected-summary" aria-live="polite"></p>
-                    {% if wean_form.female_cage_lookup.errors %}
-                        <div class="field-error">
-                            {% for error in wean_form.female_cage_lookup.errors %}
-                                <div>{{ error }}</div>
-                            {% endfor %}
-                        </div>
+                    {% if wean_form.female_auto_cage_id.errors %}
+                        <div class="field-error">{% for error in wean_form.female_auto_cage_id.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
+                </div>
+                <div id="wean-female-existing-cage-fields">
+                    <div class="form-row">
+                        <label for="id_female_cage">{{ wean_form.female_cage.label }}</label>
+                        <select name="female_cage" id="id_female_cage">
+                            <option value="">---------</option>
+                        </select>
+                        {% if wean_form.female_cage.errors %}
+                            <div class="field-error">
+                                {% for error in wean_form.female_cage.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="form-row">
+                        <label for="id_female_cage_lookup">{{ wean_form.female_cage_lookup.label }}</label>
+                        {{ wean_form.female_cage_lookup }}
+                        {% if wean_form.female_cage_lookup.help_text %}
+                            <small class="muted">{{ wean_form.female_cage_lookup.help_text }}</small>
+                        {% endif %}
+                        <p class="muted small-print" id="wean-female-cage-lookup-status" aria-live="polite"></p>
+                        <p class="muted small-print" id="wean-female-cage-selected-summary" aria-live="polite"></p>
+                        {% if wean_form.female_cage_lookup.errors %}
+                            <div class="field-error">
+                                {% for error in wean_form.female_cage_lookup.errors %}
+                                    <div>{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
-
-            <p class="muted small-print">
-                Need a new cage?
-                <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>,
-                then return and refresh the list or type its ID.
-            </p>
         </div>
 
         <div class="form-actions">
@@ -380,6 +412,14 @@
     const femaleLookupStatus = document.getElementById("wean-female-cage-lookup-status");
     const maleSelectedSummary = document.getElementById("wean-male-cage-selected-summary");
     const femaleSelectedSummary = document.getElementById("wean-female-cage-selected-summary");
+    const maleModeRadios = Array.from(document.querySelectorAll('input[name="male_cage_assignment_mode"]'));
+    const femaleModeRadios = Array.from(document.querySelectorAll('input[name="female_cage_assignment_mode"]'));
+    const maleAutoCageRow = document.getElementById("wean-male-auto-cage-row");
+    const femaleAutoCageRow = document.getElementById("wean-female-auto-cage-row");
+    const maleAutoCageInput = document.getElementById("id_male_auto_cage_id");
+    const femaleAutoCageInput = document.getElementById("id_female_auto_cage_id");
+    const maleExistingCageFields = document.getElementById("wean-male-existing-cage-fields");
+    const femaleExistingCageFields = document.getElementById("wean-female-existing-cage-fields");
     const aliveMax = {% if pup_max_count %}{{ pup_max_count }}{% else %}null{% endif %};
     const malePupCountInput = document.getElementById("id_male_pup_count");
     const femalePupCountInput = document.getElementById("id_female_pup_count");
@@ -423,6 +463,37 @@
         if (strainAssignmentMode?.value === "sire") return sireStrainId;
         if (strainAssignmentMode?.value === "dam") return damStrainId;
         return "";
+    }
+
+    function cageAssignmentMode(sex) {
+        const radios = sex === "male" ? maleModeRadios : femaleModeRadios;
+        return radios.find((radio) => radio.checked)?.value || "auto";
+    }
+
+    function syncOneCageAssignmentMode(sex) {
+        const useExisting = cageAssignmentMode(sex) === "existing";
+        const autoRow = sex === "male" ? maleAutoCageRow : femaleAutoCageRow;
+        const autoInput = sex === "male" ? maleAutoCageInput : femaleAutoCageInput;
+        const existingFields = sex === "male" ? maleExistingCageFields : femaleExistingCageFields;
+        const cageSelect = sex === "male" ? maleCageSelect : femaleCageSelect;
+        const cageLookup = sex === "male" ? maleCageLookup : femaleCageLookup;
+        const lookupStatus = sex === "male" ? maleLookupStatus : femaleLookupStatus;
+        const selectedSummary = sex === "male" ? maleSelectedSummary : femaleSelectedSummary;
+        if (autoRow) autoRow.hidden = useExisting;
+        if (existingFields) existingFields.hidden = !useExisting;
+        if (autoInput) autoInput.disabled = useExisting;
+        if (cageSelect) cageSelect.disabled = !useExisting;
+        if (cageLookup) cageLookup.disabled = !useExisting;
+        if (!useExisting) {
+            if (lookupStatus) {
+                lookupStatus.textContent = "";
+                lookupStatus.className = "muted small-print";
+            }
+            if (selectedSummary) {
+                selectedSummary.textContent = "";
+                selectedSummary.className = "muted small-print";
+            }
+        }
     }
 
     function readPupCounts() {
@@ -651,9 +722,10 @@
         syncSexLayout();
     }
 
-    function clearCageBlock(selectEl, lookupInput, statusEl, summaryEl) {
+    function clearCageBlock(selectEl, lookupInput, statusEl, summaryEl, autoInput) {
         if (selectEl) selectEl.value = "";
         if (lookupInput) lookupInput.value = "";
+        if (autoInput) autoInput.value = "";
         if (statusEl) {
             statusEl.textContent = "";
             statusEl.className = "muted small-print";
@@ -698,10 +770,14 @@
     }
 
     function selectedCageFor(selectEl) {
+        if (selectEl === maleCageSelect && cageAssignmentMode("male") !== "existing") return null;
+        if (selectEl === femaleCageSelect && cageAssignmentMode("female") !== "existing") return null;
         return MXGPicker.findCage(cages, selectEl?.value || "");
     }
 
     function cageWarningsFor(selectEl, sex) {
+        if (selectEl === maleCageSelect && cageAssignmentMode("male") !== "existing") return [];
+        if (selectEl === femaleCageSelect && cageAssignmentMode("female") !== "existing") return [];
         return MXGPicker.cageWarnings(selectedCageFor(selectEl), {
             projectId: targetProjectId(),
             strainLineId: targetStrainId(),
@@ -804,14 +880,20 @@
 
         if (maleSection) maleSection.hidden = maleCount === 0;
         if (femaleSection) femaleSection.hidden = femaleCount === 0;
-        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus, maleSelectedSummary);
-        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus, femaleSelectedSummary);
+        syncOneCageAssignmentMode("male");
+        syncOneCageAssignmentMode("female");
+        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus, maleSelectedSummary, maleAutoCageInput);
+        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus, femaleSelectedSummary, femaleAutoCageInput);
         if (maleCountLabel) maleCountLabel.textContent = maleCount ? `(${maleCount})` : "";
         if (femaleCountLabel) femaleCountLabel.textContent = femaleCount ? `(${femaleCount})` : "";
 
         const total = maleCount + femaleCount;
-        const maleCageReady = maleCount === 0 || Boolean(maleCageSelect?.value || maleCageLookup?.value.trim());
-        const femaleCageReady = femaleCount === 0 || Boolean(femaleCageSelect?.value || femaleCageLookup?.value.trim());
+        const maleCageReady = maleCount === 0
+            || cageAssignmentMode("male") === "auto"
+            || Boolean(maleCageSelect?.value || maleCageLookup?.value.trim());
+        const femaleCageReady = femaleCount === 0
+            || cageAssignmentMode("female") === "auto"
+            || Boolean(femaleCageSelect?.value || femaleCageLookup?.value.trim());
         const cagesReady = maleCageReady && femaleCageReady;
         const canSubmit = total > 0 && entriesMatchCounts && cagesReady;
         if (submitBtn) {
@@ -857,6 +939,8 @@
 
     async function syncLookupToSelect(lookupInput, selectEl, statusEl) {
         if (!lookupInput || !statusEl || !window.MXGPicker) return;
+        if (selectEl === maleCageSelect && cageAssignmentMode("male") !== "existing") return;
+        if (selectEl === femaleCageSelect && cageAssignmentMode("female") !== "existing") return;
         const query = lookupInput.value.trim();
         if (!query) {
             statusEl.textContent = "";
@@ -951,11 +1035,22 @@
             return;
         }
         const warnings = [];
-        if (male > 0 && female > 0 && maleCageSelect?.value && maleCageSelect.value === femaleCageSelect?.value) {
+        if (
+            male > 0
+            && female > 0
+            && cageAssignmentMode("male") === "existing"
+            && cageAssignmentMode("female") === "existing"
+            && maleCageSelect?.value
+            && maleCageSelect.value === femaleCageSelect?.value
+        ) {
             warnings.push("male and female pups are assigned to the same cage");
         }
-        if (male > 0) warnings.push(...cageWarningsFor(maleCageSelect, "M").map((warning) => `male cage: ${warning}`));
-        if (female > 0) warnings.push(...cageWarningsFor(femaleCageSelect, "F").map((warning) => `female cage: ${warning}`));
+        if (male > 0 && cageAssignmentMode("male") === "existing") {
+            warnings.push(...cageWarningsFor(maleCageSelect, "M").map((warning) => `male cage: ${warning}`));
+        }
+        if (female > 0 && cageAssignmentMode("female") === "existing") {
+            warnings.push(...cageWarningsFor(femaleCageSelect, "F").map((warning) => `female cage: ${warning}`));
+        }
         if (warnings.length) {
             const warningText = warnings.map((warning) => `- ${warning}`).join("\n");
             if (!window.confirm(`Cage assignment warning:\n${warningText}\n\nCreate weaned pups anyway?`)) {
@@ -973,6 +1068,8 @@
     malePupCountInput?.addEventListener("change", () => normalizeSexCountInput("male"));
     femalePupCountInput?.addEventListener("change", () => normalizeSexCountInput("female"));
     updatePupEntriesBtn?.addEventListener("click", () => rebuildPupEntriesClient());
+    maleModeRadios.forEach((radio) => radio.addEventListener("change", syncSexLayout));
+    femaleModeRadios.forEach((radio) => radio.addEventListener("change", syncSexLayout));
 
     const strainMode = document.getElementById("id_strain_assignment_mode");
     const newStrainRow = document.getElementById("wean-new-strain-row");

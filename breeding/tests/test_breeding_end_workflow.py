@@ -69,7 +69,7 @@ class BreedingEndWorkflowTests(TestCase):
         self.assertContains(response, "Destination Cage Filter")
         self.assertContains(response, "Create New Cage")
         self.assertContains(response, f"select_field=destination_cage_{self.sire.pk}")
-        self.assertContains(response, "purpose=holding")
+        self.assertContains(response, "cage_use=holding")
         self.assertContains(response, "Euthanized")
         self.assertNotContains(response, "Exception: no current cage")
 

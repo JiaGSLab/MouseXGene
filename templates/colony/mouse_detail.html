@@ -18,6 +18,9 @@
         {% if can_end_mouse %}
             <a class="button button-danger" href="{% url 'mice:mouse_end' mouse.pk %}">End / Euthanize Mouse</a>
         {% endif %}
+        {% if can_restore_mouse %}
+            <a class="button" href="{% url 'mice:mouse_restore' mouse.pk %}">Restore Mouse</a>
+        {% endif %}
         <a class="button" href="{% url 'mice:mouse_pedigree' mouse.pk %}">View Pedigree</a>
     </div>
 </section>

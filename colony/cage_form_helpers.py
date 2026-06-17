@@ -95,6 +95,8 @@ def filter_active_cage_choices_payload(
             {
                 "id": cage.pk,
                 "cage_id": cage.cage_id,
+                "cage_use": cage.cage_use,
+                "cage_use_label": cage.get_cage_use_display(),
                 "purpose": cage.purpose,
                 "purpose_label": cage.get_purpose_display(),
                 "cage_type": cage.cage_type,

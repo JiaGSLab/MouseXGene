@@ -33,7 +33,7 @@ class IdUniquenessTests(TestCase):
             validate_cage_id_available("old-cage-1")
 
     def test_cage_form_rejects_reused_id(self):
-        form = CageForm(data={"cage_id": "OLD-CAGE-1", "purpose": Cage.Purpose.HOLDING, "status": Cage.Status.ACTIVE})
+        form = CageForm(data={"cage_id": "OLD-CAGE-1", "cage_use": Cage.CageUse.HOLDING, "status": Cage.Status.ACTIVE})
         self.assertFalse(form.is_valid())
         self.assertIn("already used", str(form.errors))
 
@@ -58,8 +58,7 @@ class IdUniquenessTests(TestCase):
         form = CageForm(
             data={
                 "cage_id": self.retired_cage.cage_id,
-                "cage_type": self.retired_cage.cage_type,
-                "purpose": self.retired_cage.purpose,
+                "cage_use": self.retired_cage.cage_use,
                 "status": self.retired_cage.status,
             },
             instance=self.retired_cage,

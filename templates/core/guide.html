@@ -237,7 +237,7 @@
             <li>导入前先下载系统模板，不要改列名。</li>
             <li>Mouse UID 和 cage ID 必须唯一。</li>
             <li>日期统一使用 <code>YYYY-MM-DD</code>。</li>
-            <li>status、sex、cage type、purpose 等字段要使用系统允许的值。</li>
+            <li>status、sex、cage use 等字段要使用系统允许的值。</li>
             <li>如果导入自动创建了 project、strain line 或 cage，导入后要回头检查这些占位数据是否合理。</li>
             <li>不确定时，先找 manager 或 admin 确认再导入。</li>
         </ul>
@@ -402,7 +402,7 @@
         <ul class="guide-list">
             <li>Create the cage before assigning mice whenever possible.</li>
             <li>Keep <strong>Room</strong>, <strong>Rack</strong>, and <strong>Position</strong> formats consistent, otherwise filtering becomes messy.</li>
-            <li>Each real cage position keeps one <strong>Cage ID</strong>. Status, purpose, room, rack, and position may change, but the Cage ID stays the same and must not be reused for another cage position.</li>
+            <li>Each real cage position keeps one <strong>Cage ID</strong>. Status, cage use, room, rack, and position may change, but the Cage ID stays the same and must not be reused for another cage position.</li>
             <li><strong>Current Mice</strong> on cage detail is the live occupancy view. Mouse UIDs and breeding codes are clickable.</li>
             <li>Do not hard-delete normal cages. Use inactive or retired status when a cage is no longer in routine use.</li>
         </ul>
@@ -513,7 +513,7 @@
             <li>Download the system template first and do not rename columns.</li>
             <li>Mouse UID and cage ID must be unique.</li>
             <li>Use <code>YYYY-MM-DD</code> dates.</li>
-            <li>Use allowed system values for status, sex, cage type, and purpose.</li>
+            <li>Use allowed system values for status, sex, and cage use.</li>
             <li>If import creates placeholder projects, strain lines, or cages, review them afterward.</li>
             <li>When unsure, ask a manager or admin before importing.</li>
         </ul>

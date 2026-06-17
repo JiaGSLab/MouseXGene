@@ -239,6 +239,76 @@ a.link-primary:hover {
     font-size: var(--font-section);
 }
 
+.cage-detail-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.cage-detail--breeding .cage-detail-header {
+    padding: 14px 16px;
+    border: 1px solid #ead8a4;
+    border-radius: var(--radius);
+    background: #fff8e7;
+}
+
+.cage-detail--breeding .card {
+    border-color: #eadfbf;
+    background: #fffdf5;
+}
+
+.cage-purpose-pill,
+.cage-meta-pill {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid #d6deea;
+    background: #f8fbff;
+    color: #465c76;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.cage-purpose-pill--breeding {
+    border-color: #d9b76e;
+    background: #fff2c2;
+    color: #775317;
+}
+
+.cage-purpose-pill--holding {
+    border-color: #c7d7eb;
+    background: #eef5fc;
+    color: #405f82;
+}
+
+.cage-purpose-pill--experiment {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.cage-purpose-pill--weaning {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.cage-purpose-pill--quarantine {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.cage-purpose-pill--retired {
+    border-color: #d1d5db;
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
 .metric {
     font-size: 1.8rem;
     margin: 8px 0 0;
@@ -593,7 +663,8 @@ body.col-resize-active * {
     vertical-align: top;
 }
 
-.col-purpose {
+.col-purpose,
+.col-cage-use {
     font-weight: 500;
 }
 

@@ -101,22 +101,13 @@
         </div>
 
         <div class="form-row">
-            <label for="{{ form.cage_type.id_for_label }}">
-                {{ form.cage_type.label }}{% if form.cage_type.field.required %}<span class="required-mark">*</span>{% endif %}
+            <label for="{{ form.cage_use.id_for_label }}">
+                {{ form.cage_use.label }}{% if form.cage_use.field.required %}<span class="required-mark">*</span>{% endif %}
             </label>
-            {{ form.cage_type }}
-            {% if form.cage_type.errors %}
-                <div class="field-error">{% for error in form.cage_type.errors %}<div>{{ error }}</div>{% endfor %}</div>
-            {% endif %}
-        </div>
-
-        <div class="form-row">
-            <label for="{{ form.purpose.id_for_label }}">
-                {{ form.purpose.label }}{% if form.purpose.field.required %}<span class="required-mark">*</span>{% endif %}
-            </label>
-            {{ form.purpose }}
-            {% if form.purpose.errors %}
-                <div class="field-error">{% for error in form.purpose.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {{ form.cage_use }}
+            {% if form.cage_use.help_text %}<small class="muted">{{ form.cage_use.help_text }}</small>{% endif %}
+            {% if form.cage_use.errors %}
+                <div class="field-error">{% for error in form.cage_use.errors %}<div>{{ error }}</div>{% endfor %}</div>
             {% endif %}
         </div>
 

@@ -153,7 +153,7 @@
                                 <div class="end-cage-row-actions">
                                     <a
                                         class="button button-light button-small end-create-cage-link"
-                                        href="{% url 'colony:cage_create' %}?next={{ request.get_full_path|urlencode }}&select_field={{ row.destination.html_name|urlencode }}&purpose=holding&cage_type=standard&status=active"
+                                        href="{% url 'colony:cage_create' %}?next={{ request.get_full_path|urlencode }}&select_field={{ row.destination.html_name|urlencode }}&cage_use=holding&status=active"
                                         data-select-name="{{ row.destination.html_name }}"
                                     >Create New Cage</a>
                                 </div>

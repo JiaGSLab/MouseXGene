@@ -54,7 +54,7 @@ class Breeding(ActorStampedModel):
         ]
 
     def clean(self) -> None:
-        if not self.cage_id:
+        if not self.cage_id and not getattr(self, "_allow_pending_auto_cage", False):
             raise ValidationError("cage is required.")
         if self.male and self.male.sex != Mouse.Sex.MALE:
             raise ValidationError("male must be a male mouse.")

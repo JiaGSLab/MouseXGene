@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from django.db.models import Count, F, Min, Q, QuerySet, Value
+from django.db.models import Case, CharField, Count, F, Min, Q, QuerySet, Value, When
 from django.db.models.functions import Coalesce, Lower
 from django.http import HttpRequest
 from django.urls import reverse
@@ -141,6 +141,20 @@ def _prepare_cage_list_sort(qs: QuerySet) -> QuerySet:
     )
 
 
+def _prepare_cage_use_sort(qs: QuerySet) -> QuerySet:
+    return qs.annotate(
+        _sort_cage_use=Case(
+            When(purpose="retired", then=Value("retired")),
+            When(Q(purpose="breeding") | Q(cage_type="breeding"), then=Value("breeding")),
+            When(cage_type="weaning", then=Value("weaning")),
+            When(purpose="experiment", then=Value("experiment")),
+            When(cage_type="quarantine", then=Value("quarantine")),
+            default=Value("holding"),
+            output_field=CharField(),
+        )
+    )
+
+
 def _prepare_mouse_breeding_sort(qs: QuerySet) -> QuerySet:
     active = Q(sired_breedings__active=True)
     active_dam = Q(maternal_breedings_primary__active=True)
@@ -160,6 +174,13 @@ CAGE_LIST_SORT = ListSortRegistry(
         "room": SortColumn("room", SortKind.TEXT, ("room",), tie_breaker=("cage_id",)),
         "rack": SortColumn("rack", SortKind.TEXT, ("rack",), tie_breaker=("cage_id",)),
         "position": SortColumn("position", SortKind.TEXT, ("position",), tie_breaker=("cage_id",)),
+        "cage_use": SortColumn(
+            "cage_use",
+            SortKind.ENUM,
+            ("_sort_cage_use",),
+            tie_breaker=("cage_id",),
+            prepare=_prepare_cage_use_sort,
+        ),
         "cage_type": SortColumn("cage_type", SortKind.ENUM, ("cage_type",), tie_breaker=("cage_id",)),
         "purpose": SortColumn("purpose", SortKind.ENUM, ("purpose",), tie_breaker=("cage_id",)),
         "mouse_count": SortColumn(

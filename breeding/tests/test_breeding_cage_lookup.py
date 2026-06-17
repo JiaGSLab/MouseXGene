@@ -92,6 +92,44 @@ class BreedingCageLookupTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["cage"], self.cage_b)
 
+    def test_form_auto_creates_breeding_cage(self):
+        user = get_user_model().objects.create_user(username="cage_auto_user", password="x")
+        strain = StrainLine.objects.create(line_name="AutoCageStrain", name="AutoCageStrain")
+        project = Project.objects.create(name="AutoCageProject", owner=user)
+        sire = Mouse.objects.create(
+            mouse_uid="M-AUTO-CAGE-SIRE",
+            sex=Mouse.Sex.MALE,
+            project=project,
+            strain_line=strain,
+        )
+        dam = Mouse.objects.create(
+            mouse_uid="M-AUTO-CAGE-DAM",
+            sex=Mouse.Sex.FEMALE,
+            project=project,
+            strain_line=strain,
+        )
+        form = BreedingForm(
+            data={
+                "sire": sire.pk,
+                "dams": [dam.pk],
+                "cage_assignment_mode": BreedingForm.CageAssignmentMode.AUTO,
+                "auto_cage_id": "AUTO-BR-CAGE-1",
+                "breeding_type": "pair",
+                "start_date": "2026-01-01",
+                "status": "setup",
+                "active": True,
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        breeding = form.save()
+
+        self.assertEqual(breeding.cage.cage_id, "AUTO-BR-CAGE-1")
+        self.assertEqual(breeding.cage.cage_type, Cage.CageType.BREEDING)
+        self.assertEqual(breeding.cage.purpose, Cage.Purpose.BREEDING)
+        self.assertEqual(breeding.cage.project_id, project.pk)
+        self.assertEqual(form.created_auto_cage, breeding.cage)
+
     def test_form_warns_but_allows_cross_project_breeders(self):
         user_a = get_user_model().objects.create_user(username="cross_project_a", first_name="Alice")
         user_b = get_user_model().objects.create_user(username="cross_project_b", first_name="Bob")

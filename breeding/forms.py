@@ -9,6 +9,13 @@ from django.utils import timezone
 from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
 from colony.models import Cage, Mouse
 from core.models import format_project_owner_label
+from .cage_autocreate import (
+    create_auto_cage,
+    infer_project_for_breeding_cage,
+    infer_shared_colony,
+    infer_source_cage,
+    validate_requested_auto_cage_id,
+)
 from .consistency import active_breedings_for_mouse
 from .models import Breeding, BreedingExtraFemale, Litter, LitterPup
 
@@ -40,11 +47,33 @@ def resolve_cage_from_lookup(lookup: str) -> tuple[Cage | None, str | None]:
 
 
 class BreedingForm(forms.ModelForm):
+    class CageAssignmentMode:
+        AUTO = "auto"
+        EXISTING = "existing"
+
+    CAGE_ASSIGNMENT_CHOICES = (
+        (CageAssignmentMode.AUTO, "Create a new cage automatically"),
+        (CageAssignmentMode.EXISTING, "Use an existing cage"),
+    )
+
+    cage_assignment_mode = forms.ChoiceField(
+        label="Cage Assignment",
+        choices=CAGE_ASSIGNMENT_CHOICES,
+        initial=CageAssignmentMode.AUTO,
+        widget=forms.RadioSelect,
+        required=False,
+    )
     cage_lookup = forms.CharField(
         max_length=64,
         required=False,
         label="Or enter cage ID",
         help_text="Partial cage ID is supported. Must match an existing active cage.",
+    )
+    auto_cage_id = forms.CharField(
+        max_length=64,
+        required=False,
+        label="New cage ID",
+        help_text="Optional. Leave blank to generate one automatically.",
     )
     male = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
     female_1 = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
@@ -91,11 +120,14 @@ class BreedingForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._auto_generated_breeding_code = False
+        self.created_auto_cage: Cage | None = None
         self.fields["breeding_code"].help_text = "Example: BR-2026-001 or Lyz2xTet2-01."
         self.fields["breeding_code"].required = False
         self.fields["breeding_code"].widget.attrs.update(
             {"placeholder": "Optional; auto-generated if left blank."}
         )
+        if self.instance.pk:
+            self.fields["cage_assignment_mode"].initial = self.CageAssignmentMode.EXISTING
         self.fields["cage"].queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
         self.fields["cage"].required = False
         male_qs = Mouse.objects.filter(sex=Mouse.Sex.MALE).order_by("mouse_uid")
@@ -285,19 +317,53 @@ class BreedingForm(forms.ModelForm):
 
         cage = cleaned_data.get("cage")
         lookup = (cleaned_data.get("cage_lookup") or "").strip()
-        if lookup:
-            resolved, err = resolve_cage_from_lookup(lookup)
-            if err:
-                self.add_error("cage_lookup", err)
-            elif resolved is not None:
-                if resolved.status != Cage.Status.ACTIVE:
-                    self.add_error("cage_lookup", f"Cage {resolved.cage_id} is not active.")
-                else:
-                    cleaned_data["cage"] = resolved
-        if not self.errors.get("cage_lookup") and not cleaned_data.get("cage"):
-            self.add_error("cage", "Select a cage or enter a cage ID.")
+        cage_assignment_mode = cleaned_data.get("cage_assignment_mode")
+        if not cage_assignment_mode:
+            cage_assignment_mode = self.CageAssignmentMode.EXISTING if cage or lookup else self.CageAssignmentMode.AUTO
+        cleaned_data["cage_assignment_mode"] = cage_assignment_mode
+        if cage_assignment_mode == self.CageAssignmentMode.AUTO:
+            self.instance._allow_pending_auto_cage = True
+            requested_id = (cleaned_data.get("auto_cage_id") or "").strip()
+            if requested_id:
+                try:
+                    cleaned_data["auto_cage_id"] = validate_requested_auto_cage_id(requested_id)
+                except ValueError as exc:
+                    self.add_error("auto_cage_id", str(exc))
+            cleaned_data["cage"] = None
+        else:
+            self.instance._allow_pending_auto_cage = False
+            if lookup:
+                resolved, err = resolve_cage_from_lookup(lookup)
+                if err:
+                    self.add_error("cage_lookup", err)
+                elif resolved is not None:
+                    if resolved.status != Cage.Status.ACTIVE:
+                        self.add_error("cage_lookup", f"Cage {resolved.cage_id} is not active.")
+                    else:
+                        cleaned_data["cage"] = resolved
+            if not self.errors.get("cage_lookup") and not cleaned_data.get("cage"):
+                self.add_error("cage", "Select a cage, enter a cage ID, or choose automatic cage creation.")
 
         return cleaned_data
+
+    def _create_auto_breeding_cage(self) -> Cage:
+        selected_mice = self._selected_mice()
+        sire = self.cleaned_data.get("male")
+        start_date = self.cleaned_data.get("start_date") or timezone.localdate()
+        project = infer_project_for_breeding_cage(selected_mice, preferred=sire)
+        colony = infer_shared_colony(selected_mice, project=project)
+        source_cage = infer_source_cage(selected_mice, preferred=sire)
+        return create_auto_cage(
+            prefix="CAGE-BR",
+            requested_cage_id=self.cleaned_data.get("auto_cage_id") or "",
+            cage_type=Cage.CageType.BREEDING,
+            purpose=Cage.Purpose.BREEDING,
+            created_date=start_date,
+            project=project,
+            colony=colony,
+            source_cage=source_cage,
+            notes=f"Auto-created for breeding {self.cleaned_data.get('breeding_code') or 'new breeding'}.",
+        )
 
     def save(self, commit=True):
         if not (self.cleaned_data.get("breeding_code") or "").strip():
@@ -312,6 +378,11 @@ class BreedingForm(forms.ModelForm):
         for _attempt in range(BREEDING_CODE_RETRY_LIMIT):
             try:
                 with transaction.atomic():
+                    if self.cleaned_data.get("cage_assignment_mode") == self.CageAssignmentMode.AUTO:
+                        auto_cage = self._create_auto_breeding_cage()
+                        self.cleaned_data["cage"] = auto_cage
+                        self.instance.cage = auto_cage
+                        self.created_auto_cage = auto_cage
                     breeding = super().save(commit=True)
                 break
             except IntegrityError as exc:
@@ -552,6 +623,15 @@ LitterPupFormSet = inlineformset_factory(
 
 
 class WeanLitterForm(forms.Form):
+    class CageAssignmentMode:
+        AUTO = "auto"
+        EXISTING = "existing"
+
+    CAGE_ASSIGNMENT_CHOICES = (
+        (CageAssignmentMode.AUTO, "Create a new cage automatically"),
+        (CageAssignmentMode.EXISTING, "Use an existing cage"),
+    )
+
     class ParentageMode:
         BREEDING_CAGE = "breeding_cage"
         SELECT_PARENTS = "select_parents"
@@ -593,6 +673,19 @@ class WeanLitterForm(forms.Form):
         widget=forms.CheckboxSelectMultiple,
         help_text="Select one dam if known, or multiple dams when the exact mother is unknown.",
     )
+    male_cage_assignment_mode = forms.ChoiceField(
+        label="Male cage assignment",
+        choices=CAGE_ASSIGNMENT_CHOICES,
+        initial=CageAssignmentMode.AUTO,
+        widget=forms.RadioSelect,
+        required=False,
+    )
+    male_auto_cage_id = forms.CharField(
+        max_length=64,
+        required=False,
+        label="New male cage ID",
+        help_text="Optional. Leave blank to generate one automatically.",
+    )
     male_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
         label="Male pups cage",
@@ -603,6 +696,19 @@ class WeanLitterForm(forms.Form):
         required=False,
         label="Or enter male cage ID",
         help_text="Partial cage ID supported. Required when weaning male pups.",
+    )
+    female_cage_assignment_mode = forms.ChoiceField(
+        label="Female cage assignment",
+        choices=CAGE_ASSIGNMENT_CHOICES,
+        initial=CageAssignmentMode.AUTO,
+        widget=forms.RadioSelect,
+        required=False,
+    )
+    female_auto_cage_id = forms.CharField(
+        max_length=64,
+        required=False,
+        label="New female cage ID",
+        help_text="Optional. Leave blank to generate one automatically.",
     )
     female_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
@@ -769,22 +875,67 @@ class WeanLitterForm(forms.Form):
         if male_pups + female_pups < 1:
             self.add_error("male_pup_count", "Enter at least one male or female pup to wean.")
 
-        male_cage = _resolve_wean_cage_assignment(
-            self,
-            cleaned_data,
-            cage_field="male_cage",
-            lookup_field="male_cage_lookup",
-        )
-        female_cage = _resolve_wean_cage_assignment(
-            self,
-            cleaned_data,
-            cage_field="female_cage",
-            lookup_field="female_cage_lookup",
-        )
-        if self.pup_male_count > 0 and male_cage is None and not self.errors.get("male_cage_lookup"):
-            self.add_error("male_cage", "Select a cage for male pups or enter a male cage ID.")
-        if self.pup_female_count > 0 and female_cage is None and not self.errors.get("female_cage_lookup"):
-            self.add_error("female_cage", "Select a cage for female pups or enter a female cage ID.")
+        male_mode = cleaned_data.get("male_cage_assignment_mode")
+        female_mode = cleaned_data.get("female_cage_assignment_mode")
+        if not male_mode:
+            male_mode = (
+                self.CageAssignmentMode.EXISTING
+                if cleaned_data.get("male_cage") or (cleaned_data.get("male_cage_lookup") or "").strip()
+                else self.CageAssignmentMode.AUTO
+            )
+        if not female_mode:
+            female_mode = (
+                self.CageAssignmentMode.EXISTING
+                if cleaned_data.get("female_cage") or (cleaned_data.get("female_cage_lookup") or "").strip()
+                else self.CageAssignmentMode.AUTO
+            )
+        cleaned_data["male_cage_assignment_mode"] = male_mode
+        cleaned_data["female_cage_assignment_mode"] = female_mode
+        male_cage = None
+        female_cage = None
+        if self.pup_male_count > 0:
+            if male_mode == self.CageAssignmentMode.AUTO:
+                requested_id = (cleaned_data.get("male_auto_cage_id") or "").strip()
+                if requested_id:
+                    try:
+                        cleaned_data["male_auto_cage_id"] = validate_requested_auto_cage_id(requested_id)
+                    except ValueError as exc:
+                        self.add_error("male_auto_cage_id", str(exc))
+            else:
+                male_cage = _resolve_wean_cage_assignment(
+                    self,
+                    cleaned_data,
+                    cage_field="male_cage",
+                    lookup_field="male_cage_lookup",
+                )
+                if male_cage is None and not self.errors.get("male_cage_lookup"):
+                    self.add_error("male_cage", "Select a cage for male pups or enter a male cage ID.")
+        if self.pup_female_count > 0:
+            if female_mode == self.CageAssignmentMode.AUTO:
+                requested_id = (cleaned_data.get("female_auto_cage_id") or "").strip()
+                if requested_id:
+                    try:
+                        cleaned_data["female_auto_cage_id"] = validate_requested_auto_cage_id(requested_id)
+                    except ValueError as exc:
+                        self.add_error("female_auto_cage_id", str(exc))
+            else:
+                female_cage = _resolve_wean_cage_assignment(
+                    self,
+                    cleaned_data,
+                    cage_field="female_cage",
+                    lookup_field="female_cage_lookup",
+                )
+                if female_cage is None and not self.errors.get("female_cage_lookup"):
+                    self.add_error("female_cage", "Select a cage for female pups or enter a female cage ID.")
+        if (
+            self.pup_male_count > 0
+            and self.pup_female_count > 0
+            and male_mode == self.CageAssignmentMode.AUTO
+            and female_mode == self.CageAssignmentMode.AUTO
+            and (cleaned_data.get("male_auto_cage_id") or "")
+            and cleaned_data.get("male_auto_cage_id") == cleaned_data.get("female_auto_cage_id")
+        ):
+            self.add_error("female_auto_cage_id", "Male and female pups need different cage IDs.")
         if (
             self.pup_male_count > 0
             and self.pup_female_count > 0

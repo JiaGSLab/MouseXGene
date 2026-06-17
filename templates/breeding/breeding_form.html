@@ -101,66 +101,90 @@
             {% if field.name == 'male' or field.name == 'female_1' or field.name == 'female_2' or field.name == 'extra_females' %}
                 {# Hidden: legacy compatibility fields, replaced by dynamic breeder-member rows #}
                 {{ field.as_hidden }}
-            {% elif field.name == 'sire' or field.name == 'dams' or field.name == 'cage_lookup' %}
+            {% elif field.name == 'sire' or field.name == 'dams' or field.name == 'cage_lookup' or field.name == 'cage_assignment_mode' or field.name == 'auto_cage_id' %}
                 {# Rendered in dedicated blocks #}
             {% elif field.name == 'cage' %}
                 <div class="card card-nested">
                     <h2>Cage</h2>
-                    <p class="muted small-print">Filter by project and/or owner, then pick a cage or type a cage ID (partial match supported).</p>
-                    <div class="filter-grid">
-                        <div class="form-row">
-                            <label for="id_breeding_cage_project_filter">Filter by project</label>
-                            <select id="id_breeding_cage_project_filter" class="filter-control">
-                                <option value="">All projects</option>
-                                {% for project in cage_project_options %}
-                                    <option value="{{ project.id }}">{{ project.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="form-row">
-                            <label for="id_breeding_cage_owner_filter">Filter by owner</label>
-                            <select id="id_breeding_cage_owner_filter" class="filter-control">
-                                <option value="">All owners</option>
-                                {% for owner in cage_owner_options %}
-                                    <option value="{{ owner.id }}">{{ owner.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                        <button type="button" class="button button-light" id="breeding-cage-filter-apply">Refresh list</button>
-                        <span class="muted small-print" id="breeding-cage-filter-status">Showing all active cages.</span>
-                    </div>
+                    <p class="muted small-print">Create a new breeding cage automatically, or choose an existing active cage.</p>
                     <div class="form-row">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.errors %}
+                        <label>{{ form.cage_assignment_mode.label }}</label>
+                        {{ form.cage_assignment_mode }}
+                        {% if form.cage_assignment_mode.errors %}
                             <div class="field-error">
-                                {% for error in field.errors %}
+                                {% for error in form.cage_assignment_mode.errors %}
                                     <div>{{ error }}</div>
                                 {% endfor %}
                             </div>
                         {% endif %}
                     </div>
-                    <div class="form-row">
-                        <label for="{{ form.cage_lookup.id_for_label }}">{{ form.cage_lookup.label }}</label>
-                        {{ form.cage_lookup }}
-                        {% if form.cage_lookup.help_text %}
-                            <small class="muted">{{ form.cage_lookup.help_text }}</small>
+                    <div class="form-row" id="breeding-auto-cage-row">
+                        <label for="{{ form.auto_cage_id.id_for_label }}">{{ form.auto_cage_id.label }}</label>
+                        {{ form.auto_cage_id }}
+                        {% if form.auto_cage_id.help_text %}
+                            <small class="muted">{{ form.auto_cage_id.help_text }}</small>
                         {% endif %}
-                        <p class="muted small-print" id="breeding-cage-lookup-status" aria-live="polite"></p>
-                        <p class="muted small-print" id="breeding-cage-selected-summary" aria-live="polite"></p>
-                        {% if form.cage_lookup.errors %}
+                        {% if form.auto_cage_id.errors %}
                             <div class="field-error">
-                                {% for error in form.cage_lookup.errors %}
+                                {% for error in form.auto_cage_id.errors %}
                                     <div>{{ error }}</div>
                                 {% endfor %}
                             </div>
                         {% endif %}
                     </div>
-                    <small class="muted">
-                        Need a new cage? <a href="{% url 'colony:cage_create' %}" target="_blank" rel="noopener">Create cage</a>, then return and select it.
-                    </small>
+                    <div id="breeding-existing-cage-fields">
+                        <div class="filter-grid">
+                            <div class="form-row">
+                                <label for="id_breeding_cage_project_filter">Filter by project</label>
+                                <select id="id_breeding_cage_project_filter" class="filter-control">
+                                    <option value="">All projects</option>
+                                    {% for project in cage_project_options %}
+                                        <option value="{{ project.id }}">{{ project.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <label for="id_breeding_cage_owner_filter">Filter by owner</label>
+                                <select id="id_breeding_cage_owner_filter" class="filter-control">
+                                    <option value="">All owners</option>
+                                    {% for owner in cage_owner_options %}
+                                        <option value="{{ owner.id }}">{{ owner.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                            <button type="button" class="button button-light" id="breeding-cage-filter-apply">Refresh list</button>
+                            <span class="muted small-print" id="breeding-cage-filter-status">Showing all active cages.</span>
+                        </div>
+                        <div class="form-row">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="field-error">
+                                    {% for error in field.errors %}
+                                        <div>{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <div class="form-row">
+                            <label for="{{ form.cage_lookup.id_for_label }}">{{ form.cage_lookup.label }}</label>
+                            {{ form.cage_lookup }}
+                            {% if form.cage_lookup.help_text %}
+                                <small class="muted">{{ form.cage_lookup.help_text }}</small>
+                            {% endif %}
+                            <p class="muted small-print" id="breeding-cage-lookup-status" aria-live="polite"></p>
+                            <p class="muted small-print" id="breeding-cage-selected-summary" aria-live="polite"></p>
+                            {% if form.cage_lookup.errors %}
+                                <div class="field-error">
+                                    {% for error in form.cage_lookup.errors %}
+                                        <div>{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             {% else %}
                 <div class="form-row">
@@ -525,10 +549,42 @@
     const lookupStatus = document.getElementById("breeding-cage-lookup-status");
     const selectedSummary = document.getElementById("breeding-cage-selected-summary");
     const breedingForm = document.getElementById("breeding-form");
+    const modeRadios = Array.from(document.querySelectorAll('input[name="cage_assignment_mode"]'));
+    const existingCageFields = document.getElementById("breeding-existing-cage-fields");
+    const autoCageRow = document.getElementById("breeding-auto-cage-row");
+    const autoCageInput = document.getElementById("id_auto_cage_id");
     if (!cageSelect || !window.MXGPicker) return;
 
     let cages = [];
     const selectedCageId = "{{ form.cage.value|default:''|escapejs }}";
+
+    function cageMode() {
+        return modeRadios.find((radio) => radio.checked)?.value || "auto";
+    }
+
+    function syncCageMode() {
+        const useExisting = cageMode() === "existing";
+        if (existingCageFields) existingCageFields.hidden = !useExisting;
+        if (autoCageRow) autoCageRow.hidden = useExisting;
+        if (cageSelect) cageSelect.disabled = !useExisting;
+        if (cageLookupInput) cageLookupInput.disabled = !useExisting;
+        if (projectFilter) projectFilter.disabled = !useExisting;
+        if (ownerFilter) ownerFilter.disabled = !useExisting;
+        if (applyFilterBtn) applyFilterBtn.disabled = !useExisting;
+        if (autoCageInput) autoCageInput.disabled = useExisting;
+        if (!useExisting) {
+            if (lookupStatus) {
+                lookupStatus.textContent = "";
+                lookupStatus.className = "muted small-print";
+            }
+            if (selectedSummary) {
+                selectedSummary.textContent = "";
+                selectedSummary.className = "muted small-print";
+            }
+        } else {
+            updateSelectedSummary();
+        }
+    }
 
     function currentFilters() {
         return {
@@ -538,6 +594,7 @@
     }
 
     function selectedCage() {
+        if (cageMode() !== "existing") return null;
         return MXGPicker.findCage(cages, cageSelect.value);
     }
 
@@ -627,6 +684,7 @@
     applyFilterBtn?.addEventListener("click", () => reloadCages());
     projectFilter?.addEventListener("change", reloadCagesDebounced);
     ownerFilter?.addEventListener("change", reloadCagesDebounced);
+    modeRadios.forEach((radio) => radio.addEventListener("change", syncCageMode));
     cageLookupInput?.addEventListener("input", syncLookupToSelect);
     cageLookupInput?.addEventListener("change", syncLookupToSelect);
     cageSelect.addEventListener("change", () => {
@@ -640,6 +698,7 @@
         updateSelectedSummary();
     });
     breedingForm?.addEventListener("submit", (event) => {
+        if (cageMode() !== "existing") return;
         const warning = selectedPurposeWarning();
         if (!warning) return;
         if (!window.confirm(`${warning}. Save breeding anyway?`)) {
@@ -648,6 +707,7 @@
     });
     reloadCages();
     syncLookupToSelect();
+    syncCageMode();
 })();
 </script>
 {% endblock %}

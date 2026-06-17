@@ -4,9 +4,15 @@
 {% block title %}Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
 
 {% block content %}
-<section class="page-header page-header-row">
+<div class="cage-detail {% if is_breeding_cage %}cage-detail--breeding{% endif %}">
+<section class="page-header page-header-row cage-detail-header">
     <div>
-        <h1>Cage {{ cage.cage_id }}</h1>
+        <div class="cage-detail-title">
+            <h1>Cage {{ cage.cage_id }}</h1>
+            {% if is_breeding_cage %}
+                <span class="cage-purpose-pill cage-purpose-pill--breeding">Breeding cage</span>
+            {% endif %}
+        </div>
         <p class="muted">Cage details and current occupancy.</p>
     </div>
     <div class="action-links">
@@ -36,8 +42,8 @@
             <dt>Created Date</dt><dd>{{ cage.created_date|default:"-" }}</dd>
             <dt>Rack</dt><dd>{{ cage.rack|default:"-" }}</dd>
             <dt>Position</dt><dd>{{ cage.position|default:"-" }}</dd>
-            <dt>Cage Type</dt><dd>{{ cage.get_cage_type_display }}</dd>
-            <dt>Purpose</dt><dd>{{ cage.get_purpose_display }}</dd>
+            <dt>Cage Use</dt>
+            <dd><span class="cage-purpose-pill cage-purpose-pill--{{ cage.cage_use }}">{{ cage.get_cage_use_display }}</span></dd>
             <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
             <dt>Home Project</dt>
             <dd>
@@ -202,6 +208,7 @@
 </section>
 
 {% include "includes/record_timeline.html" with created_at=cage.created_at updated_at=cage.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by extra_date_label="Created date (cage card)" extra_date_value=cage.created_date only %}
+</div>
 {% endblock %}
 
 {% block extra_scripts %}

@@ -29,10 +29,10 @@
         {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search cage_id" class="search-input filter-control">
-            <select name="purpose" class="filter-control">
-                <option value="">All Purposes</option>
-                {% for value, label in purpose_options %}
-                    <option value="{{ value }}" {% if purpose == value %}selected{% endif %}>{{ label }}</option>
+            <select name="cage_use" class="filter-control">
+                <option value="">All Cage Uses</option>
+                {% for value, label in cage_use_options %}
+                    <option value="{{ value }}" {% if cage_use == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
             <select name="status" class="filter-control">
@@ -76,12 +76,6 @@
                     <option value="{{ value }}" {% if rack == value %}selected{% endif %}>{{ value }}</option>
                 {% endfor %}
             </select>
-            <select name="cage_type" class="filter-control">
-                <option value="">All Cage Types</option>
-                {% for value, label in cage_type_options %}
-                    <option value="{{ value }}" {% if cage_type == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-            </select>
             <select name="include_inactive" class="filter-control">
                 <option value="">Active Only</option>
                 <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
@@ -122,8 +116,7 @@
                 {% sort_th "room" "Room" %}
                 {% sort_th "rack" "Rack" %}
                 {% sort_th "position" "Position" %}
-                {% sort_th "cage_type" "Cage Type" %}
-                {% sort_th "purpose" "Purpose" extra_class="col-purpose" %}
+                {% sort_th "cage_use" "Cage Use" extra_class="col-cage-use" %}
                 {% sort_th "mouse_count" "# Mice" extra_class="col-num" %}
                 {% sort_th "project" "Project" %}
                 {% sort_th "owner" "Owner" %}
@@ -137,8 +130,9 @@
                 <td>{{ cage.room|default:"-" }}</td>
                 <td>{{ cage.rack|default:"-" }}</td>
                 <td>{{ cage.position|default:"-" }}</td>
-                <td>{{ cage.get_cage_type_display }}</td>
-                <td class="col-purpose">{{ cage.get_purpose_display }}</td>
+                <td class="col-cage-use">
+                    <span class="cage-purpose-pill cage-purpose-pill--{{ cage.cage_use }}">{{ cage.get_cage_use_display }}</span>
+                </td>
                 <td class="col-num">{{ cage.current_mouse_count|default:"0" }}</td>
                 <td class="cage-projects-cell">
                     {% for pr in cage.project_rows %}
@@ -163,7 +157,7 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="10" class="empty-row">No cages found.</td>
+                <td colspan="9" class="empty-row">No cages found.</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -180,10 +180,12 @@ class CagePickerApiTests(TestCase):
         self.assertIn("PICK-MATCH", cage_ids)
         self.assertNotIn("PICK-OTHER", cage_ids)
 
-    def test_cage_picker_includes_purpose_metadata(self):
+    def test_cage_picker_includes_cage_use_metadata(self):
         response = self.client.get(reverse("colony:cage_picker_api"), {"q": "PICK-EMPTY"})
         self.assertEqual(response.status_code, 200)
         row = response.json()["cages"][0]
         self.assertEqual(row["cage_id"], "PICK-EMPTY")
+        self.assertEqual(row["cage_use"], Cage.CageUse.HOLDING)
+        self.assertEqual(row["cage_use_label"], "Holding")
         self.assertIn("purpose", row)
         self.assertIn("purpose_label", row)
