@@ -11,7 +11,9 @@
     <div class="action-links">
         <a class="link-primary" href="{% url 'colony:strain_line_list' %}">Back to list</a>
         <a class="button button-secondary" href="{% url 'mice:mouse_create' %}?strain_line_id={{ line.pk }}">New mouse</a>
-        <a class="button" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a>
+        {% if can_edit_line %}
+            <a class="button" href="{% url 'colony:strain_line_edit' line.pk %}">Edit</a>
+        {% endif %}
     </div>
 </section>
 

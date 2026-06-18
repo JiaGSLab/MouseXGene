@@ -12,9 +12,9 @@ UPDATE colony_strainline
 SET
   expected_loci_template = E'Gpr82flox\nlyz2 Cre\nSPP1flox',
   expected_loci_config = '[
-    {"locus_name": "Gpr82flox", "locus_type": "flox", "chromosome_type": "autosomal"},
-    {"locus_name": "lyz2 Cre", "locus_type": "cre_transgene", "chromosome_type": "autosomal"},
-    {"locus_name": "SPP1flox", "locus_type": "flox", "chromosome_type": "autosomal"}
+    {"locus_name": "Gpr82flox", "locus_type": "floxed_allele", "chromosome_type": "autosomal"},
+    {"locus_name": "lyz2 Cre", "locus_type": "cre_ki", "chromosome_type": "autosomal"},
+    {"locus_name": "SPP1flox", "locus_type": "floxed_allele", "chromosome_type": "autosomal"}
   ]'::jsonb,
   notes = 'Merged Gpr82 flox het/hom lines on 2026-05-28.',
   updated_at = NOW()

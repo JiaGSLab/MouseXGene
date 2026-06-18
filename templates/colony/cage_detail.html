@@ -28,6 +28,9 @@
                 <a class="button button-danger" href="{% url 'colony:cage_retire' cage.pk %}">Retire Cage</a>
             {% endif %}
         {% endif %}
+        {% if can_restore_cage %}
+            <a class="button" href="{% url 'colony:cage_restore' cage.pk %}">Restore Cage</a>
+        {% endif %}
         <a class="button button-light" href="{% url 'colony:cage_print' cage.pk %}">Print Cage Card</a>
         <a class="button button-light" href="{% url 'colony:cage_history' cage.pk %}">View Cage History</a>
     </div>

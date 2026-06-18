@@ -1,9 +1,9 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from datetime import timedelta
 
-from colony.models import Cage, Mouse, TimeStampedModel
-from core.models import ActorStampedModel
+from colony.models import Cage, Mouse
+from core.models import ActorStampedModel, TimeStampedModel
+from .dates import expected_birth_date_for
 
 
 class Breeding(ActorStampedModel):
@@ -65,8 +65,11 @@ class Breeding(ActorStampedModel):
                 raise ValidationError("female_2 must be a female mouse.")
             if self.female_1_id and self.female_2_id and self.female_1_id == self.female_2_id:
                 raise ValidationError("female_1 and female_2 cannot be the same mouse.")
-        if self.plug_date and not self.expected_birth_date:
-            self.expected_birth_date = self.plug_date + timedelta(days=19)
+        if not self.expected_birth_date:
+            self.expected_birth_date = expected_birth_date_for(
+                start_date=self.start_date,
+                plug_date=self.plug_date,
+            )
 
     def __str__(self) -> str:
         return self.breeding_code

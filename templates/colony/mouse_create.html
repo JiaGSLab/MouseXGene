@@ -473,31 +473,65 @@
     const sexLinkedWarning = document.getElementById("batch-sex-linked-warning");
     let renderedGenotypeLoci = [];
 
+    const LOCUS_TYPE_LABELS = {
+        ko_null: "KO / null allele",
+        floxed_allele: "Floxed allele",
+        knock_in: "Knock-in",
+        cre_ki: "Cre knock-in",
+        cre_ert2_ki: "CreERT2 knock-in",
+        transgene: "Transgene",
+        reporter_knock_in: "Reporter knock-in",
+        reporter_transgene: "Reporter transgene",
+        point_variant: "Point mutation / variant",
+        other_custom: "Other / custom",
+    };
+    const LEGACY_LOCUS_TYPE_MAP = {
+        standard_autosomal: "other_custom",
+        flox: "floxed_allele",
+        cre_transgene: "cre_ki",
+        reporter_ki: "reporter_knock_in",
+        tg_pos_neg: "transgene",
+        custom: "other_custom",
+        x_linked: "other_custom",
+    };
+    const option = (value, label) => ({ value, label });
+    const withEmpty = (values) => [option("", "(not set)"), ...values];
+    const CUSTOM_OPTION = option("Custom", "Custom");
+    function normalizeLocusType(value) {
+        const raw = String(value || "other_custom").trim() || "other_custom";
+        return LEGACY_LOCUS_TYPE_MAP[raw] || raw;
+    }
     const AUTOSOMAL_OPTIONS = {
-        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
-        flox: ["+/+", "fl/+", "fl/fl", "+/-", "-/-", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
-        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["Custom"],
+        ko_null: withEmpty([option("+/+", "WT (+/+)"), option("+/-", "Het (+/-)"), option("-/-", "Homo null (-/-)"), CUSTOM_OPTION]),
+        floxed_allele: withEmpty([option("+/+", "WT (+/+)"), option("fl/+", "Het flox (fl/+)"), option("fl/fl", "Homo flox (fl/fl)"), CUSTOM_OPTION]),
+        knock_in: withEmpty([option("+/+", "WT (+/+)"), option("KI/+", "Het KI (KI/+)"), option("KI/KI", "Homo KI (KI/KI)"), CUSTOM_OPTION]),
+        cre_ki: withEmpty([option("+/+", "WT (+/+)"), option("Cre/+", "Cre KI het (Cre/+)"), option("Cre/Cre", "Cre KI homo (Cre/Cre)"), CUSTOM_OPTION]),
+        cre_ert2_ki: withEmpty([option("+/+", "WT (+/+)"), option("CreERT2/+", "CreERT2 het (CreERT2/+)"), option("CreERT2/CreERT2", "CreERT2 homo (CreERT2/CreERT2)"), CUSTOM_OPTION]),
+        transgene: withEmpty([option("neg", "Negative (neg)"), option("pos", "Positive (pos)"), CUSTOM_OPTION]),
+        reporter_knock_in: withEmpty([option("+/+", "WT (+/+)"), option("KI/+", "Reporter KI het (KI/+)"), option("KI/KI", "Reporter KI homo (KI/KI)"), CUSTOM_OPTION]),
+        reporter_transgene: withEmpty([option("neg", "Negative (neg)"), option("pos", "Positive (pos)"), CUSTOM_OPTION]),
+        point_variant: withEmpty([option("+/+", "WT (+/+)"), option("mut/+", "Het variant (mut/+)"), option("mut/mut", "Homo variant (mut/mut)"), CUSTOM_OPTION]),
+        other_custom: withEmpty([CUSTOM_OPTION]),
     };
-    const X_LINKED_FEMALE_OPTIONS = {
-        standard_autosomal: ["+/+", "+/-", "-/-", "Custom"],
-        flox: ["+/+", "fl/+", "fl/fl", "Custom"],
-        cre_transgene: ["+/+", "Cre/+", "Cre/Cre", "CreERT2/+", "CreERT2/CreERT2", "Custom"],
-        reporter_ki: ["+/+", "KI/+", "KI/KI", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["+/+", "Cre/+", "Cre/Cre", "fl/+", "fl/fl", "KI/+", "KI/KI", "Custom"],
-    };
+    const X_LINKED_FEMALE_OPTIONS = AUTOSOMAL_OPTIONS;
     const X_LINKED_MALE_OPTIONS = {
-        standard_autosomal: ["+/Y", "-/Y", "Custom"],
-        flox: ["+/Y", "fl/Y", "-/Y", "Custom"],
-        cre_transgene: ["+/Y", "Cre/Y", "CreERT2/Y", "-/Y", "Custom"],
-        reporter_ki: ["+/Y", "KI/Y", "-/Y", "Custom"],
-        tg_pos_neg: ["pos", "neg", "Custom"],
-        custom: ["+/Y", "Cre/Y", "-/Y", "fl/Y", "KI/Y", "Custom"],
+        ko_null: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Null (-/Y)"), CUSTOM_OPTION]),
+        floxed_allele: withEmpty([option("+/Y", "WT (+/Y)"), option("fl/Y", "Floxed (fl/Y)"), CUSTOM_OPTION]),
+        knock_in: withEmpty([option("+/Y", "WT (+/Y)"), option("KI/Y", "KI (KI/Y)"), CUSTOM_OPTION]),
+        cre_ki: withEmpty([option("+/Y", "WT (+/Y)"), option("Cre/Y", "Cre KI (Cre/Y)"), CUSTOM_OPTION]),
+        cre_ert2_ki: withEmpty([option("+/Y", "WT (+/Y)"), option("CreERT2/Y", "CreERT2 (CreERT2/Y)"), CUSTOM_OPTION]),
+        transgene: AUTOSOMAL_OPTIONS.transgene,
+        reporter_knock_in: withEmpty([option("+/Y", "WT (+/Y)"), option("KI/Y", "Reporter KI (KI/Y)"), CUSTOM_OPTION]),
+        reporter_transgene: AUTOSOMAL_OPTIONS.reporter_transgene,
+        point_variant: withEmpty([option("+/Y", "WT (+/Y)"), option("mut/Y", "Variant (mut/Y)"), CUSTOM_OPTION]),
+        other_custom: withEmpty([CUSTOM_OPTION]),
     };
-    const Y_LINKED_MALE_OPTIONS = ["+/Y", "-/Y", "KI/Y", "Custom"];
+    const Y_LINKED_MALE_OPTIONS = {
+        ko_null: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Null (-/Y)"), CUSTOM_OPTION]),
+        transgene: AUTOSOMAL_OPTIONS.transgene,
+        reporter_transgene: AUTOSOMAL_OPTIONS.reporter_transgene,
+        other_custom: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Variant (-/Y)"), CUSTOM_OPTION]),
+    };
 
     function batchSexForGenotype() {
         const sexes = activeSexes();
@@ -527,7 +561,7 @@
             seen.add(key);
             out.push({
                 locus_name: text,
-                locus_type: String(raw?.locus_type || "custom").trim() || "custom",
+                locus_type: normalizeLocusType(raw?.locus_type),
                 chromosome_type: String(raw?.chromosome_type || "autosomal").trim() || "autosomal",
             });
         }
@@ -579,21 +613,21 @@
     }
 
     function optionsFor(item, sex) {
-        const locusType = item.locus_type || "custom";
+        const locusType = normalizeLocusType(item.locus_type);
         const chromosomeType = item.chromosome_type || "autosomal";
         if (chromosomeType === "autosomal") {
-            return { options: AUTOSOMAL_OPTIONS[locusType] || AUTOSOMAL_OPTIONS.custom, disabled: false };
+            return { options: AUTOSOMAL_OPTIONS[locusType] || AUTOSOMAL_OPTIONS.other_custom, disabled: false };
         }
         if (chromosomeType === "x_linked") {
             if (sex === "M") {
-                return { options: X_LINKED_MALE_OPTIONS[locusType] || X_LINKED_MALE_OPTIONS.custom, disabled: false };
+                return { options: X_LINKED_MALE_OPTIONS[locusType] || X_LINKED_MALE_OPTIONS.other_custom, disabled: false };
             }
-            return { options: X_LINKED_FEMALE_OPTIONS[locusType] || X_LINKED_FEMALE_OPTIONS.custom, disabled: false };
+            return { options: X_LINKED_FEMALE_OPTIONS[locusType] || X_LINKED_FEMALE_OPTIONS.other_custom, disabled: false };
         }
         if (sex === "F") {
-            return { options: ["N/A"], disabled: true };
+            return { options: [option("", "N/A")], disabled: true };
         }
-        return { options: Y_LINKED_MALE_OPTIONS, disabled: false };
+        return { options: Y_LINKED_MALE_OPTIONS[locusType] || Y_LINKED_MALE_OPTIONS.other_custom, disabled: false };
     }
 
     async function renderRows() {
@@ -625,7 +659,7 @@
             const row = document.createElement("div");
             row.className = "form-row";
             const label = document.createElement("label");
-            label.textContent = `${locus} (${item.locus_type}, ${item.chromosome_type})`;
+            label.textContent = `${locus} (${LOCUS_TYPE_LABELS[normalizeLocusType(item.locus_type)] || "Other / custom"}, ${item.chromosome_type})`;
             const hidden = document.createElement("input");
             hidden.type = "hidden";
             hidden.name = `genotype_locus_${idx}`;
@@ -639,10 +673,11 @@
             customInput.type = "text";
             customInput.placeholder = "Custom genotype";
             let hasMatched = false;
-            options.forEach((optValue) => {
+            options.forEach((optDef) => {
+                const optValue = optDef.value;
                 const opt = document.createElement("option");
                 opt.value = optValue;
-                opt.textContent = optValue;
+                opt.textContent = optDef.label || optValue;
                 if (current && current === optValue) {
                     opt.selected = true;
                     hasMatched = true;
@@ -652,8 +687,8 @@
             if (current && !hasMatched) {
                 select.value = "Custom";
                 customInput.value = current;
-            } else if (!current && options[0] !== "Custom") {
-                select.value = options[0];
+            } else if (!current && options[0]?.value !== "Custom") {
+                select.value = options[0]?.value || "";
             } else {
                 select.value = "Custom";
             }

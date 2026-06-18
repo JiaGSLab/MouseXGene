@@ -16,12 +16,12 @@ class MouseGenotypeSummaryTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "Pcbp1mut-KI",
-                    "locus_type": "reporter_ki",
+                    "locus_type": "reporter_knock_in",
                     "chromosome_type": "autosomal",
                 },
                 {
                     "locus_name": "Lgr5-CreERT2",
-                    "locus_type": "cre_transgene",
+                    "locus_type": "cre_ert2_ki",
                     "chromosome_type": "autosomal",
                 },
             ],

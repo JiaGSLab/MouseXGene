@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 
 from colony.models import Mouse
+from .models import MouseGenotype
 
 
 GENOTYPE_EXPECTED_COLUMNS = [
@@ -16,6 +17,7 @@ GENOTYPE_EXPECTED_COLUMNS = [
     "assay_date",
     "notes",
 ]
+MAX_GENOTYPE_IMPORT_ROWS = 5000
 
 
 @dataclass
@@ -73,6 +75,11 @@ def parse_genotype_import(uploaded_file) -> GenotypeImportResult:
         )
 
     dataframe.columns = [str(col).strip() for col in dataframe.columns]
+    if len(dataframe.index) > MAX_GENOTYPE_IMPORT_ROWS:
+        return GenotypeImportResult(
+            rows=[],
+            errors=[f"Too many rows ({len(dataframe.index)}). Maximum is {MAX_GENOTYPE_IMPORT_ROWS} per import."],
+        )
     missing_columns = [col for col in GENOTYPE_EXPECTED_COLUMNS if col not in dataframe.columns]
     if missing_columns:
         return GenotypeImportResult(
@@ -86,9 +93,18 @@ def parse_genotype_import(uploaded_file) -> GenotypeImportResult:
             ],
         )
 
-    mouse_map = {obj.mouse_uid: obj for obj in Mouse.objects.all()}
+    requested_uids = {
+        _to_text(record.get("mouse_uid"))
+        for _index, record in dataframe[GENOTYPE_EXPECTED_COLUMNS].iterrows()
+        if _to_text(record.get("mouse_uid"))
+    }
+    mouse_map = {
+        obj.mouse_uid: obj
+        for obj in Mouse.objects.filter(mouse_uid__in=requested_uids).select_related("project")
+    }
     rows: list[dict] = []
     errors: list[str] = []
+    seen_keys: dict[tuple[int, str], int] = {}
 
     for index, record in dataframe[GENOTYPE_EXPECTED_COLUMNS].iterrows():
         row_number = index + 2
@@ -112,6 +128,14 @@ def parse_genotype_import(uploaded_file) -> GenotypeImportResult:
         if not locus_name:
             errors.append(f"Row {row_number}: locus_name is required.")
             continue
+        key = (mouse_obj.pk, locus_name)
+        if key in seen_keys:
+            errors.append(
+                f"Row {row_number}: duplicate genotype for mouse_uid '{mouse_uid}' and locus_name "
+                f"'{locus_name}' also appears on row {seen_keys[key]}."
+            )
+            continue
+        seen_keys[key] = row_number
 
         rows.append(
             {
@@ -126,4 +150,20 @@ def parse_genotype_import(uploaded_file) -> GenotypeImportResult:
             }
         )
 
-    return GenotypeImportResult(rows=rows, errors=errors)
+    if rows:
+        existing = set(
+            MouseGenotype.objects.filter(
+                mouse_id__in=[row["mouse"].pk for row in rows],
+                gene__isnull=True,
+                locus_name__in=[row["locus_name"] for row in rows],
+            ).values_list("mouse_id", "locus_name")
+        )
+        for row in rows:
+            key = (row["mouse"].pk, row["locus_name"])
+            if key in existing:
+                errors.append(
+                    f"Mouse {row['mouse'].mouse_uid} already has a genotype record for locus "
+                    f"'{row['locus_name']}'. Edit it instead of importing a duplicate."
+                )
+
+    return GenotypeImportResult(rows=[] if errors else rows, errors=errors)

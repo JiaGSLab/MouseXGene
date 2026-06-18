@@ -34,7 +34,7 @@ class StrainLineEditViewTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "LocusA",
-                    "locus_type": "custom",
+                    "locus_type": "other_custom",
                     "chromosome_type": "autosomal",
                 }
             ],
@@ -44,8 +44,8 @@ class StrainLineEditViewTests(TestCase):
         config = overrides.pop(
             "expected_loci_config",
             [
-                {"locus_name": "LocusA", "locus_type": "custom", "chromosome_type": "autosomal"},
-                {"locus_name": "LocusB", "locus_type": "flox", "chromosome_type": "autosomal"},
+                {"locus_name": "LocusA", "locus_type": "other_custom", "chromosome_type": "autosomal"},
+                {"locus_name": "LocusB", "locus_type": "floxed_allele", "chromosome_type": "autosomal"},
             ],
         )
         data = {
@@ -60,7 +60,7 @@ class StrainLineEditViewTests(TestCase):
             "is_active": "on",
             "notes": "updated notes",
             "admin_correction_unlocked": "1",
-            "admin_correction_reason": "test correction",
+            "admin_correction_reason": "Admin reviewed correction",
         }
         data.update(overrides)
         return data
@@ -192,7 +192,7 @@ class StrainLineEditViewTests(TestCase):
             allele_display_2="-",
         )
         config = [
-            {"locus_name": "LocusA", "locus_type": "custom", "chromosome_type": "autosomal"},
+            {"locus_name": "LocusA", "locus_type": "other_custom", "chromosome_type": "autosomal"},
         ]
         url = reverse("colony:strain_line_edit", args=[self.line.pk])
         self.client.post(
@@ -225,8 +225,8 @@ class StrainLineEditViewTests(TestCase):
             allele_display_2="-",
         )
         config = [
-            {"locus_name": "LocusA", "locus_type": "custom", "chromosome_type": "autosomal"},
-            {"locus_name": "ImportedExtra", "locus_type": "custom", "chromosome_type": "autosomal"},
+            {"locus_name": "LocusA", "locus_type": "other_custom", "chromosome_type": "autosomal"},
+            {"locus_name": "ImportedExtra", "locus_type": "other_custom", "chromosome_type": "autosomal"},
         ]
         url = reverse("colony:strain_line_edit", args=[self.line.pk])
         self.client.post(
@@ -247,7 +247,7 @@ class StrainLineEditViewTests(TestCase):
         self.line.expected_loci_config = [
             {
                 "locus_name": "Foxp3 flox",
-                "locus_type": "flox",
+                "locus_type": "floxed_allele",
                 "chromosome_type": "autosomal",
             }
         ]
@@ -264,7 +264,7 @@ class StrainLineEditViewTests(TestCase):
         config = [
             {
                 "locus_name": "Foxp3 flox",
-                "locus_type": "flox",
+                "locus_type": "floxed_allele",
                 "chromosome_type": "autosomal",
             }
         ]

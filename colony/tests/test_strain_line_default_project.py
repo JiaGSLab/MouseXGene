@@ -48,7 +48,7 @@ class StrainLineProjectsTests(TestCase):
                 [
                     {
                         "locus_name": "LocusA",
-                        "locus_type": "custom",
+                        "locus_type": "other_custom",
                         "chromosome_type": "autosomal",
                     }
                 ]

@@ -16,7 +16,7 @@ class MouseGenotypeApplyTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "MyTg",
-                    "locus_type": "tg_pos_neg",
+                    "locus_type": "transgene",
                     "chromosome_type": "autosomal",
                 }
             ],

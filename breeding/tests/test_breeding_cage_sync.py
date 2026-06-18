@@ -149,6 +149,38 @@ class BreedingCageSyncTests(TestCase):
         self.assertTrue(CageMembership.objects.filter(mouse=self.dam, cage=self.new_cage, is_current=True).exists())
         self.assertIn("Repaired 2 breeder cage assignment(s).", out.getvalue())
 
+    def test_sync_active_breeding_cages_does_not_reoccupy_terminal_breeders(self):
+        self.sire.status = Mouse.Status.EUTHANIZED
+        self.sire.current_cage = None
+        self.sire.save(update_fields=["status", "current_cage", "updated_at"])
+        CageMembership.objects.create(
+            mouse=self.sire,
+            cage=self.old_cage,
+            start_date=date(2026, 1, 1),
+            is_current=True,
+            reason="Historical stale current membership",
+        )
+        Breeding.objects.create(
+            breeding_code="BR-SYNC-TERMINAL",
+            cage=self.new_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+
+        out = StringIO()
+        call_command("sync_active_breeding_cages", stdout=out)
+
+        self.sire.refresh_from_db()
+        self.dam.refresh_from_db()
+        self.assertIsNone(self.sire.current_cage_id)
+        self.assertEqual(self.dam.current_cage_id, self.new_cage.pk)
+        self.assertFalse(CageMembership.objects.get(mouse=self.sire, cage=self.old_cage).is_current)
+        self.assertFalse(CageMembership.objects.filter(mouse=self.sire, cage=self.new_cage, is_current=True).exists())
+        self.assertTrue(CageMembership.objects.filter(mouse=self.dam, cage=self.new_cage, is_current=True).exists())
+        self.assertIn("Repaired 1 breeder cage assignment(s).", out.getvalue())
+
     def test_dashboard_warns_when_active_breeding_cage_mismatch_exists(self):
         Breeding.objects.create(
             breeding_code="BR-SYNC-DASH-MISMATCH",

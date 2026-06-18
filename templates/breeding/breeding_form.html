@@ -104,11 +104,14 @@
             {% elif field.name == 'sire' or field.name == 'dams' or field.name == 'cage_lookup' or field.name == 'cage_assignment_mode' or field.name == 'auto_cage_id' %}
                 {# Rendered in dedicated blocks #}
             {% elif field.name == 'cage' %}
-                <div class="card card-nested">
-                    <h2>Cage</h2>
-                    <p class="muted small-print">Create a new breeding cage automatically, or choose an existing active cage.</p>
-                    <div class="form-row">
-                        <label>{{ form.cage_assignment_mode.label }}</label>
+                <div class="card card-nested cage-assignment-block">
+                    <h2>Breeding Cage Setup</h2>
+                    <div class="workflow-note">
+                        <strong>Choose where this breeding will live.</strong>
+                        <span>Most new breedings should auto-create a breeding cage. Use an existing active cage only when the breeders are already in that cage and it should become the breeding cage.</span>
+                    </div>
+                    <div class="form-row assignment-mode-row">
+                        <label>How should MouseXGene assign the breeding cage?</label>
                         {{ form.cage_assignment_mode }}
                         {% if form.cage_assignment_mode.errors %}
                             <div class="field-error">
@@ -118,7 +121,9 @@
                             </div>
                         {% endif %}
                     </div>
-                    <div class="form-row" id="breeding-auto-cage-row">
+                    <div class="form-row assignment-detail-panel" id="breeding-auto-cage-row">
+                        <h3>Auto-create a new breeding cage</h3>
+                        <p class="muted small-print">Use this for a normal new breeding setup. Leave the ID blank unless you need to reserve a specific cage number.</p>
                         <label for="{{ form.auto_cage_id.id_for_label }}">{{ form.auto_cage_id.label }}</label>
                         {{ form.auto_cage_id }}
                         {% if form.auto_cage_id.help_text %}
@@ -132,7 +137,9 @@
                             </div>
                         {% endif %}
                     </div>
-                    <div id="breeding-existing-cage-fields">
+                    <div class="assignment-detail-panel" id="breeding-existing-cage-fields">
+                        <h3>Use an existing active cage</h3>
+                        <p class="muted small-print">Filter the active cage list, then select the cage that already contains the breeders for this setup.</p>
                         <div class="filter-grid">
                             <div class="form-row">
                                 <label for="id_breeding_cage_project_filter">Filter by project</label>

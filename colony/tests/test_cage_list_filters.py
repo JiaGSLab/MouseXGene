@@ -203,7 +203,7 @@ class CageEditFreezeTests(TestCase):
         self.cage = Cage.objects.create(cage_id="FREEZE-CAGE", room="OldRoom", status=Cage.Status.ACTIVE)
         self.client = Client()
 
-    def test_non_admin_can_edit_location_but_not_locked_identity(self):
+    def test_non_admin_can_edit_location_and_holding_breeding_use_but_not_locked_identity(self):
         self.client.login(username="cagefreezemember", password="x")
         response = self.client.post(
             reverse("colony:cage_edit", args=[self.cage.pk]),
@@ -222,11 +222,34 @@ class CageEditFreezeTests(TestCase):
         self.assertRedirects(response, reverse("colony:cage_detail", args=[self.cage.pk]))
         self.cage.refresh_from_db()
         self.assertEqual(self.cage.cage_id, "FREEZE-CAGE")
-        self.assertEqual(self.cage.cage_type, Cage.CageType.STANDARD)
-        self.assertEqual(self.cage.purpose, Cage.Purpose.HOLDING)
+        self.assertEqual(self.cage.cage_type, Cage.CageType.BREEDING)
+        self.assertEqual(self.cage.purpose, Cage.Purpose.BREEDING)
         self.assertEqual(self.cage.status, Cage.Status.ACTIVE)
         self.assertEqual(self.cage.room, "NewRoom")
         self.assertEqual(self.cage.rack, "R2")
+
+    def test_non_admin_cannot_change_other_cage_uses_without_admin_correction(self):
+        self.client.login(username="cagefreezemember", password="x")
+        response = self.client.post(
+            reverse("colony:cage_edit", args=[self.cage.pk]),
+            {
+                "cage_id": "FREEZE-CAGE",
+                "created_date": "",
+                "room": "__custom__",
+                "room_custom": "NewRoom",
+                "rack": "R2",
+                "position": "A1",
+                "cage_use": Cage.CageUse.WEANING,
+                "status": Cage.Status.ACTIVE,
+                "notes": "attempt unsupported use change",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Users with cage edit access can switch Cage Use between Holding and Breeding")
+        self.cage.refresh_from_db()
+        self.assertEqual(self.cage.cage_type, Cage.CageType.STANDARD)
+        self.assertEqual(self.cage.purpose, Cage.Purpose.HOLDING)
+        self.assertEqual(self.cage.room, "OldRoom")
 
     def test_admin_locked_change_requires_reason(self):
         self.client.login(username="cagefreezeadmin", password="x")
@@ -256,7 +279,7 @@ class CageEditFreezeTests(TestCase):
             reverse("colony:cage_edit", args=[self.cage.pk]),
             {
                 "admin_correction_unlocked": "1",
-                "admin_correction_reason": "historical cage label typo",
+                "admin_correction_reason": "Admin reviewed correction",
                 "cage_id": "FREEZE-CAGE-CHANGED",
                 "created_date": "",
                 "room": "OldRoom",

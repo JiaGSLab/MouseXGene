@@ -10,7 +10,7 @@
 {% block content %}
 <section class="page-header">
     <h1>Wean litter</h1>
-    <p class="muted">Creates individual <strong>Mouse</strong> records and sets the litter wean date. Pups are split by sex into separate cages (male cage and/or female cage). Pup rows from the litter edit page are pre-filled when available.</p>
+    <p class="muted">Creates individual <strong>Mouse</strong> records and sets the litter wean date. Male and female pups stay separated; add extra cages when one sex needs more than one cage. Pup rows from the litter edit page are pre-filled when available.</p>
 </section>
 
 <section class="card">
@@ -222,70 +222,25 @@
             <small class="muted">Enter male and female pup counts; pup entry rows refresh automatically.</small>
         {% endif %}
 
-        <h2>Pup Entries <span class="muted" id="wean-pup-entries-count">({{ pup_forms|length }})</span></h2>
-        <p class="muted small-print">Each pup must be Male or Female. Male rows come first, then female rows. Sex determines which cage the mouse is placed into.</p>
-        <p class="muted small-print" id="wean-pup-uid-status" aria-live="polite"></p>
-        <div id="wean-pup-entries">
-        {% for pup_form in pup_forms %}
-            <div class="card pup-card">
-                <h3>Pup {{ forloop.counter }}</h3>
-                {% for field in pup_form %}
-                    <div class="form-row">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.errors %}
-                            <div class="field-error">
-                                {% for error in field.errors %}
-                                    <div>{{ error }}</div>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
+        <div class="card card-nested cage-assignment-block">
+            <h2>Weaning Cage Setup</h2>
+            <div class="workflow-note">
+                <strong>Male and female pups are assigned separately.</strong>
+                <span>If both sexes are present, they must go to different cages. Auto-create is usually safest; use existing cages only when you know exactly where those pups should go.</span>
             </div>
-        {% endfor %}
-        </div>
-
-        <p class="muted" id="wean-sex-summary" aria-live="polite"></p>
-
-        <div class="card card-nested">
-            <h2>Cage Assignment</h2>
-            <p class="muted small-print">Male and female pups must go to different cages. Choose project and/or owner, then pick cages or type cage IDs.</p>
-            <div class="filter-grid">
-                <div class="form-row">
-                    <label for="id_wean_project_filter">Filter by project</label>
-                    <select name="wean_cage_project_filter" id="id_wean_project_filter" class="filter-control">
-                        <option value="">All projects</option>
-                        {% for project in wean_project_options %}
-                            <option value="{{ project.id }}"{% if cage_project_filter == project.id|stringformat:"s" %} selected{% endif %}>{{ project.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-row">
-                    <label for="id_wean_owner_filter">Filter by owner</label>
-                    <select name="wean_cage_owner_filter" id="id_wean_owner_filter" class="filter-control">
-                        <option value="">All owners</option>
-                        {% for owner in wean_owner_options %}
-                            <option value="{{ owner.id }}"{% if cage_owner_filter == owner.id|stringformat:"s" %} selected{% endif %}>{{ owner.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                <button type="button" class="button button-light" id="wean-cage-filter-apply">Refresh list</button>
-                <span class="muted small-print" id="wean-cage-filter-status">Showing all active cages.</span>
-            </div>
-
-            <div id="wean-male-cage-section" hidden>
-                <h3>Male pups cage <span class="muted" id="wean-male-count-label"></span></h3>
-                <div class="form-row">
-                    <label>{{ wean_form.male_cage_assignment_mode.label }}</label>
+            <div class="sex-cage-section" id="wean-male-cage-section" hidden>
+                <h3>Male pups -> cage <span class="muted" id="wean-male-count-label"></span></h3>
+                <p class="muted small-print">Choose how male pups should be housed after weaning.</p>
+                <div class="form-row assignment-mode-row">
+                    <label>Male pups cage setup</label>
                     {{ wean_form.male_cage_assignment_mode }}
                     {% if wean_form.male_cage_assignment_mode.errors %}
                         <div class="field-error">{% for error in wean_form.male_cage_assignment_mode.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div class="form-row" id="wean-male-auto-cage-row">
+                <div class="form-row assignment-detail-panel" id="wean-male-auto-cage-row">
+                    <h3>Auto-create male pups cage</h3>
+                    <p class="muted small-print">Leave the ID blank unless you need a specific cage ID for the male pups.</p>
                     <label for="{{ wean_form.male_auto_cage_id.id_for_label }}">{{ wean_form.male_auto_cage_id.label }}</label>
                     {{ wean_form.male_auto_cage_id }}
                     {% if wean_form.male_auto_cage_id.help_text %}
@@ -295,7 +250,33 @@
                         <div class="field-error">{% for error in wean_form.male_auto_cage_id.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div id="wean-male-existing-cage-fields">
+                <div class="assignment-detail-panel" id="wean-male-existing-cage-fields">
+                    <h3>Use existing cage for male pups</h3>
+                    <p class="muted small-print">Pick from the active cage list or type a cage ID below.</p>
+                    <div class="filter-grid">
+                        <div class="form-row">
+                            <label for="id_wean_male_project_filter">Filter by project</label>
+                            <select id="id_wean_male_project_filter" class="filter-control" data-wean-cage-project-filter>
+                                <option value="">All projects</option>
+                                {% for project in wean_project_options %}
+                                    <option value="{{ project.id }}"{% if cage_project_filter == project.id|stringformat:"s" %} selected{% endif %}>{{ project.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_wean_male_owner_filter">Filter by owner</label>
+                            <select id="id_wean_male_owner_filter" class="filter-control" data-wean-cage-owner-filter>
+                                <option value="">All owners</option>
+                                {% for owner in wean_owner_options %}
+                                    <option value="{{ owner.id }}"{% if cage_owner_filter == owner.id|stringformat:"s" %} selected{% endif %}>{{ owner.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="button button-light" data-wean-cage-filter-apply>Refresh list</button>
+                        <span class="muted small-print" data-wean-cage-filter-status>Showing all active cages.</span>
+                    </div>
                     <div class="form-row">
                         <label for="id_male_cage">{{ wean_form.male_cage.label }}</label>
                         <select name="male_cage" id="id_male_cage">
@@ -326,18 +307,28 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="assignment-detail-panel wean-extra-cage-panel">
+                    <h3>Additional male cages</h3>
+                    <p class="muted small-print">Add another male cage only when male pups need to be split. Each added cage can be auto-created or selected from existing active cages.</p>
+                    <input type="hidden" name="male_extra_cage_count" id="id_male_extra_cage_count" value="0">
+                    <div class="wean-extra-cage-list" data-extra-cage-list="male"></div>
+                    <button type="button" class="button button-light" id="wean-add-male-cage">Add male cage</button>
+                </div>
             </div>
 
-            <div id="wean-female-cage-section" hidden>
-                <h3>Female pups cage <span class="muted" id="wean-female-count-label"></span></h3>
-                <div class="form-row">
-                    <label>{{ wean_form.female_cage_assignment_mode.label }}</label>
+            <div class="sex-cage-section" id="wean-female-cage-section" hidden>
+                <h3>Female pups -> cage <span class="muted" id="wean-female-count-label"></span></h3>
+                <p class="muted small-print">Choose how female pups should be housed after weaning.</p>
+                <div class="form-row assignment-mode-row">
+                    <label>Female pups cage setup</label>
                     {{ wean_form.female_cage_assignment_mode }}
                     {% if wean_form.female_cage_assignment_mode.errors %}
                         <div class="field-error">{% for error in wean_form.female_cage_assignment_mode.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div class="form-row" id="wean-female-auto-cage-row">
+                <div class="form-row assignment-detail-panel" id="wean-female-auto-cage-row">
+                    <h3>Auto-create female pups cage</h3>
+                    <p class="muted small-print">Leave the ID blank unless you need a specific cage ID for the female pups.</p>
                     <label for="{{ wean_form.female_auto_cage_id.id_for_label }}">{{ wean_form.female_auto_cage_id.label }}</label>
                     {{ wean_form.female_auto_cage_id }}
                     {% if wean_form.female_auto_cage_id.help_text %}
@@ -347,7 +338,33 @@
                         <div class="field-error">{% for error in wean_form.female_auto_cage_id.errors %}<div>{{ error }}</div>{% endfor %}</div>
                     {% endif %}
                 </div>
-                <div id="wean-female-existing-cage-fields">
+                <div class="assignment-detail-panel" id="wean-female-existing-cage-fields">
+                    <h3>Use existing cage for female pups</h3>
+                    <p class="muted small-print">Pick from the active cage list or type a cage ID below.</p>
+                    <div class="filter-grid">
+                        <div class="form-row">
+                            <label for="id_wean_female_project_filter">Filter by project</label>
+                            <select id="id_wean_female_project_filter" class="filter-control" data-wean-cage-project-filter>
+                                <option value="">All projects</option>
+                                {% for project in wean_project_options %}
+                                    <option value="{{ project.id }}"{% if cage_project_filter == project.id|stringformat:"s" %} selected{% endif %}>{{ project.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label for="id_wean_female_owner_filter">Filter by owner</label>
+                            <select id="id_wean_female_owner_filter" class="filter-control" data-wean-cage-owner-filter>
+                                <option value="">All owners</option>
+                                {% for owner in wean_owner_options %}
+                                    <option value="{{ owner.id }}"{% if cage_owner_filter == owner.id|stringformat:"s" %} selected{% endif %}>{{ owner.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <button type="button" class="button button-light" data-wean-cage-filter-apply>Refresh list</button>
+                        <span class="muted small-print" data-wean-cage-filter-status>Showing all active cages.</span>
+                    </div>
                     <div class="form-row">
                         <label for="id_female_cage">{{ wean_form.female_cage.label }}</label>
                         <select name="female_cage" id="id_female_cage">
@@ -378,7 +395,55 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="assignment-detail-panel wean-extra-cage-panel">
+                    <h3>Additional female cages</h3>
+                    <p class="muted small-print">Add another female cage only when female pups need to be split. Each added cage can be auto-created or selected from existing active cages.</p>
+                    <input type="hidden" name="female_extra_cage_count" id="id_female_extra_cage_count" value="0">
+                    <div class="wean-extra-cage-list" data-extra-cage-list="female"></div>
+                    <button type="button" class="button button-light" id="wean-add-female-cage">Add female cage</button>
+                </div>
             </div>
+        </div>
+
+        <p class="muted" id="wean-sex-summary" aria-live="polite"></p>
+
+        <h2>Pup Entries <span class="muted" id="wean-pup-entries-count">({{ pup_forms|length }})</span></h2>
+        <p class="muted small-print">Set the cage first, then enter each mouse UID. Male rows come first, then female rows.</p>
+        <p class="muted small-print" id="wean-pup-uid-status" aria-live="polite"></p>
+        <div id="wean-pup-entries">
+        {% for pup_form in pup_forms %}
+            <div class="card pup-card">
+                <h3>Pup {{ forloop.counter }}</h3>
+                {% for field in pup_form %}
+                    {% if field.name == "cage_slot" %}
+                        <div class="form-row pup-cage-slot-row">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            <select name="{{ field.html_name }}" id="{{ field.id_for_label }}" data-pup-cage-slot data-current-value="{{ field.value|default:'' }}"></select>
+                            <small class="muted">Choose the cage before entering this mouse UID.</small>
+                            {% if field.errors %}
+                                <div class="field-error">
+                                    {% for error in field.errors %}
+                                        <div>{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="form-row">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="field-error">
+                                    {% for error in field.errors %}
+                                        <div>{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        {% endfor %}
         </div>
 
         <div class="form-actions">
@@ -393,14 +458,14 @@
     const cageApiUrl = "{{ cage_picker_api_url|default:'/cages/api/picker/'|escapejs }}";
     const uidCheckUrl = "{{ mouse_uid_check_api_url|default:'/mice/api/uid-check/'|escapejs }}";
     let cages = [];
-    const projectFilter = document.getElementById("id_wean_project_filter");
-    const ownerFilter = document.getElementById("id_wean_owner_filter");
+    const projectFilters = Array.from(document.querySelectorAll("[data-wean-cage-project-filter]"));
+    const ownerFilters = Array.from(document.querySelectorAll("[data-wean-cage-owner-filter]"));
     const maleCageSelect = document.getElementById("id_male_cage");
     const femaleCageSelect = document.getElementById("id_female_cage");
     const maleCageLookup = document.getElementById("id_male_cage_lookup");
     const femaleCageLookup = document.getElementById("id_female_cage_lookup");
-    const applyFilterBtn = document.getElementById("wean-cage-filter-apply");
-    const filterStatus = document.getElementById("wean-cage-filter-status");
+    const applyFilterBtns = Array.from(document.querySelectorAll("[data-wean-cage-filter-apply]"));
+    const filterStatuses = Array.from(document.querySelectorAll("[data-wean-cage-filter-status]"));
     const selectedMaleCageId = "{{ wean_form.male_cage.value|default:''|escapejs }}";
     const selectedFemaleCageId = "{{ wean_form.female_cage.value|default:''|escapejs }}";
     const maleSection = document.getElementById("wean-male-cage-section");
@@ -420,6 +485,26 @@
     const femaleAutoCageInput = document.getElementById("id_female_auto_cage_id");
     const maleExistingCageFields = document.getElementById("wean-male-existing-cage-fields");
     const femaleExistingCageFields = document.getElementById("wean-female-existing-cage-fields");
+    const extraCageConfig = {
+        male: {
+            countInput: document.getElementById("id_male_extra_cage_count"),
+            list: document.querySelector('[data-extra-cage-list="male"]'),
+            addButton: document.getElementById("wean-add-male-cage"),
+            label: "Male",
+            sexValue: "M",
+            defaultSlot: "male-default",
+            inputPrefix: "male",
+        },
+        female: {
+            countInput: document.getElementById("id_female_extra_cage_count"),
+            list: document.querySelector('[data-extra-cage-list="female"]'),
+            addButton: document.getElementById("wean-add-female-cage"),
+            label: "Female",
+            sexValue: "F",
+            defaultSlot: "female-default",
+            inputPrefix: "female",
+        },
+    };
     const aliveMax = {% if pup_max_count %}{{ pup_max_count }}{% else %}null{% endif %};
     const malePupCountInput = document.getElementById("id_male_pup_count");
     const femalePupCountInput = document.getElementById("id_female_pup_count");
@@ -468,6 +553,38 @@
     function cageAssignmentMode(sex) {
         const radios = sex === "male" ? maleModeRadios : femaleModeRadios;
         return radios.find((radio) => radio.checked)?.value || "auto";
+    }
+
+    function extraCageMode(row) {
+        return row?.querySelector('[data-extra-cage-mode]:checked')?.value || "auto";
+    }
+
+    function syncExtraCageRowMode(row) {
+        if (!row) return;
+        const useExisting = extraCageMode(row) === "existing";
+        const autoPanel = row.querySelector("[data-extra-auto-panel]");
+        const existingPanel = row.querySelector("[data-extra-existing-panel]");
+        if (autoPanel) autoPanel.hidden = useExisting;
+        if (existingPanel) existingPanel.hidden = !useExisting;
+        row.querySelectorAll("[data-extra-auto-panel] input").forEach((input) => {
+            input.disabled = useExisting;
+        });
+        row.querySelectorAll("[data-extra-existing-panel] input, [data-extra-existing-panel] select").forEach((input) => {
+            input.disabled = !useExisting;
+        });
+        const status = row.querySelector("[data-extra-cage-lookup-status]");
+        const summary = row.querySelector("[data-extra-cage-selected-summary]");
+        if (!useExisting) {
+            if (status) {
+                status.textContent = "";
+                status.className = "muted small-print";
+            }
+            if (summary) {
+                summary.textContent = "";
+                summary.className = "muted small-print";
+            }
+        }
+        syncCageSummaries();
     }
 
     function syncOneCageAssignmentMode(sex) {
@@ -592,6 +709,7 @@
             rows.push({
                 mouse_uid: card.querySelector('[name$="-mouse_uid"]')?.value || "",
                 sex: card.querySelector('[name$="-sex"]')?.value || "",
+                cage_slot: card.querySelector('[name$="-cage_slot"]')?.value || "",
                 ear_tag: card.querySelector('[name$="-ear_tag"]')?.value || "",
                 coat_color: card.querySelector('[name$="-coat_color"]')?.value || "",
                 notes: card.querySelector('[name$="-notes"]')?.value || "",
@@ -640,6 +758,66 @@
         card.appendChild(row);
     }
 
+    function sexKeyFromValue(sexValue) {
+        return sexValue === "F" ? "female" : "male";
+    }
+
+    function cageSlotOptionsForSex(sexKey) {
+        const config = extraCageConfig[sexKey];
+        const options = [
+            {
+                value: config.defaultSlot,
+                label: `${config.label} cage 1 (default)`,
+            },
+        ];
+        config.list?.querySelectorAll("[data-extra-cage-row]").forEach((row, rowIndex) => {
+            options.push({
+                value: `${config.inputPrefix}-extra-${rowIndex + 1}`,
+                label: `${config.label} cage ${rowIndex + 2}`,
+            });
+        });
+        return options;
+    }
+
+    function populateCageSlotSelect(select, sexKey, preferredValue = "") {
+        if (!select) return;
+        const options = cageSlotOptionsForSex(sexKey);
+        const current = preferredValue || select.value || select.dataset.currentValue || "";
+        select.replaceChildren();
+        options.forEach((item) => {
+            const opt = document.createElement("option");
+            opt.value = item.value;
+            opt.textContent = item.label;
+            if (item.value === current) opt.selected = true;
+            select.appendChild(opt);
+        });
+        if (!options.some((item) => item.value === select.value)) {
+            select.value = options[0]?.value || "";
+        }
+        select.dataset.currentValue = select.value;
+    }
+
+    function appendCageSlotField(card, index, sex, value) {
+        const row = document.createElement("div");
+        row.className = "form-row pup-cage-slot-row";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.htmlFor = `id_pups-${index}-cage_slot`;
+        fieldLabel.textContent = "Weaning cage";
+        const select = document.createElement("select");
+        select.name = `pups-${index}-cage_slot`;
+        select.id = `id_pups-${index}-cage_slot`;
+        select.dataset.pupCageSlot = "1";
+        select.dataset.currentValue = value || "";
+        const help = document.createElement("small");
+        help.className = "muted";
+        help.textContent = "Choose the cage for this mouse UID.";
+        row.appendChild(fieldLabel);
+        row.appendChild(select);
+        row.appendChild(help);
+        card.appendChild(row);
+        populateCageSlotSelect(select, sexKeyFromValue(sex), value);
+    }
+
     function appendNotesField(card, index, value) {
         const row = document.createElement("div");
         row.className = "form-row";
@@ -662,12 +840,321 @@
         const heading = document.createElement("h3");
         heading.textContent = `Pup ${index + 1}`;
         card.appendChild(heading);
-        appendTextField(card, index, "mouse_uid", "Mouse UID", data.mouse_uid);
         appendSexField(card, index, sex);
+        appendCageSlotField(card, index, sex, data.cage_slot);
+        appendTextField(card, index, "mouse_uid", "Mouse UID", data.mouse_uid);
         appendTextField(card, index, "ear_tag", "Ear Tag", data.ear_tag);
         appendTextField(card, index, "coat_color", "Coat Color", data.coat_color);
         appendNotesField(card, index, data.notes);
         return card;
+    }
+
+    function syncPupCageSlotOptions() {
+        pupEntriesContainer?.querySelectorAll(".pup-card").forEach((card, index) => {
+            const sexValue = card.querySelector('[name$="-sex"]')?.value || "M";
+            let select = card.querySelector('[name$="-cage_slot"]');
+            if (!select) {
+                appendCageSlotField(card, index, sexValue, "");
+                select = card.querySelector('[name$="-cage_slot"]');
+            }
+            populateCageSlotSelect(select, sexKeyFromValue(sexValue));
+        });
+    }
+
+    function renumberExtraCages(sexKey) {
+        const config = extraCageConfig[sexKey];
+        const rows = Array.from(config.list?.querySelectorAll("[data-extra-cage-row]") || []);
+        rows.forEach((row, rowIndex) => {
+            const index = rowIndex + 1;
+            row.dataset.index = String(index);
+            const title = row.querySelector("[data-extra-cage-title]");
+            const modeAuto = row.querySelector("[data-extra-cage-mode-auto]");
+            const modeExisting = row.querySelector("[data-extra-cage-mode-existing]");
+            const autoLabel = row.querySelector("[data-extra-auto-label]");
+            const autoInput = row.querySelector("[data-extra-auto-id]");
+            const projectLabel = row.querySelector("[data-extra-project-label]");
+            const projectFilter = row.querySelector("[data-wean-cage-project-filter]");
+            const ownerLabel = row.querySelector("[data-extra-owner-label]");
+            const ownerFilter = row.querySelector("[data-wean-cage-owner-filter]");
+            const cageLabel = row.querySelector("[data-extra-cage-label]");
+            const cageSelect = row.querySelector("[data-extra-cage-select]");
+            const lookupLabel = row.querySelector("[data-extra-lookup-label]");
+            const lookupInput = row.querySelector("[data-extra-cage-lookup]");
+            const removeButton = row.querySelector("[data-extra-cage-remove]");
+            if (title) title.textContent = `${config.label} cage ${index + 1}`;
+            if (modeAuto) {
+                modeAuto.name = `${config.inputPrefix}_extra_cage_mode_${index}`;
+                modeAuto.id = `id_${config.inputPrefix}_extra_cage_mode_${index}_auto`;
+            }
+            if (modeExisting) {
+                modeExisting.name = `${config.inputPrefix}_extra_cage_mode_${index}`;
+                modeExisting.id = `id_${config.inputPrefix}_extra_cage_mode_${index}_existing`;
+            }
+            row.querySelector("[data-extra-cage-mode-auto-label]")?.setAttribute("for", `id_${config.inputPrefix}_extra_cage_mode_${index}_auto`);
+            row.querySelector("[data-extra-cage-mode-existing-label]")?.setAttribute("for", `id_${config.inputPrefix}_extra_cage_mode_${index}_existing`);
+            if (autoLabel) {
+                autoLabel.htmlFor = `id_${config.inputPrefix}_extra_cage_id_${index}`;
+                autoLabel.textContent = `Optional new ${config.label.toLowerCase()} cage ${index + 1} ID`;
+            }
+            if (autoInput) {
+                autoInput.name = `${config.inputPrefix}_extra_cage_id_${index}`;
+                autoInput.id = `id_${config.inputPrefix}_extra_cage_id_${index}`;
+            }
+            if (projectLabel) projectLabel.htmlFor = `id_${config.inputPrefix}_extra_project_filter_${index}`;
+            if (projectFilter) projectFilter.id = `id_${config.inputPrefix}_extra_project_filter_${index}`;
+            if (ownerLabel) ownerLabel.htmlFor = `id_${config.inputPrefix}_extra_owner_filter_${index}`;
+            if (ownerFilter) ownerFilter.id = `id_${config.inputPrefix}_extra_owner_filter_${index}`;
+            if (cageLabel) {
+                cageLabel.htmlFor = `id_${config.inputPrefix}_extra_cage_${index}`;
+                cageLabel.textContent = `Existing ${config.label.toLowerCase()} cage ${index + 1}`;
+            }
+            if (cageSelect) {
+                cageSelect.name = `${config.inputPrefix}_extra_cage_${index}`;
+                cageSelect.id = `id_${config.inputPrefix}_extra_cage_${index}`;
+            }
+            if (lookupLabel) {
+                lookupLabel.htmlFor = `id_${config.inputPrefix}_extra_cage_lookup_${index}`;
+                lookupLabel.textContent = `Or enter ${config.label.toLowerCase()} cage ${index + 1} ID`;
+            }
+            if (lookupInput) {
+                lookupInput.name = `${config.inputPrefix}_extra_cage_lookup_${index}`;
+                lookupInput.id = `id_${config.inputPrefix}_extra_cage_lookup_${index}`;
+            }
+            if (removeButton) {
+                removeButton.setAttribute("aria-label", `Remove ${config.label.toLowerCase()} cage ${index + 1}`);
+            }
+            syncExtraCageRowMode(row);
+        });
+        if (config.countInput) config.countInput.value = String(rows.length);
+        syncPupCageSlotOptions();
+        syncSexLayout();
+    }
+
+    function makeFilterSelect(kind) {
+        const source = kind === "project" ? projectFilters[0] : ownerFilters[0];
+        const select = document.createElement("select");
+        select.className = "filter-control";
+        select.innerHTML = source?.innerHTML || '<option value="">All</option>';
+        if (source) select.value = source.value;
+        if (kind === "project") {
+            select.dataset.weanCageProjectFilter = "1";
+            projectFilters.push(select);
+            select.addEventListener("change", () => {
+                syncFilterGroup(select, projectFilters);
+                reloadCagesDebounced();
+            });
+        } else {
+            select.dataset.weanCageOwnerFilter = "1";
+            ownerFilters.push(select);
+            select.addEventListener("change", () => {
+                syncFilterGroup(select, ownerFilters);
+                reloadCagesDebounced();
+            });
+        }
+        return select;
+    }
+
+    function appendFilterRow(parent, sexKey) {
+        const config = extraCageConfig[sexKey];
+        const filterGrid = document.createElement("div");
+        filterGrid.className = "filter-grid";
+        const projectRow = document.createElement("div");
+        projectRow.className = "form-row";
+        const projectLabel = document.createElement("label");
+        projectLabel.textContent = "Filter by project";
+        projectLabel.dataset.extraProjectLabel = "1";
+        const projectSelect = makeFilterSelect("project");
+        projectRow.appendChild(projectLabel);
+        projectRow.appendChild(projectSelect);
+        const ownerRow = document.createElement("div");
+        ownerRow.className = "form-row";
+        const ownerLabel = document.createElement("label");
+        ownerLabel.textContent = "Filter by owner";
+        ownerLabel.dataset.extraOwnerLabel = "1";
+        const ownerSelect = makeFilterSelect("owner");
+        ownerRow.appendChild(ownerLabel);
+        ownerRow.appendChild(ownerSelect);
+        filterGrid.appendChild(projectRow);
+        filterGrid.appendChild(ownerRow);
+        parent.appendChild(filterGrid);
+
+        const refreshRow = document.createElement("div");
+        refreshRow.className = "form-row wean-extra-cage-refresh-row";
+        const refreshButton = document.createElement("button");
+        refreshButton.type = "button";
+        refreshButton.className = "button button-light";
+        refreshButton.textContent = "Refresh list";
+        refreshButton.addEventListener("click", () => reloadCages());
+        const status = document.createElement("span");
+        status.className = "muted small-print";
+        status.dataset.weanCageFilterStatus = "1";
+        status.textContent = "Showing all active cages.";
+        filterStatuses.push(status);
+        refreshRow.appendChild(refreshButton);
+        refreshRow.appendChild(status);
+        parent.appendChild(refreshRow);
+    }
+
+    function bindExtraExistingControls(row, sexKey) {
+        const select = row.querySelector("[data-extra-cage-select]");
+        const lookup = row.querySelector("[data-extra-cage-lookup]");
+        const status = row.querySelector("[data-extra-cage-lookup-status]");
+        select?.addEventListener("change", () => {
+            if (lookup && select.value) {
+                const cage = cages.find((c) => String(c.id) === String(select.value));
+                if (cage) {
+                    lookup.value = cage.cage_id;
+                    syncLookupToSelect(lookup, select, status);
+                }
+            }
+            syncSexLayout();
+        });
+        lookup?.addEventListener("input", () => syncLookupToSelect(lookup, select, status));
+        row.querySelectorAll("[data-extra-cage-mode]").forEach((radio) => {
+            radio.addEventListener("change", () => syncExtraCageRowMode(row));
+        });
+        select.dataset.sex = extraCageConfig[sexKey].sexValue;
+    }
+
+    function addExtraCageRow(sexKey, value = "") {
+        const config = extraCageConfig[sexKey];
+        if (!config.list) return;
+        const row = document.createElement("div");
+        row.className = "wean-extra-cage-row";
+        row.dataset.extraCageRow = sexKey;
+        const title = document.createElement("h4");
+        title.dataset.extraCageTitle = "1";
+        row.appendChild(title);
+        const modeRow = document.createElement("div");
+        modeRow.className = "form-row assignment-mode-row wean-extra-cage-mode-row";
+        const modeLabel = document.createElement("label");
+        modeLabel.textContent = "Cage setup";
+        const choices = document.createElement("div");
+        const autoMode = document.createElement("input");
+        autoMode.type = "radio";
+        autoMode.value = "auto";
+        autoMode.checked = true;
+        autoMode.dataset.extraCageMode = "1";
+        autoMode.dataset.extraCageModeAuto = "1";
+        const autoModeLabel = document.createElement("label");
+        autoModeLabel.dataset.extraCageModeAutoLabel = "1";
+        autoModeLabel.appendChild(autoMode);
+        autoModeLabel.appendChild(document.createTextNode("Auto-create a new cage"));
+        const existingMode = document.createElement("input");
+        existingMode.type = "radio";
+        existingMode.value = "existing";
+        existingMode.dataset.extraCageMode = "1";
+        existingMode.dataset.extraCageModeExisting = "1";
+        const existingModeLabel = document.createElement("label");
+        existingModeLabel.dataset.extraCageModeExistingLabel = "1";
+        existingModeLabel.appendChild(existingMode);
+        existingModeLabel.appendChild(document.createTextNode("Use an existing active cage"));
+        choices.appendChild(autoModeLabel);
+        choices.appendChild(existingModeLabel);
+        modeRow.appendChild(modeLabel);
+        modeRow.appendChild(choices);
+        row.appendChild(modeRow);
+
+        const autoPanel = document.createElement("div");
+        autoPanel.className = "assignment-detail-panel wean-extra-cage-subpanel";
+        autoPanel.dataset.extraAutoPanel = "1";
+        const autoField = document.createElement("div");
+        autoField.className = "form-row";
+        const autoLabel = document.createElement("label");
+        autoLabel.dataset.extraAutoLabel = "1";
+        const autoInput = document.createElement("input");
+        autoInput.type = "text";
+        autoInput.maxLength = 64;
+        autoInput.value = value || "";
+        autoInput.placeholder = "Optional; leave blank to auto-generate";
+        autoInput.dataset.extraAutoId = "1";
+        const help = document.createElement("small");
+        help.className = "muted";
+        help.textContent = "Optional. Leave blank and MouseXGene will generate it automatically.";
+        autoField.appendChild(autoLabel);
+        autoField.appendChild(autoInput);
+        autoField.appendChild(help);
+        autoPanel.appendChild(autoField);
+        row.appendChild(autoPanel);
+
+        const existingPanel = document.createElement("div");
+        existingPanel.className = "assignment-detail-panel wean-extra-cage-subpanel";
+        existingPanel.dataset.extraExistingPanel = "1";
+        existingPanel.hidden = true;
+        appendFilterRow(existingPanel, sexKey);
+        const cageRow = document.createElement("div");
+        cageRow.className = "form-row";
+        const cageLabel = document.createElement("label");
+        cageLabel.dataset.extraCageLabel = "1";
+        const cageSelect = document.createElement("select");
+        cageSelect.dataset.extraCageSelect = "1";
+        cageSelect.dataset.sex = config.sexValue;
+        cageRow.appendChild(cageLabel);
+        cageRow.appendChild(cageSelect);
+        existingPanel.appendChild(cageRow);
+        const lookupRow = document.createElement("div");
+        lookupRow.className = "form-row";
+        const lookupLabel = document.createElement("label");
+        lookupLabel.dataset.extraLookupLabel = "1";
+        const lookupInput = document.createElement("input");
+        lookupInput.type = "text";
+        lookupInput.maxLength = 64;
+        lookupInput.dataset.extraCageLookup = "1";
+        const lookupHelp = document.createElement("small");
+        lookupHelp.className = "muted";
+        lookupHelp.textContent = "Partial cage ID supported.";
+        const lookupStatus = document.createElement("p");
+        lookupStatus.className = "muted small-print";
+        lookupStatus.dataset.extraCageLookupStatus = "1";
+        lookupStatus.setAttribute("aria-live", "polite");
+        const selectedSummary = document.createElement("p");
+        selectedSummary.className = "muted small-print";
+        selectedSummary.dataset.extraCageSelectedSummary = "1";
+        selectedSummary.setAttribute("aria-live", "polite");
+        lookupRow.appendChild(lookupLabel);
+        lookupRow.appendChild(lookupInput);
+        lookupRow.appendChild(lookupHelp);
+        lookupRow.appendChild(lookupStatus);
+        lookupRow.appendChild(selectedSummary);
+        existingPanel.appendChild(lookupRow);
+        row.appendChild(existingPanel);
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "button button-light button-small";
+        removeButton.textContent = "Remove";
+        removeButton.dataset.extraCageRemove = "1";
+        removeButton.addEventListener("click", () => {
+            row.remove();
+            renumberExtraCages(sexKey);
+        });
+        row.appendChild(removeButton);
+        config.list.appendChild(row);
+        bindExtraExistingControls(row, sexKey);
+        renumberExtraCages(sexKey);
+        renderCageOptions();
+    }
+
+    function clearExtraCages(sexKey) {
+        const config = extraCageConfig[sexKey];
+        config.list?.replaceChildren();
+        if (config.countInput) config.countInput.value = "0";
+        syncPupCageSlotOptions();
+    }
+
+    function extraCageCount(sexKey) {
+        return extraCageConfig[sexKey].list?.querySelectorAll("[data-extra-cage-row]").length || 0;
+    }
+
+    function assignedCageSlotCount(sexKey) {
+        const sexValue = extraCageConfig[sexKey].sexValue;
+        const assigned = new Set();
+        pupEntriesContainer?.querySelectorAll(".pup-card").forEach((card) => {
+            if (card.querySelector('[name$="-sex"]')?.value !== sexValue) return;
+            const slot = card.querySelector('[name$="-cage_slot"]')?.value || extraCageConfig[sexKey].defaultSlot;
+            if (slot) assigned.add(slot);
+        });
+        return assigned.size;
     }
 
     function rebuildPupEntriesClient() {
@@ -686,6 +1173,7 @@
             pupEntriesCount.textContent = `(${total})`;
         }
         entriesSynced = true;
+        syncPupCageSlotOptions();
         if (pupEntriesSyncHint) {
             pupEntriesSyncHint.textContent = total
                 ? `${total} pup entr${total === 1 ? "y" : "ies"} (${male}♂ · ${female}♀).`
@@ -763,15 +1251,35 @@
     }
 
     function currentCageFilters() {
+        const projectFilter = visibleFilter(projectFilters) || projectFilters.find((filter) => document.contains(filter));
+        const ownerFilter = visibleFilter(ownerFilters) || ownerFilters.find((filter) => document.contains(filter));
         return {
             project_id: projectFilter?.value || "",
             owner_id: ownerFilter?.value || "",
         };
     }
 
+    function visibleFilter(filters) {
+        return filters.find((filter) => document.contains(filter) && !filter.closest("[hidden]")) || null;
+    }
+
+    function syncFilterGroup(source, filters) {
+        filters.forEach((filter) => {
+            if (document.contains(filter) && filter !== source) filter.value = source.value;
+        });
+    }
+
+    function syncFilterStatus(text) {
+        filterStatuses.forEach((status) => {
+            if (document.contains(status)) status.textContent = text;
+        });
+    }
+
     function selectedCageFor(selectEl) {
         if (selectEl === maleCageSelect && cageAssignmentMode("male") !== "existing") return null;
         if (selectEl === femaleCageSelect && cageAssignmentMode("female") !== "existing") return null;
+        const extraRow = selectEl?.closest?.("[data-extra-cage-row]");
+        if (extraRow && extraCageMode(extraRow) !== "existing") return null;
         return MXGPicker.findCage(cages, selectEl?.value || "");
     }
 
@@ -803,6 +1311,11 @@
     function syncCageSummaries() {
         updateCageSummary(maleCageSelect, maleSelectedSummary, "M");
         updateCageSummary(femaleCageSelect, femaleSelectedSummary, "F");
+        document.querySelectorAll("[data-extra-cage-select]").forEach((selectEl) => {
+            const row = selectEl.closest("[data-extra-cage-row]");
+            const summaryEl = row?.querySelector("[data-extra-cage-selected-summary]");
+            updateCageSummary(selectEl, summaryEl, selectEl.dataset.sex || "M");
+        });
     }
 
     function ensureCageInOptions(cage) {
@@ -815,17 +1328,17 @@
 
     async function reloadCages(extra = {}) {
         if (!window.MXGPicker) return;
-        if (filterStatus) filterStatus.textContent = "Loading cages...";
+        syncFilterStatus("Loading cages...");
         try {
             cages = await MXGPicker.loadCages(cageApiUrl, { ...currentCageFilters(), ...extra });
             renderCageOptions();
             syncCageSummaries();
         } catch (err) {
-            if (filterStatus) filterStatus.textContent = `Failed to load cages: ${err.message}`;
+            syncFilterStatus(`Failed to load cages: ${err.message}`);
         }
     }
 
-    const reloadCagesDebounced = window.MXGPicker?.debounce(() => reloadCages(), 250);
+    const reloadCagesDebounced = window.MXGPicker?.debounce(() => reloadCages(), 250) || (() => reloadCages());
 
     function renderSelectOptions(selectEl, selectedId) {
         if (!selectEl) return;
@@ -848,11 +1361,14 @@
     function renderCageOptions() {
         renderSelectOptions(maleCageSelect, selectedMaleCageId);
         renderSelectOptions(femaleCageSelect, selectedFemaleCageId);
-        if (filterStatus) {
-            const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
-            const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
-            filterStatus.textContent = `Showing ${cages.length} cage(s) for ${projectLabel} / ${ownerLabel}.`;
-        }
+        document.querySelectorAll("[data-extra-cage-select]").forEach((selectEl) => {
+            renderSelectOptions(selectEl, selectEl.dataset.selectedId || "");
+        });
+        const projectFilter = visibleFilter(projectFilters) || projectFilters[0];
+        const ownerFilter = visibleFilter(ownerFilters) || ownerFilters[0];
+        const projectLabel = projectFilter?.selectedOptions?.[0]?.text || "All projects";
+        const ownerLabel = ownerFilter?.selectedOptions?.[0]?.text || "All owners";
+        syncFilterStatus(`Showing ${cages.length} cage(s) for ${projectLabel} / ${ownerLabel}.`);
     }
 
     function countPupSexes() {
@@ -882,8 +1398,14 @@
         if (femaleSection) femaleSection.hidden = femaleCount === 0;
         syncOneCageAssignmentMode("male");
         syncOneCageAssignmentMode("female");
-        if (maleCount === 0) clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus, maleSelectedSummary, maleAutoCageInput);
-        if (femaleCount === 0) clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus, femaleSelectedSummary, femaleAutoCageInput);
+        if (maleCount === 0) {
+            clearCageBlock(maleCageSelect, maleCageLookup, maleLookupStatus, maleSelectedSummary, maleAutoCageInput);
+            clearExtraCages("male");
+        }
+        if (femaleCount === 0) {
+            clearCageBlock(femaleCageSelect, femaleCageLookup, femaleLookupStatus, femaleSelectedSummary, femaleAutoCageInput);
+            clearExtraCages("female");
+        }
         if (maleCountLabel) maleCountLabel.textContent = maleCount ? `(${maleCount})` : "";
         if (femaleCountLabel) femaleCountLabel.textContent = femaleCount ? `(${femaleCount})` : "";
 
@@ -924,13 +1446,21 @@
                 sexSummary.textContent = "Choose a cage for each sex before saving.";
                 sexSummary.className = "field-error";
             } else if (maleCount > 0 && femaleCount > 0) {
-                sexSummary.textContent = `${maleCount}♂ · ${femaleCount}♀ → requires 2 cages: male cage + female cage`;
+                const maleOptions = 1 + extraCageCount("male");
+                const femaleOptions = 1 + extraCageCount("female");
+                const maleAssigned = assignedCageSlotCount("male");
+                const femaleAssigned = assignedCageSlotCount("female");
+                sexSummary.textContent = `${maleCount}♂ using ${maleAssigned}/${maleOptions} male cage option${maleOptions === 1 ? "" : "s"} · ${femaleCount}♀ using ${femaleAssigned}/${femaleOptions} female cage option${femaleOptions === 1 ? "" : "s"}. Assign each UID above.`;
                 sexSummary.className = "muted";
             } else if (maleCount > 0) {
-                sexSummary.textContent = `${maleCount}♂ → requires 1 cage: male cage`;
+                const maleOptions = 1 + extraCageCount("male");
+                const maleAssigned = assignedCageSlotCount("male");
+                sexSummary.textContent = `${maleCount}♂ using ${maleAssigned}/${maleOptions} male cage option${maleOptions === 1 ? "" : "s"}. Assign each UID above.`;
                 sexSummary.className = "muted";
             } else if (femaleCount > 0) {
-                sexSummary.textContent = `${femaleCount}♀ → requires 1 cage: female cage`;
+                const femaleOptions = 1 + extraCageCount("female");
+                const femaleAssigned = assignedCageSlotCount("female");
+                sexSummary.textContent = `${femaleCount}♀ using ${femaleAssigned}/${femaleOptions} female cage option${femaleOptions === 1 ? "" : "s"}. Assign each UID above.`;
                 sexSummary.className = "muted";
             }
         }
@@ -941,6 +1471,8 @@
         if (!lookupInput || !statusEl || !window.MXGPicker) return;
         if (selectEl === maleCageSelect && cageAssignmentMode("male") !== "existing") return;
         if (selectEl === femaleCageSelect && cageAssignmentMode("female") !== "existing") return;
+        const extraRow = selectEl?.closest?.("[data-extra-cage-row]");
+        if (extraRow && extraCageMode(extraRow) !== "existing") return;
         const query = lookupInput.value.trim();
         if (!query) {
             statusEl.textContent = "";
@@ -977,9 +1509,19 @@
         syncSexLayout();
     }
 
-    applyFilterBtn?.addEventListener("click", () => reloadCages());
-    projectFilter?.addEventListener("change", reloadCagesDebounced);
-    ownerFilter?.addEventListener("change", reloadCagesDebounced);
+    applyFilterBtns.forEach((button) => button.addEventListener("click", () => reloadCages()));
+    projectFilters.forEach((filter) => {
+        filter.addEventListener("change", () => {
+            syncFilterGroup(filter, projectFilters);
+            reloadCagesDebounced();
+        });
+    });
+    ownerFilters.forEach((filter) => {
+        filter.addEventListener("change", () => {
+            syncFilterGroup(filter, ownerFilters);
+            reloadCagesDebounced();
+        });
+    });
     maleCageLookup?.addEventListener("input", () => syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus));
     femaleCageLookup?.addEventListener("input", () => syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus));
     maleCageSelect?.addEventListener("change", () => {
@@ -1004,6 +1546,11 @@
     });
     weanForm?.addEventListener("change", (event) => {
         if (event.target && event.target.name && event.target.name.endsWith("-sex")) {
+            syncPupCageSlotOptions();
+            syncSexLayout();
+        }
+        if (event.target && event.target.name && event.target.name.endsWith("-cage_slot")) {
+            event.target.dataset.currentValue = event.target.value;
             syncSexLayout();
         }
     });
@@ -1051,6 +1598,14 @@
         if (female > 0 && cageAssignmentMode("female") === "existing") {
             warnings.push(...cageWarningsFor(femaleCageSelect, "F").map((warning) => `female cage: ${warning}`));
         }
+        document.querySelectorAll("[data-extra-cage-row]").forEach((row) => {
+            if (extraCageMode(row) !== "existing") return;
+            const select = row.querySelector("[data-extra-cage-select]");
+            const title = row.querySelector("[data-extra-cage-title]")?.textContent || "extra cage";
+            if (select?.value) {
+                warnings.push(...cageWarningsFor(select, select.dataset.sex || "M").map((warning) => `${title}: ${warning}`));
+            }
+        });
         if (warnings.length) {
             const warningText = warnings.map((warning) => `- ${warning}`).join("\n");
             if (!window.confirm(`Cage assignment warning:\n${warningText}\n\nCreate weaned pups anyway?`)) {
@@ -1070,6 +1625,8 @@
     updatePupEntriesBtn?.addEventListener("click", () => rebuildPupEntriesClient());
     maleModeRadios.forEach((radio) => radio.addEventListener("change", syncSexLayout));
     femaleModeRadios.forEach((radio) => radio.addEventListener("change", syncSexLayout));
+    extraCageConfig.male.addButton?.addEventListener("click", () => addExtraCageRow("male"));
+    extraCageConfig.female.addButton?.addEventListener("click", () => addExtraCageRow("female"));
 
     const strainMode = document.getElementById("id_strain_assignment_mode");
     const newStrainRow = document.getElementById("wean-new-strain-row");
@@ -1085,6 +1642,7 @@
     reloadCages();
     syncLookupToSelect(maleCageLookup, maleCageSelect, maleLookupStatus);
     syncLookupToSelect(femaleCageLookup, femaleCageSelect, femaleLookupStatus);
+    syncPupCageSlotOptions();
     syncStrainFields();
     syncParentageMode();
     syncPupCountSummary();

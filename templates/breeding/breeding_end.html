@@ -48,6 +48,10 @@
 
 <section class="card">
     <h2>Breeder Destinations</h2>
+    <div class="workflow-note workflow-note--important">
+        <strong>Every breeder must have an outcome before this breeding can be ended.</strong>
+        <span>If a breeder is still alive, choose <strong>Move to another cage</strong> and select its new cage. If the breeder is Euthanized, Culled, or Found dead, no destination cage is needed.</span>
+    </div>
     <form method="post" class="form-layout" id="breeding-end-form">
         {% csrf_token %}
 
@@ -68,7 +72,8 @@
         </div>
 
         <div class="card card-nested">
-            <h2>Destination Cage Filter</h2>
+            <h2>Destination Cages For Moved Breeders</h2>
+            <p class="muted small-print">These filters only affect breeders whose Action is <strong>Move to another cage</strong>.</p>
             <div class="filter-grid">
                 <div class="form-row">
                     <label for="id_end_cage_owner_filter">Filter by owner</label>
@@ -109,6 +114,12 @@
             </div>
         </div>
 
+        <div class="form-row end-breeding-quick-actions">
+            <button type="button" class="button button-danger" id="end-mark-all-euthanized" title="Set every breeder action to Euthanized">Mark all euthanized</button>
+            <button type="button" class="button button-light" id="end-move-all" title="Set every breeder action to Move">Move all to cages</button>
+            <span class="muted small-print">Bulk actions only prefill the table below. For moved breeders, choose or create each destination cage before saving.</span>
+        </div>
+
         <div class="table-wrap">
             <table class="data-table data-table--compact data-table--end-breeding">
                 <colgroup>
@@ -129,7 +140,7 @@
                 </thead>
                 <tbody>
                     {% for row in member_rows %}
-                        <tr>
+                        <tr data-end-breeding-row>
                             <td>
                                 <a class="link-primary" href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a>
                                 <div class="muted small-print">{{ row.mouse.strain_line|default:"—" }}</div>
@@ -150,14 +161,17 @@
                             </td>
                             <td>
                                 {{ row.destination }}
-                                <div class="end-cage-row-actions">
-                                    <a
-                                        class="button button-light button-small end-create-cage-link"
-                                        href="{% url 'colony:cage_create' %}?next={{ request.get_full_path|urlencode }}&select_field={{ row.destination.html_name|urlencode }}&cage_use=holding&status=active"
-                                        data-select-name="{{ row.destination.html_name }}"
-                                    >Create New Cage</a>
+                                <div class="end-cage-move-fields">
+                                    <div class="end-cage-row-actions">
+                                        <a
+                                            class="button button-light button-small end-create-cage-link"
+                                            href="{% url 'colony:cage_create' %}?next={{ request.get_full_path|urlencode }}&select_field={{ row.destination.html_name|urlencode }}&cage_use=holding&status=active"
+                                            data-select-name="{{ row.destination.html_name }}"
+                                        >Create New Cage</a>
+                                    </div>
+                                    <p class="muted small-print end-cage-selected-summary" data-cage-summary-for="{{ row.destination.id_for_label }}" aria-live="polite"></p>
                                 </div>
-                                <p class="muted small-print end-cage-selected-summary" data-cage-summary-for="{{ row.destination.id_for_label }}" aria-live="polite"></p>
+                                <p class="muted small-print end-terminal-outcome-note" hidden>No destination cage is used for terminal outcomes.</p>
                                 {% if row.destination.errors %}
                                     <div class="field-error">{% for error in row.destination.errors %}<div>{{ error }}</div>{% endfor %}</div>
                                 {% endif %}
@@ -196,9 +210,12 @@
     const lookupInput = document.getElementById("id_end_cage_lookup");
     const lookupStatus = document.getElementById("end-cage-lookup-status");
     const form = document.getElementById("breeding-end-form");
+    const markAllEuthanizedBtn = document.getElementById("end-mark-all-euthanized");
+    const moveAllBtn = document.getElementById("end-move-all");
     if (!form || !window.MXGPicker) return;
 
     const MOVE_ACTION = "move";
+    const EUTHANIZED_ACTION = "euthanized";
     const actionSelects = Array.from(form.querySelectorAll("select[name^='member_action_']"));
     const cageSelects = Array.from(form.querySelectorAll("select[name^='destination_cage_']"));
     const createCageLinks = Array.from(form.querySelectorAll(".end-create-cage-link"));
@@ -334,11 +351,17 @@
 
     function syncActionState() {
         cageSelects.forEach((select) => {
-            const row = select.closest("tr");
+            const row = select.closest("[data-end-breeding-row]");
             const action = row?.querySelector("select[name^='member_action_']");
             const createLink = row?.querySelector(".end-create-cage-link");
+            const moveFields = row?.querySelector(".end-cage-move-fields");
+            const terminalNote = row?.querySelector(".end-terminal-outcome-note");
             const shouldMove = !action || action.value === MOVE_ACTION;
             select.disabled = !shouldMove;
+            select.hidden = !shouldMove;
+            row?.classList.toggle("end-breeding-row--terminal", !shouldMove);
+            if (moveFields) moveFields.hidden = !shouldMove;
+            if (terminalNote) terminalNote.hidden = shouldMove;
             if (createLink) {
                 createLink.classList.toggle("is-disabled", !shouldMove);
                 createLink.setAttribute("aria-disabled", shouldMove ? "false" : "true");
@@ -446,6 +469,31 @@
             updateSelectedSummary(select);
             saveFormState();
         });
+    });
+    markAllEuthanizedBtn?.addEventListener("click", () => {
+        actionSelects.forEach((select) => {
+            select.value = EUTHANIZED_ACTION;
+        });
+        cageSelects.forEach((select) => {
+            select.value = "";
+            selectedByName[select.name] = "";
+            updateSelectedSummary(select);
+        });
+        syncActionState();
+        saveFormState();
+    });
+    moveAllBtn?.addEventListener("click", () => {
+        actionSelects.forEach((select) => {
+            select.value = MOVE_ACTION;
+        });
+        cageSelects.forEach((select) => {
+            select.value = "";
+            selectedByName[select.name] = "";
+            updateSelectedSummary(select);
+        });
+        syncActionState();
+        saveFormState();
+        cageSelects.find((select) => !select.disabled)?.focus();
     });
     actionSelects.forEach((select) => {
         select.addEventListener("change", () => {

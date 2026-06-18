@@ -1,9 +1,16 @@
 #!/usr/bin/env python
 import os
 import sys
+from pathlib import Path
 
 
 def main() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        load_dotenv = None
+    if load_dotenv is not None:
+        load_dotenv(Path(__file__).resolve().parent / ".env")
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     try:
         from django.core.management import execute_from_command_line

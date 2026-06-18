@@ -1,5 +1,6 @@
 from django import forms
 
+from colony.forms import validate_import_file_upload
 from colony.models import Mouse
 from .models import Gene, MouseGenotype
 
@@ -9,6 +10,9 @@ class GenotypeImportForm(forms.Form):
         label="CSV or XLSX file",
         help_text="Required. Use the template; one row per locus result.",
     )
+
+    def clean_data_file(self):
+        return validate_import_file_upload(self.cleaned_data["data_file"])
 
 
 class GeneForm(forms.ModelForm):

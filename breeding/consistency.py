@@ -59,6 +59,8 @@ def breeding_cage_mismatch_rows(breeding: Breeding) -> list[dict]:
     rows: list[dict] = []
     for member in breeding_member_role_rows(breeding):
         mouse: Mouse = member["mouse"]
+        if mouse.status != Mouse.Status.ACTIVE:
+            continue
         if mouse.current_cage_id == breeding.cage_id:
             continue
         rows.append(

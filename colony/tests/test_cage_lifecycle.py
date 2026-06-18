@@ -72,12 +72,7 @@ class CageLifecycleTests(TestCase):
 
     def test_cage_edit_with_breeding_purpose_shows_on_breeding_list(self):
         client = Client()
-        admin = get_user_model().objects.create_superuser(
-            username="lifecycle-admin",
-            email="lifecycle-admin@example.test",
-            password="x",
-        )
-        client.force_login(admin)
+        client.login(username="lifecycle", password="x")
         holding_cage = Cage.objects.create(cage_id="HOLD-TO-BR")
         Mouse.objects.create(
             mouse_uid="M-SIRE-2",
@@ -96,8 +91,6 @@ class CageLifecycleTests(TestCase):
         response = client.post(
             reverse("colony:cage_edit", kwargs={"pk": holding_cage.pk}),
             {
-                "admin_correction_unlocked": "1",
-                "admin_correction_reason": "convert existing cage to breeding setup",
                 "cage_id": holding_cage.cage_id,
                 "created_date": "",
                 "cage_use": Cage.CageUse.BREEDING,
@@ -109,6 +102,9 @@ class CageLifecycleTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
+        holding_cage.refresh_from_db()
+        self.assertEqual(holding_cage.cage_type, Cage.CageType.BREEDING)
+        self.assertEqual(holding_cage.purpose, Cage.Purpose.BREEDING)
         self.assertTrue(Breeding.objects.filter(cage=holding_cage, active=True).exists())
         list_response = client.get(reverse("breeding:breeding_list"))
         self.assertContains(list_response, holding_cage.cage_id)
@@ -160,6 +156,37 @@ class CageLifecycleTests(TestCase):
         empty_cage.refresh_from_db()
         self.assertEqual(empty_cage.status, Cage.Status.RETIRED)
         self.assertEqual(empty_cage.purpose, Cage.Purpose.RETIRED)
+
+    def test_project_manager_can_restore_retired_cage(self):
+        client = Client()
+        client.login(username="lifecycle", password="x")
+        empty_cage = Cage.objects.create(
+            cage_id="RESTORE-EMPTY",
+            project=self.project,
+            status=Cage.Status.RETIRED,
+            purpose=Cage.Purpose.RETIRED,
+            cage_type=Cage.CageType.STANDARD,
+            archived_at=timezone.now(),
+        )
+
+        detail = client.get(reverse("colony:cage_detail", args=[empty_cage.pk]))
+        self.assertContains(detail, "Restore Cage")
+
+        response = client.post(
+            reverse("colony:cage_restore", args=[empty_cage.pk]),
+            {
+                "restore_date": timezone.localdate().isoformat(),
+                "cage_use": Cage.CageUse.HOLDING,
+                "reason": "Project manager reviewed correction",
+                "confirm": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("colony:cage_detail", args=[empty_cage.pk]))
+        empty_cage.refresh_from_db()
+        self.assertEqual(empty_cage.status, Cage.Status.ACTIVE)
+        self.assertEqual(empty_cage.purpose, Cage.Purpose.HOLDING)
+        self.assertIsNone(empty_cage.archived_at)
 
     def test_retire_cage_blocks_current_mice(self):
         client = Client()

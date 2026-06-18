@@ -7,7 +7,7 @@ from colony.models import StrainLine
 
 
 class StrainLineFormLociTests(TestCase):
-    def test_save_preserves_locus_type(self):
+    def test_save_preserves_new_locus_type(self):
         line = StrainLine.objects.create(
             line_name="Test Loci",
             name="Test Loci",
@@ -15,12 +15,12 @@ class StrainLineFormLociTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "Pcbp1mut-KI",
-                    "locus_type": "custom",
+                    "locus_type": "other_custom",
                     "chromosome_type": "autosomal",
                 },
                 {
                     "locus_name": "Lgr5-CreERT2",
-                    "locus_type": "custom",
+                    "locus_type": "other_custom",
                     "chromosome_type": "autosomal",
                 },
             ],
@@ -28,12 +28,12 @@ class StrainLineFormLociTests(TestCase):
         config = [
             {
                 "locus_name": "Pcbp1mut-KI",
-                "locus_type": "reporter_ki",
+                "locus_type": "reporter_knock_in",
                 "chromosome_type": "autosomal",
             },
             {
                 "locus_name": "Lgr5-CreERT2",
-                "locus_type": "cre_transgene",
+                "locus_type": "cre_ert2_ki",
                 "chromosome_type": "autosomal",
             },
         ]
@@ -52,9 +52,51 @@ class StrainLineFormLociTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         saved = form.save()
         entries = saved.expected_loci_entries()
-        self.assertEqual(entries[0]["locus_type"], "reporter_ki")
-        self.assertEqual(entries[1]["locus_type"], "cre_transgene")
+        self.assertEqual(entries[0]["locus_type"], "reporter_knock_in")
+        self.assertEqual(entries[1]["locus_type"], "cre_ert2_ki")
         self.assertIsInstance(saved.expected_loci_config, list)
+
+    def test_legacy_locus_type_values_are_normalized(self):
+        line = StrainLine.objects.create(
+            line_name="Legacy Loci",
+            name="Legacy Loci",
+            expected_loci_template="Rag1\nLgr5-CreERT2\nCd4-Cre-Tg",
+        )
+        config = [
+            {
+                "locus_name": "Rag1",
+                "locus_type": "standard_autosomal",
+                "chromosome_type": "autosomal",
+            },
+            {
+                "locus_name": "Lgr5-CreERT2",
+                "locus_type": "cre_transgene",
+                "chromosome_type": "autosomal",
+            },
+            {
+                "locus_name": "Cd4-Cre-Tg",
+                "locus_type": "tg_pos_neg",
+                "chromosome_type": "autosomal",
+            },
+        ]
+        data = {
+            "name": "Legacy Loci KO",
+            "species": "mouse",
+            "source": "",
+            "category": StrainLine.Category.COMPOUND_STRAIN,
+            "background": StrainLine.BackgroundPreset.C57BL_6J,
+            "expected_loci_template": "Rag1\nLgr5-CreERT2\nCd4-Cre-Tg",
+            "expected_loci_config": json.dumps(config),
+            "is_active": "on",
+            "notes": "",
+        }
+        form = StrainLineForm(data, instance=line)
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertEqual(
+            [entry["locus_type"] for entry in saved.expected_loci_entries()],
+            ["ko_null", "cre_ert2_ki", "transgene"],
+        )
 
     def test_rename_syncs_legacy_name_fields(self):
         line = StrainLine.objects.create(
@@ -66,7 +108,7 @@ class StrainLineFormLociTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "LocusA",
-                    "locus_type": "custom",
+                    "locus_type": "other_custom",
                     "chromosome_type": "autosomal",
                 }
             ],
@@ -99,7 +141,7 @@ class StrainLineFormLociTests(TestCase):
             expected_loci_config=[
                 {
                     "locus_name": "LocusA",
-                    "locus_type": "custom",
+                    "locus_type": "other_custom",
                     "chromosome_type": "autosomal",
                 }
             ],
@@ -121,7 +163,7 @@ class StrainLineFormLociTests(TestCase):
         self.assertEqual(saved.expected_loci_list(), [])
         self.assertEqual(saved.expected_loci_config, [])
 
-    def test_save_preserves_tg_pos_neg_locus_type(self):
+    def test_save_normalizes_tg_pos_neg_locus_type(self):
         line = StrainLine.objects.create(
             line_name="TgStrain",
             name="TgStrain",
@@ -148,7 +190,7 @@ class StrainLineFormLociTests(TestCase):
         form = StrainLineForm(data, instance=line)
         self.assertTrue(form.is_valid(), form.errors)
         saved = form.save()
-        self.assertEqual(saved.expected_loci_entries()[0]["locus_type"], "tg_pos_neg")
+        self.assertEqual(saved.expected_loci_entries()[0]["locus_type"], "transgene")
 
     def test_partial_save_with_name_updates_line_name(self):
         line = StrainLine.objects.create(

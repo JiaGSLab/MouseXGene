@@ -9,7 +9,9 @@
         <p class="muted">Master definitions: maintain loci and genes here first; they are then used when creating Mouse Genotype Records.</p>
     </div>
     <div class="action-links">
-        <a href="{% url 'genotypes:gene_create' %}" class="button">New Gene Definition</a>
+        {% if can_manage_strain_lines %}
+            <a href="{% url 'genotypes:gene_create' %}" class="button">New Gene Definition</a>
+        {% endif %}
         <a href="{% url 'genotypes:mouse_genotype_create' %}" class="button button-light">Add Genotype Record</a>
         <a href="{% url 'genotypes:genotype_record_list' %}" class="button button-light">Genotype Records</a>
         {% if can_import %}
@@ -58,7 +60,11 @@
                     <td>{{ gene.key_name|default:"-" }}</td>
                     <td>{{ gene.full_name|default:"-" }}</td>
                     <td><span class="status-pill">{{ gene.is_active|yesno:"Active,Archived" }}</span></td>
-                    <td><a href="{% url 'genotypes:gene_edit' gene.pk %}">Edit</a></td>
+                    <td>
+                        {% if can_manage_strain_lines %}
+                            <a href="{% url 'genotypes:gene_edit' gene.pk %}">Edit</a>
+                        {% endif %}
+                    </td>
                 </tr>
             {% empty %}
                 <tr>

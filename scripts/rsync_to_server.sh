@@ -18,6 +18,8 @@ echo "Syncing ${ROOT} -> ${SERVER}:${REMOTE_DIR}"
 rsync -avz --delete \
   --exclude '.git' \
   --exclude '.venv' \
+  --exclude '.claude' \
+  --exclude '.ruff_cache' \
   --exclude '.env' \
   --exclude '.env.deploy' \
   --exclude '.env.prod' \

@@ -64,7 +64,7 @@ class StrainLineUsageCountTests(TestCase):
         self.assertGreaterEqual(live["active_cages_count"], 2)
 
     def test_detail_page_related_records_reflect_new_breeding(self):
-        user = get_user_model().objects.create_user(username="strainview", password="x")
+        get_user_model().objects.create_user(username="strainview", password="x")
         self.client.login(username="strainview", password="x")
         Breeding.objects.create(
             breeding_code="BR-CNT-2",
@@ -111,7 +111,7 @@ class StrainLineUsageCountTests(TestCase):
             start_date="2026-01-01",
             active=True,
         )
-        user = get_user_model().objects.create_user(username="breedfilter", password="x")
+        get_user_model().objects.create_user(username="breedfilter", password="x")
         self.client.login(username="breedfilter", password="x")
         response = self.client.get(reverse("breeding:breeding_list"), {"strain_line_id": self.strain.pk})
         self.assertEqual(response.status_code, 200)
@@ -181,7 +181,7 @@ class StrainLineUsageCountTests(TestCase):
             start_date="2026-01-01",
             active=True,
         )
-        user = get_user_model().objects.create_user(username="cagefilter", password="x")
+        get_user_model().objects.create_user(username="cagefilter", password="x")
         self.client.login(username="cagefilter", password="x")
         response = self.client.get(reverse("colony:cage_list"), {"strain_line": self.strain.pk})
         self.assertEqual(response.status_code, 200)

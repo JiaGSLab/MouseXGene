@@ -21,13 +21,14 @@ fi
 mkdir -p "${OUTPUT_DIR}"
 
 echo "Dumping production DB on ${SERVER}..."
-ssh "${SERVER}" bash -s > "${BACKUP_FILE}" <<EOF
+ssh "${SERVER}" bash -s -- "${REMOTE_DIR}" > "${BACKUP_FILE}" <<'EOF'
 set -euo pipefail
-cd ${REMOTE_DIR}
+REMOTE_DIR="$1"
+cd "${REMOTE_DIR}"
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
-USER="\$(grep -E '^POSTGRES_USER=' .env.prod 2>/dev/null | cut -d= -f2- || echo mousexgene)"
-DB="\$(grep -E '^POSTGRES_DB=' .env.prod 2>/dev/null | cut -d= -f2- || echo mousexgene)"
-\${COMPOSE} exec -T db pg_dump -U "\${USER}" "\${DB}"
+USER="$(grep -E '^POSTGRES_USER=' .env.prod 2>/dev/null | cut -d= -f2- || echo mousexgene)"
+DB="$(grep -E '^POSTGRES_DB=' .env.prod 2>/dev/null | cut -d= -f2- || echo mousexgene)"
+${COMPOSE} exec -T db pg_dump -U "${USER}" "${DB}"
 EOF
 
 BYTES="$(wc -c < "${BACKUP_FILE}" | tr -d ' ')"

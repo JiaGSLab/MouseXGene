@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}End Litter {{ litter.litter_id_display }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>End Litter {{ litter.litter_id_display }}</h1>
+    <p class="muted">Close this litter workflow after confirming pup tracking is complete.</p>
+</section>
+
+<section class="card">
+    <h2>Litter Summary</h2>
+    <dl class="detail-grid">
+        <dt>Litter ID</dt><dd><strong>{{ litter.litter_id_display }}</strong></dd>
+        <dt>Status</dt><dd><span class="status-pill status-pill-{{ litter.litter_status }}">{{ litter.get_litter_status_display }}</span></dd>
+        <dt>Birth date</dt><dd>{{ litter.birth_date|default:"-" }}</dd>
+        <dt>Alive / dead</dt><dd>{{ litter.alive_count|default:"-" }} / {{ litter.dead_count|default:"-" }}</dd>
+        <dt>Male / female counts</dt><dd>{{ litter.male_count|default:"-" }} / {{ litter.female_count|default:"-" }}</dd>
+        <dt>Wean date</dt><dd>{{ litter.wean_date|default:"-" }}</dd>
+        <dt>Registered pups</dt><dd>{{ registered_pup_count }}</dd>
+        <dt>Breeding</dt>
+        <dd><a class="link-primary" href="{% url 'breeding:breeding_detail' litter.breeding.pk %}">{{ litter.breeding.breeding_code }}</a></dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Confirmation</h2>
+
+    {% if not has_weaned %}
+        <div class="workflow-note workflow-note--warning">
+            <strong>This litter has not been weaned.</strong>
+            <span>Ending it now will close the litter record without creating individual mouse records for the pups. Wean the litter first unless there are no pups that need to be tracked.</span>
+        </div>
+    {% else %}
+        <div class="workflow-note">
+            <strong>This litter appears to be weaned.</strong>
+            <span>Closing it will keep the record available in closed or archived filters.</span>
+        </div>
+    {% endif %}
+
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-row">
+            <label class="checkbox-inline" for="{{ form.confirm_end.id_for_label }}">
+                {{ form.confirm_end }}
+                <span>{{ form.confirm_end.label }}</span>
+            </label>
+            {% if form.confirm_end.errors %}
+                <div class="field-error">{% for error in form.confirm_end.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        {% if form.confirm_unweaned %}
+            <div class="form-row">
+                <label class="checkbox-inline" for="{{ form.confirm_unweaned.id_for_label }}">
+                    {{ form.confirm_unweaned }}
+                    <span>{{ form.confirm_unweaned.label }}</span>
+                </label>
+                {% if form.confirm_unweaned.errors %}
+                    <div class="field-error">{% for error in form.confirm_unweaned.errors %}<div>{{ error }}</div>{% endfor %}</div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <div class="form-actions">
+            <button type="submit" class="button button-danger">Confirm End Litter</button>
+            {% if not has_weaned %}
+                <a class="button" href="{% url 'litters:litter_wean' litter.pk %}">Wean litter first</a>
+            {% endif %}
+            <a class="button button-light" href="{% url 'litters:litter_detail' litter.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

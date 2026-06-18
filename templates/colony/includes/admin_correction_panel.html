@@ -13,12 +13,15 @@
     </div>
     <div class="form-row" data-admin-correction-reason {% if not admin_correction_unlocked %}hidden{% endif %}>
         <label for="admin-correction-reason">Correction reason</label>
-        <textarea
+        <select
             name="admin_correction_reason"
             id="admin-correction-reason"
-            rows="2"
-            placeholder="Required when changing locked historical fields"
-        >{{ admin_correction_reason }}</textarea>
+            class="filter-control"
+        >
+            {% for value, label in admin_correction_reason_choices %}
+                <option value="{{ value }}" {% if admin_correction_reason == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
     </div>
 </div>
 <script>

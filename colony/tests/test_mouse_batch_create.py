@@ -59,7 +59,7 @@ class MouseBatchCreateTests(TestCase):
         self.strain.expected_loci_config = [
             {
                 "locus_name": "Xgene",
-                "locus_type": StrainLine.LocusType.CUSTOM,
+                "locus_type": StrainLine.LocusType.OTHER_CUSTOM,
                 "chromosome_type": StrainLine.ChromosomeType.X_LINKED,
             }
         ]
@@ -83,7 +83,7 @@ class MouseBatchCreateTests(TestCase):
         self.strain.expected_loci_config = [
             {
                 "locus_name": "Xgene",
-                "locus_type": StrainLine.LocusType.CUSTOM,
+                "locus_type": StrainLine.LocusType.OTHER_CUSTOM,
                 "chromosome_type": StrainLine.ChromosomeType.X_LINKED,
             }
         ]

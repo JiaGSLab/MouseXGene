@@ -1,8 +1,5 @@
-import csv
-import json
 import logging
 import re
-from io import BytesIO
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
@@ -15,31 +12,31 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db import transaction
-from django.db.models import Count, Exists, F, Max, OuterRef, Q, Subquery, IntegerField, Value
+from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
-from openpyxl import Workbook
 
 from .forms import (
+    ADMIN_CORRECTION_REASON_CHOICES,
     CageForm,
     CageImportForm,
     CageRetireForm,
+    CageRestoreForm,
     MOUSE_BATCH_MAX_ROWS,
     MouseBatchEntryForm,
     MouseBatchSharedForm,
     MouseEndForm,
     MouseForm,
-    MouseGenotypeComponentFormSet,
     MouseImportForm,
     MouseRestoreForm,
+    MouseSexCorrectionForm,
     MoveCageForm,
     StrainLineForm,
 )
 from .importers import (
     EXPECTED_COLUMNS,
     GENOTYPE_SLOT_COUNT,
-    GENOTYPE_EXPECTED_COLUMNS,
     MOUSE_EXPECTED_COLUMNS,
     MOUSE_IMPORT_TEMPLATE_COLUMNS,
     MouseImportOptions,
@@ -60,7 +57,8 @@ from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
 from core.audit import log_audit_event
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
-from core.models import AuditLog, ImportLog, Project, ProjectMembership, format_project_owner_label
+from core.exporting import csv_response, set_content_disposition, xlsx_response
+from core.models import AuditLog, ImportLog, Project, format_project_owner_label
 from core.owner_filters import (
     project_owner_filter_options,
     resolve_project_owner_filter,
@@ -81,11 +79,7 @@ from colony.cage_lifecycle import (
 from colony.strain_line_usage import (
     compute_strain_line_usage_counts_bulk,
     compute_strain_line_usage_counts,
-    enrich_strain_line_cage_rows,
     strain_line_cage_ids,
-    strain_line_cage_queryset,
-    strain_line_member_breeding_filter,
-    strain_line_member_litter_filter,
 )
 from colony.import_staging import (
     ImportStagingError,
@@ -109,8 +103,10 @@ from core.list_sort import (
 from users.permissions import (
     authenticated_required,
     can_archive_or_change_terminal_status,
+    can_edit_strain_line,
     can_edit_project_data,
     can_import,
+    can_manage_strain_lines,
     ensure_can_archive_or_change_terminal_status,
     ensure_can_edit_cage,
     ensure_can_edit_project_data,
@@ -132,25 +128,36 @@ ADMIN_CORRECTION_FLAG = "admin_correction_unlocked"
 ADMIN_CORRECTION_REASON = "admin_correction_reason"
 
 
-def _admin_correction_unlocked(request: HttpRequest) -> bool:
-    return bool(is_admin(request.user) and (request.POST.get(ADMIN_CORRECTION_FLAG) or "") == "1")
+def _admin_correction_unlocked(request: HttpRequest, allowed_check=is_admin) -> bool:
+    return bool(allowed_check(request.user) and (request.POST.get(ADMIN_CORRECTION_FLAG) or "") == "1")
 
 
 def _admin_correction_reason(request: HttpRequest) -> str:
     return (request.POST.get(ADMIN_CORRECTION_REASON) or "").strip()
 
 
-def _require_admin_correction_reason(request: HttpRequest, form, changed_fields: list[str]) -> str:
+def _require_admin_correction_reason(
+    request: HttpRequest,
+    form,
+    changed_fields: list[str],
+    *,
+    allowed_check=is_admin,
+    denied_message: str = "Only admins can change locked historical fields.",
+) -> str:
     if not changed_fields:
         return ""
-    if not is_admin(request.user):
-        raise PermissionDenied("Only admins can change locked historical fields.")
+    if not allowed_check(request.user):
+        raise PermissionDenied(denied_message)
     reason = _admin_correction_reason(request)
     if not reason:
         form.add_error(
             None,
             "Correction reason is required when changing locked historical fields.",
         )
+        return ""
+    valid_reasons = {value for value, _label in ADMIN_CORRECTION_REASON_CHOICES if value}
+    if reason not in valid_reasons:
+        form.add_error(None, "Select a correction reason from the list.")
         return ""
     return reason
 
@@ -160,6 +167,7 @@ def _admin_correction_template_context(request: HttpRequest, form) -> dict:
         "admin_correction_available": getattr(form, "admin_correction_available", False),
         "admin_correction_unlocked": getattr(form, "admin_correction_unlocked", False),
         "admin_correction_reason": _admin_correction_reason(request) if request.method == "POST" else "",
+        "admin_correction_reason_choices": ADMIN_CORRECTION_REASON_CHOICES,
     }
 
 
@@ -179,6 +187,17 @@ def _can_retire_cage(user, cage: Cage) -> bool:
 def _ensure_can_retire_cage(user, cage: Cage) -> None:
     if not _can_retire_cage(user, cage):
         raise PermissionDenied("Only lab admins or project managers can retire cages.")
+
+
+def _can_restore_cage(user, cage: Cage) -> bool:
+    if cage.project_id:
+        return can_archive_or_change_terminal_status(user, cage.project)
+    return bool(is_admin(user) or is_manager(user))
+
+
+def _ensure_can_restore_cage(user, cage: Cage) -> None:
+    if not _can_restore_cage(user, cage):
+        raise PermissionDenied("Only lab admins or project managers can restore cages.")
 
 
 def _can_upload_strain_line_pdf(user) -> bool:
@@ -377,23 +396,7 @@ class MouseImportExecutionError(Exception):
 
 
 def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = sheet_name
-    worksheet.append(headers)
-    for row in rows:
-        worksheet.append(row)
-
-    buffer = BytesIO()
-    workbook.save(buffer)
-    buffer.seek(0)
-
-    response = HttpResponse(
-        buffer.getvalue(),
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return response
+    return xlsx_response(filename, sheet_name, headers, rows)
 
 
 def record_import_log(
@@ -777,11 +780,7 @@ def _cages_export_http_response(request: HttpRequest, export_fmt: str) -> HttpRe
     rows = _cages_export_rows_from_queryset(cages)
     headers = _cages_export_headers()
     if export_fmt == "csv":
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="cages_export.csv"'
-        writer = csv.writer(response)
-        writer.writerow(headers)
-        writer.writerows(rows)
+        response = csv_response("cages_export.csv", headers, rows)
     else:
         response = build_xlsx_response("cages.xlsx", "Cages", headers, rows)
     response["Cache-Control"] = "no-store"
@@ -1010,6 +1009,11 @@ def build_cage_genotype_overview(mice: list[Mouse], *, sample_size: int = 3) -> 
 
 def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, list[dict[str, str]]]:
     out: dict[int, list[dict[str, str]]] = {mid: [] for mid in mouse_ids}
+    if not mouse_ids:
+        return out
+    mouse_ids = list(
+        Mouse.objects.filter(pk__in=mouse_ids, status=Mouse.Status.ACTIVE).values_list("pk", flat=True)
+    )
     if not mouse_ids:
         return out
     breedings = (
@@ -1372,7 +1376,10 @@ def _template_loci_union_for_mouse_relations(
             if key in seen:
                 continue
             seen.add(key)
-            locus_type = entry.get("locus_type") or StrainLine.LocusType.CUSTOM
+            locus_type = StrainLine.normalize_locus_type(
+                entry.get("locus_type") or StrainLine.LocusType.OTHER_CUSTOM,
+                locus_name=text,
+            )
             chromosome_type = entry.get("chromosome_type") or StrainLine.ChromosomeType.AUTOSOMAL
             ordered.append(
                 {
@@ -1556,7 +1563,11 @@ def _propagate_strain_line_template_to_mice(
 
 
 def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: list[str]) -> None:
-    target_keys = {StrainLine.normalize_locus_name(l).casefold() for l in target_loci if StrainLine.normalize_locus_name(l)}
+    target_keys = {
+        StrainLine.normalize_locus_name(locus_name).casefold()
+        for locus_name in target_loci
+        if StrainLine.normalize_locus_name(locus_name)
+    }
     if mode == "replace":
         mouse.genotype_components.all().delete()
         mouse.ensure_template_genotype_components(extra_loci=list(target_loci), include_strain_template=False)
@@ -2560,6 +2571,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
             "allow_pdf_upload": False,
             "allow_pdf_delete": False,
+            "can_edit_line": can_edit_strain_line(request.user, line),
             "audit_entries": audit_entries,
             **actors,
         },
@@ -2675,8 +2687,7 @@ def strain_line_document_download(request: HttpRequest, pk: int, doc_pk: int) ->
     except FileNotFoundError as exc:
         raise Http404("File not found on disk.") from exc
     response = FileResponse(handle, content_type="application/pdf")
-    response["Content-Disposition"] = f'inline; filename="{doc.display_name}"'
-    return response
+    return set_content_disposition(response, doc.display_name, as_attachment=False)
 
 
 @authenticated_required
@@ -2700,10 +2711,12 @@ def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> H
 @authenticated_required
 def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
     line = get_object_or_404(StrainLine, pk=pk)
+    if not can_edit_strain_line(request.user, line):
+        raise PermissionDenied("You cannot edit this strain line.")
     documents = list(
         line.documents.select_related("uploaded_by", "uploaded_by__profile").order_by("created_at", "id")
     )
-    admin_unlocked = _admin_correction_unlocked(request)
+    admin_unlocked = _admin_correction_unlocked(request, allowed_check=can_manage_strain_lines)
     previous_active = line.is_active
     if request.method == "POST":
         form = StrainLineForm(
@@ -2714,15 +2727,21 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
         )
         if form.is_valid():
             admin_changed_fields = form.admin_correction_changed_fields()
-            correction_reason = _require_admin_correction_reason(request, form, admin_changed_fields)
+            correction_reason = _require_admin_correction_reason(
+                request,
+                form,
+                admin_changed_fields,
+                allowed_check=can_manage_strain_lines,
+                denied_message="Only lab admins or lab managers can change locked strain-line fields.",
+            )
             if admin_changed_fields and not correction_reason:
                 pass
             elif not form.has_changed():
                 messages.info(request, "No strain line changes to save.")
                 return redirect("colony:strain_line_detail", pk=line.pk)
             else:
-                if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
-                    raise PermissionDenied("Only managers or admins can archive/deactivate strain lines.")
+                if form.cleaned_data.get("is_active") != previous_active and not can_manage_strain_lines(request.user):
+                    raise PermissionDenied("Only lab admins or lab managers can archive/deactivate strain lines.")
                 before_editable = line.editable_loci_entries()
                 before_loci_names = [entry["locus_name"] for entry in before_editable]
                 before_name = (line.name or line.line_name or "").strip()
@@ -3002,6 +3021,57 @@ def cage_retire(request: HttpRequest, pk: int) -> HttpResponse:
     )
 
 
+@authenticated_required
+def cage_restore(request: HttpRequest, pk: int) -> HttpResponse:
+    cage = get_object_or_404(
+        _scoped_cage_queryset(request.user).select_related("project"),
+        pk=pk,
+    )
+    _ensure_can_restore_cage(request.user, cage)
+    if cage.status == Cage.Status.ACTIVE:
+        messages.info(request, f"Cage {cage.cage_id} is already active.")
+        return redirect("colony:cage_detail", pk=cage.pk)
+
+    if request.method == "POST":
+        form = CageRestoreForm(request.POST, cage=cage)
+        if form.is_valid():
+            restore_date = form.cleaned_data["restore_date"]
+            reason = form.cleaned_data["reason"]
+            target_use = form.cleaned_data["cage_use"]
+            previous_status = cage.status
+            previous_use = cage.get_cage_use_display()
+            cage.status = Cage.Status.ACTIVE
+            cage.archived_at = None
+            cage.set_cage_use(target_use)
+            cage.save(update_fields=["status", "cage_type", "purpose", "archived_at", "updated_at"])
+            breeding = sync_cage_breeding_workflow(cage)
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=cage,
+                message=(
+                    f"Restored cage {cage.cage_id} to Active on {restore_date}. "
+                    f"Status {previous_status} -> {cage.status}; cage use {previous_use} -> {cage.get_cage_use_display()}. "
+                    f"Reason: {reason}"
+                )[:4000],
+            )
+            if breeding:
+                messages.info(request, f"Breeding {breeding.breeding_code} linked to restored cage {cage.cage_id}.")
+            messages.success(request, f"Cage {cage.cage_id} restored to Active.")
+            return redirect("colony:cage_detail", pk=cage.pk)
+    else:
+        form = CageRestoreForm(cage=cage)
+
+    return render(
+        request,
+        "colony/cage_restore.html",
+        {
+            "cage": cage,
+            "form": form,
+        },
+    )
+
+
 @role_required(can_import)
 def cage_import(request: HttpRequest) -> HttpResponse:
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
@@ -3166,24 +3236,23 @@ def cage_import(request: HttpRequest) -> HttpResponse:
 
 @role_required(can_import)
 def cage_import_template(request: HttpRequest) -> HttpResponse:
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="cage_import_template.csv"'
-    writer = csv.writer(response)
-    writer.writerow(EXPECTED_COLUMNS)
-    writer.writerow(
+    return csv_response(
+        "cage_import_template.csv",
+        EXPECTED_COLUMNS,
         [
-            "C001",
-            "2026-04-10",
-            "Room-A",
-            "Rack-1",
-            "A1",
-            Cage.CageType.STANDARD,
-            Cage.Purpose.HOLDING,
-            Cage.Status.ACTIVE,
-            "Example note",
-        ]
+            [
+                "C001",
+                "2026-04-10",
+                "Room-A",
+                "Rack-1",
+                "A1",
+                Cage.CageType.STANDARD,
+                Cage.Purpose.HOLDING,
+                Cage.Status.ACTIVE,
+                "Example note",
+            ]
+        ],
     )
-    return response
 
 
 @role_required(can_import)
@@ -3218,7 +3287,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     )
     current_mice = list(
         _scoped_mouse_queryset(request.user)
-        .filter(current_cage=cage)
+        .filter(current_cage=cage, status=Mouse.Status.ACTIVE)
         .select_related("project", "project__owner", "project__owner__profile")
         .prefetch_related("genotype_components__strain_line", "genotypes__gene")
         .order_by("mouse_uid")
@@ -3270,6 +3339,10 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
             cage_retire_block_reason = "Move or end all current mice before retiring this cage."
         elif active_breeding_count:
             cage_retire_block_reason = "End linked active breeding records before retiring this cage."
+    can_restore_cage = (
+        _can_restore_cage(request.user, cage)
+        and cage.status not in {Cage.Status.ACTIVE, Cage.Status.ARCHIVED}
+    )
     audit_entries = audit_entries_for_object("Cage", cage.pk)
     actors = merge_actor_labels(cage, audit_entries)
     context = {
@@ -3284,6 +3357,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "is_breeding_cage": is_breeding_cage,
         "can_retire_cage": can_retire_cage,
         "cage_retire_block_reason": cage_retire_block_reason,
+        "can_restore_cage": can_restore_cage,
         "audit_entries": audit_entries,
         **actors,
     }
@@ -3340,25 +3414,22 @@ def cages_export(request: HttpRequest) -> HttpResponse:
 @authenticated_required
 def cage_inventory_export(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="cage_{cage.cage_id}_inventory.csv"'
-    writer = csv.writer(response)
-    writer.writerow(
-        [
-            "cage_id",
-            "mouse_uid",
-            "sex",
-            "birth_date",
-            "status",
-            "strain_line",
-            "project",
-            "ear_tag",
-            "coat_color",
-        ]
+    headers = [
+        "cage_id",
+        "mouse_uid",
+        "sex",
+        "birth_date",
+        "status",
+        "strain_line",
+        "project",
+        "ear_tag",
+        "coat_color",
+    ]
+    return csv_response(
+        f"cage_{cage.cage_id}_inventory.csv",
+        headers,
+        get_cage_inventory_rows(cage),
     )
-    for row in get_cage_inventory_rows(cage):
-        writer.writerow(row)
-    return response
 
 
 @authenticated_required
@@ -3425,11 +3496,7 @@ def _mice_export_http_response(request: HttpRequest, export_fmt: str) -> HttpRes
     headers = _mice_export_headers()
     rows = get_mice_export_rows(request)
     if export_fmt == "csv":
-        response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = 'attachment; filename="mice_export.csv"'
-        writer = csv.writer(response)
-        writer.writerow(headers)
-        writer.writerows(rows)
+        response = csv_response("mice_export.csv", headers, rows)
     else:
         response = build_xlsx_response("mice.xlsx", "Mice", headers, rows)
     response["Cache-Control"] = "no-store"
@@ -3659,36 +3726,35 @@ def mouse_import(request: HttpRequest) -> HttpResponse:
 
 @role_required(can_import)
 def mouse_import_template(request: HttpRequest) -> HttpResponse:
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="mouse_import_template.csv"'
-    writer = csv.writer(response)
-    writer.writerow(MOUSE_IMPORT_TEMPLATE_COLUMNS)
-    writer.writerow(
+    return csv_response(
+        "mouse_import_template.csv",
+        MOUSE_IMPORT_TEMPLATE_COLUMNS,
         [
-            "M001",
-            Mouse.Sex.FEMALE,
-            "2026-01-15",
-            Mouse.Status.ACTIVE,
-            "Tet2 flox",
-            "C001",
-            "Inflammation Study",
-            "ET-001",
-            "TT-001",
-            "In-house breeding",
-            "black",
-            "Example imported mouse",
-            "BC001",
-            "",
-            "",
-            "Cre/+",
-            "fl/fl",
-            "+/-",
-            "+/+",
-            "+/+",
-            "KI/+",
-        ]
+            [
+                "M001",
+                Mouse.Sex.FEMALE,
+                "2026-01-15",
+                Mouse.Status.ACTIVE,
+                "Tet2 flox",
+                "C001",
+                "Inflammation Study",
+                "ET-001",
+                "TT-001",
+                "In-house breeding",
+                "black",
+                "Example imported mouse",
+                "BC001",
+                "",
+                "",
+                "Cre/+",
+                "fl/fl",
+                "+/-",
+                "+/+",
+                "+/+",
+                "KI/+",
+            ]
+        ],
     )
-    return response
 
 
 @role_required(can_import)
@@ -3792,7 +3858,11 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         mouse.status not in TERMINAL_MOUSE_STATUSES
         and can_archive_or_change_terminal_status(request.user, mouse.project)
     )
-    can_restore_mouse = mouse.status in TERMINAL_MOUSE_STATUSES and is_admin(request.user)
+    can_restore_mouse = (
+        mouse.status in TERMINAL_MOUSE_STATUSES
+        and can_archive_or_change_terminal_status(request.user, mouse.project)
+    )
+    can_correct_mouse_sex = can_archive_or_change_terminal_status(request.user, mouse.project)
     context = {
         "mouse": mouse,
         "genotype_records": genotype_records,
@@ -3815,6 +3885,7 @@ def mouse_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "can_move_mouse": can_edit_mouse and mouse.status == Mouse.Status.ACTIVE,
         "can_end_mouse": can_end_mouse,
         "can_restore_mouse": can_restore_mouse,
+        "can_correct_mouse_sex": can_correct_mouse_sex,
         **actors,
     }
     return render(request, "colony/mouse_detail.html", context)
@@ -4145,13 +4216,25 @@ def mouse_edit(request: HttpRequest, pk: int) -> HttpResponse:
                         if StrainLine.normalize_locus_name(x)
                     }
                     overlap = sorted(
-                        [l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() in old_keys]
+                        [
+                            locus_name
+                            for locus_name in new_loci
+                            if StrainLine.normalize_locus_name(locus_name).casefold() in old_keys
+                        ]
                     )
                     to_add = sorted(
-                        [l for l in new_loci if StrainLine.normalize_locus_name(l).casefold() not in old_keys]
+                        [
+                            locus_name
+                            for locus_name in new_loci
+                            if StrainLine.normalize_locus_name(locus_name).casefold() not in old_keys
+                        ]
                     )
                     to_remove = sorted(
-                        [l for l in old_loci if StrainLine.normalize_locus_name(l).casefold() not in new_keys]
+                        [
+                            locus_name
+                            for locus_name in old_loci
+                            if StrainLine.normalize_locus_name(locus_name).casefold() not in new_keys
+                        ]
                     )
                     post_payload: list[tuple[str, str]] = []
                     for key, values in request.POST.lists():
@@ -4403,11 +4486,107 @@ def _latest_cage_membership(mouse: Mouse) -> CageMembership | None:
     )
 
 
+def _mouse_sex_correction_impact_rows(mouse: Mouse) -> list[dict[str, str]]:
+    breeder_count = (
+        Breeding.objects.filter(
+            Q(male=mouse)
+            | Q(female_1=mouse)
+            | Q(female_2=mouse)
+            | Q(extra_female_links__mouse=mouse)
+            | Q(breeding_members__mouse=mouse)
+        )
+        .distinct()
+        .count()
+    )
+    offspring_count = (
+        Mouse.objects.filter(Q(sire=mouse) | Q(dam=mouse) | Q(possible_dams=mouse))
+        .distinct()
+        .count()
+    )
+    sex_linked_count = mouse.genotype_components.filter(
+        chromosome_type__in=[
+            MouseGenotypeComponent.ChromosomeType.X_LINKED,
+            MouseGenotypeComponent.ChromosomeType.Y_LINKED,
+        ]
+    ).count()
+    litter_pup_linked = hasattr(mouse, "litter_pup_origin")
+    return [
+        {
+            "label": "Current cage",
+            "value": mouse.current_cage.cage_id if mouse.current_cage_id else "No current cage",
+        },
+        {"label": "Breeding role records", "value": str(breeder_count)},
+        {"label": "Offspring / parent records", "value": str(offspring_count)},
+        {"label": "Sex-linked genotype rows", "value": str(sex_linked_count)},
+        {"label": "Linked litter pup row", "value": "Yes" if litter_pup_linked else "No"},
+    ]
+
+
+@authenticated_required
+def mouse_correct_sex(request: HttpRequest, pk: int) -> HttpResponse:
+    mouse = get_object_or_404(
+        _scoped_mouse_queryset(request.user)
+        .select_related("current_cage", "project")
+        .prefetch_related("genotype_components"),
+        pk=pk,
+    )
+    ensure_can_archive_or_change_terminal_status(
+        request.user,
+        mouse.project,
+        denied_message="Only lab admins or project managers can correct mouse sex.",
+    )
+
+    if request.method == "POST":
+        with transaction.atomic():
+            mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
+            previous_sex = mouse_locked.sex
+            form = MouseSexCorrectionForm(request.POST, mouse=mouse_locked)
+            if form.is_valid():
+                target_sex = form.cleaned_data["sex"]
+                reason = form.cleaned_data["reason"]
+                mouse_locked.sex = target_sex
+                mouse_locked.save(update_fields=["sex", "updated_at"])
+
+                from breeding.models import LitterPup
+
+                linked_pup_count = LitterPup.objects.filter(mouse=mouse_locked).update(sex=target_sex)
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=mouse_locked,
+                    message=(
+                        f"Corrected sex for mouse {mouse_locked.mouse_uid}: {previous_sex} -> {target_sex}. "
+                        f"Reason: {reason}. Linked litter pup rows updated: {linked_pup_count}."
+                    )[:4000],
+                )
+                messages.success(
+                    request,
+                    f"Corrected sex for {mouse_locked.mouse_uid} from {previous_sex} to {target_sex}.",
+                )
+                return redirect("mice:mouse_detail", pk=mouse_locked.pk)
+            mouse = mouse_locked
+    else:
+        form = MouseSexCorrectionForm(mouse=mouse)
+
+    return render(
+        request,
+        "colony/mouse_correct_sex.html",
+        {
+            "mouse": mouse,
+            "form": form,
+            "impact_rows": _mouse_sex_correction_impact_rows(mouse),
+        },
+    )
+
+
 @authenticated_required
 def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
-    if not is_admin(request.user):
-        raise PermissionDenied("Only lab admins can restore a terminal mouse to active status.")
+    ensure_can_archive_or_change_terminal_status(
+        request.user,
+        mouse.project,
+        denied_message="Only lab admins or project managers can restore a terminal mouse to active status.",
+    )
     if mouse.status not in TERMINAL_MOUSE_STATUSES:
         messages.info(request, f"Mouse {mouse.mouse_uid} is already active/non-terminal.")
         return redirect("mice:mouse_detail", pk=mouse.pk)
@@ -4529,24 +4708,21 @@ def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
 @authenticated_required
 def mouse_genotypes_export(request: HttpRequest, pk: int) -> HttpResponse:
     mouse = get_object_or_404(_scoped_mouse_queryset(request.user), pk=pk)
-    response = HttpResponse(content_type="text/csv")
-    response["Content-Disposition"] = f'attachment; filename="mouse_{mouse.mouse_uid}_genotypes.csv"'
-    writer = csv.writer(response)
-    writer.writerow(
-        [
-            "mouse_uid",
-            "locus_name",
-            "allele_1",
-            "allele_2",
-            "zygosity_display",
-            "is_confirmed",
-            "assay_date",
-            "notes",
-        ]
+    headers = [
+        "mouse_uid",
+        "locus_name",
+        "allele_1",
+        "allele_2",
+        "zygosity_display",
+        "is_confirmed",
+        "assay_date",
+        "notes",
+    ]
+    return csv_response(
+        f"mouse_{mouse.mouse_uid}_genotypes.csv",
+        headers,
+        get_mouse_genotype_rows(mouse),
     )
-    for row in get_mouse_genotype_rows(mouse):
-        writer.writerow(row)
-    return response
 
 
 @authenticated_required

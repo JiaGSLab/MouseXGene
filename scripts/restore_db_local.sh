@@ -32,6 +32,11 @@ fi
 
 POSTGRES_USER="${POSTGRES_USER:-mousexgene}"
 POSTGRES_DB="${POSTGRES_DB:-mousexgene}"
+IDENT_RE='^[A-Za-z_][A-Za-z0-9_]*$'
+if [[ ! "${POSTGRES_USER}" =~ ${IDENT_RE} || ! "${POSTGRES_DB}" =~ ${IDENT_RE} ]]; then
+  echo "ERROR: POSTGRES_USER and POSTGRES_DB must be simple PostgreSQL identifiers." >&2
+  exit 1
+fi
 
 if [[ "${CONFIRM}" -eq 1 ]]; then
   echo "This will ERASE all data in local database \"${POSTGRES_DB}\" and load:"

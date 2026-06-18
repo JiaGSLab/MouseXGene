@@ -7,12 +7,25 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/backups}"
+if [[ -f .env.prod ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.prod
+  set +a
+fi
+POSTGRES_USER="${POSTGRES_USER:-mousexgene}"
+POSTGRES_DB="${POSTGRES_DB:-mousexgene}"
+IDENT_RE='^[A-Za-z_][A-Za-z0-9_]*$'
+if [[ ! "${POSTGRES_USER}" =~ ${IDENT_RE} || ! "${POSTGRES_DB}" =~ ${IDENT_RE} ]]; then
+  echo "ERROR: POSTGRES_USER and POSTGRES_DB must be simple PostgreSQL identifiers." >&2
+  exit 1
+fi
 
 mkdir -p "${BACKUP_DIR}" media staticfiles
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
 echo "Database backup -> ${BACKUP_DIR}/mousexgene_${STAMP}.sql"
-${COMPOSE} exec -T db pg_dump -U "${POSTGRES_USER:-mousexgene}" "${POSTGRES_DB:-mousexgene}" \
+${COMPOSE} exec -T db pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB}" \
   > "${BACKUP_DIR}/mousexgene_${STAMP}.sql"
 
 echo "Running migrations (required after code sync; missing migrations cause HTTP 500)..."

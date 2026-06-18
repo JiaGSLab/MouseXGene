@@ -130,6 +130,32 @@ def can_import(user) -> bool:
     return is_admin(user)
 
 
+def can_create_project(user) -> bool:
+    """Create a new project-level permission boundary."""
+    return is_admin(user) or is_manager(user)
+
+
+def can_manage_strain_lines(user) -> bool:
+    """Maintain lab-wide strain-line definitions and attachments."""
+    return is_admin(user) or is_manager(user)
+
+
+def can_edit_strain_line(user, strain_line) -> bool:
+    """Open the strain-line edit screen without changing lab-wide manager rules."""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if can_manage_strain_lines(user):
+        return True
+    user_id = getattr(user, "id", None)
+    return bool(
+        user_id
+        and (
+            getattr(strain_line, "owner_id", None) == user_id
+            or getattr(strain_line, "created_by_id", None) == user_id
+        )
+    )
+
+
 def can_manage_breeding(user) -> bool:
     return is_admin(user) or is_manager(user)
 

@@ -1,4 +1,3 @@
-import json
 import re
 
 from django.db import models
@@ -14,12 +13,16 @@ from core.models import ActorStampedModel, TimeStampedModel, format_project_owne
 
 class StrainLine(ActorStampedModel):
     class LocusType(models.TextChoices):
-        STANDARD_AUTOSOMAL = "standard_autosomal", "Standard autosomal"
-        FLOX = "flox", "Flox"
-        CRE_TRANSGENE = "cre_transgene", "Cre/CreERT2 knock-in"
-        REPORTER_KI = "reporter_ki", "Reporter KI"
-        TG_POS_NEG = "tg_pos_neg", "Tg (pos/neg)"
-        CUSTOM = "custom", "Custom"
+        KO_NULL = "ko_null", "KO / null allele"
+        FLOXED_ALLELE = "floxed_allele", "Floxed allele"
+        KNOCK_IN = "knock_in", "Knock-in"
+        CRE_KI = "cre_ki", "Cre knock-in"
+        CRE_ERT2_KI = "cre_ert2_ki", "CreERT2 knock-in"
+        TRANSGENE = "transgene", "Transgene"
+        REPORTER_KI = "reporter_knock_in", "Reporter knock-in"
+        REPORTER_TG = "reporter_transgene", "Reporter transgene"
+        POINT_VARIANT = "point_variant", "Point mutation / variant"
+        OTHER_CUSTOM = "other_custom", "Other / custom"
 
     class ChromosomeType(models.TextChoices):
         AUTOSOMAL = "autosomal", "Autosomal"
@@ -147,6 +150,57 @@ class StrainLine(ActorStampedModel):
         cleaned = re.sub(suffix_pattern, "", text, flags=re.IGNORECASE).strip()
         return cleaned or text
 
+    @classmethod
+    def normalize_locus_type(cls, raw_type: str, *, locus_name: str = "", line_name: str = "") -> str:
+        value = (raw_type or "").strip()
+        if value in cls.LocusType.values:
+            return value
+
+        context = f"{locus_name or ''} {line_name or ''}".strip()
+        context_lower = context.lower()
+        context_compact = re.sub(r"[^a-z0-9]+", "", context_lower)
+
+        if value == "x_linked":
+            return cls.LocusType.OTHER_CUSTOM
+        if value == "flox":
+            return cls.LocusType.FLOXED_ALLELE
+        if value == "reporter_ki":
+            return cls.LocusType.REPORTER_KI
+        if value == "tg_pos_neg":
+            return cls.LocusType.TRANSGENE
+        if value == "standard_autosomal":
+            if re.search(r"(^|[^a-z0-9])(ko|null|knockout)([^a-z0-9]|$)", context_lower):
+                return cls.LocusType.KO_NULL
+            return cls.LocusType.OTHER_CUSTOM
+        if value == "cre_transgene":
+            if "creert2" in context_compact:
+                return cls.LocusType.CRE_ERT2_KI
+            if re.search(r"(^|[^a-z0-9])(tg|transgene)([^a-z0-9]|$)", context_lower):
+                return cls.LocusType.TRANSGENE
+            return cls.LocusType.CRE_KI
+
+        aliases = {
+            "ko": cls.LocusType.KO_NULL,
+            "knockout": cls.LocusType.KO_NULL,
+            "null": cls.LocusType.KO_NULL,
+            "ki": cls.LocusType.KNOCK_IN,
+            "knock-in": cls.LocusType.KNOCK_IN,
+            "knock_in": cls.LocusType.KNOCK_IN,
+            "cre": cls.LocusType.CRE_KI,
+            "cre_ki": cls.LocusType.CRE_KI,
+            "creert2": cls.LocusType.CRE_ERT2_KI,
+            "creert2_ki": cls.LocusType.CRE_ERT2_KI,
+            "tg": cls.LocusType.TRANSGENE,
+            "transgene": cls.LocusType.TRANSGENE,
+            "reporter": cls.LocusType.REPORTER_KI,
+            "reporter_tg": cls.LocusType.REPORTER_TG,
+            "variant": cls.LocusType.POINT_VARIANT,
+            "point_mutation": cls.LocusType.POINT_VARIANT,
+            "custom": cls.LocusType.OTHER_CUSTOM,
+            "other": cls.LocusType.OTHER_CUSTOM,
+        }
+        return aliases.get(value, cls.LocusType.OTHER_CUSTOM)
+
     def expected_loci_entries(self) -> list[dict[str, str]]:
         out: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -161,16 +215,19 @@ class StrainLine(ActorStampedModel):
                 if name in seen:
                     continue
                 seen.add(name)
-                raw_locus_type = str(raw.get("locus_type", self.LocusType.CUSTOM)).strip()
+                raw_locus_type = str(raw.get("locus_type", self.LocusType.OTHER_CUSTOM)).strip()
                 chromosome_type = str(raw.get("chromosome_type", self.ChromosomeType.AUTOSOMAL)).strip()
 
                 # Backward-compat: old config may have locus_type=x_linked.
                 if raw_locus_type == "x_linked":
-                    raw_locus_type = self.LocusType.CUSTOM
+                    raw_locus_type = self.LocusType.OTHER_CUSTOM
                     chromosome_type = self.ChromosomeType.X_LINKED
 
-                if raw_locus_type not in self.LocusType.values:
-                    raw_locus_type = self.LocusType.CUSTOM
+                raw_locus_type = self.normalize_locus_type(
+                    raw_locus_type,
+                    locus_name=name,
+                    line_name=self.label,
+                )
                 if chromosome_type not in self.ChromosomeType.values:
                     chromosome_type = self.ChromosomeType.AUTOSOMAL
                 out.append(
@@ -197,7 +254,7 @@ class StrainLine(ActorStampedModel):
             out.append(
                 {
                     "locus_name": normalized,
-                    "locus_type": self.LocusType.CUSTOM,
+                    "locus_type": self.LocusType.OTHER_CUSTOM,
                     "chromosome_type": self.ChromosomeType.AUTOSOMAL,
                 }
             )
@@ -226,7 +283,7 @@ class StrainLine(ActorStampedModel):
             out.append(
                 {
                     "locus_name": locus,
-                    "locus_type": self.LocusType.CUSTOM,
+                    "locus_type": self.LocusType.OTHER_CUSTOM,
                     "chromosome_type": self.ChromosomeType.AUTOSOMAL,
                 }
             )
@@ -728,7 +785,7 @@ class Mouse(ActorStampedModel):
         include_strain_template: bool = True,
     ) -> int:
         loci = self.strain_line.expected_loci_list() if (include_strain_template and self.strain_line_id) else []
-        loci = [(l or "").strip() for l in loci if (l or "").strip()]
+        loci = [(locus or "").strip() for locus in loci if (locus or "").strip()]
         if extra_loci:
             seen = set(loci)
             for locus in extra_loci:

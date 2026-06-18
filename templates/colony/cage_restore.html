@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Restore Cage {{ cage.cage_id }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Restore Cage {{ cage.cage_id }}</h1>
+    <p class="muted">Return an inactive cage to active cage pickers while preserving its history.</p>
+</section>
+
+<section class="card">
+    <h2>Cage Summary</h2>
+    <dl class="detail-grid">
+        <dt>Cage ID</dt><dd>{{ cage.cage_id }}</dd>
+        <dt>Status</dt><dd>{{ cage.get_status_display }}</dd>
+        <dt>Cage Use</dt><dd>{{ cage.get_cage_use_display }}</dd>
+        <dt>Home Project</dt>
+        <dd>
+            {% if cage.project %}
+                <a class="link-primary" href="{% url 'project_detail' cage.project_id %}">{{ cage.project.name }}</a>
+                <span class="muted"> · {{ cage.project.owner_display }}</span>
+            {% else %}
+                <span class="muted">Not assigned</span>
+            {% endif %}
+        </dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Restore Record</h2>
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-row">
+            <label for="{{ form.restore_date.id_for_label }}">{{ form.restore_date.label }}</label>
+            {{ form.restore_date }}
+            {% if form.restore_date.errors %}
+                <div class="field-error">{% for error in form.restore_date.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.cage_use.id_for_label }}">{{ form.cage_use.label }}</label>
+            {{ form.cage_use }}
+            {% if form.cage_use.errors %}
+                <div class="field-error">{% for error in form.cage_use.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% if form.reason.errors %}
+                <div class="field-error">{% for error in form.reason.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label class="checkbox-inline" for="{{ form.confirm.id_for_label }}">
+                {{ form.confirm }}
+                <span>{{ form.confirm.label }}</span>
+            </label>
+            {% if form.confirm.errors %}
+                <div class="field-error">{% for error in form.confirm.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="button">Restore Cage</button>
+            <a href="{% url 'colony:cage_detail' cage.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

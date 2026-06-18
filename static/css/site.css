@@ -1451,6 +1451,139 @@ body.col-resize-active * {
     padding: 12px;
 }
 
+.workflow-note {
+    display: grid;
+    gap: 4px;
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #334155;
+}
+
+.workflow-note strong {
+    color: #1f2937;
+}
+
+.workflow-note--important {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.workflow-note--warning {
+    border-color: #f97316;
+    background: #fff7ed;
+}
+
+.inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.cage-assignment-block {
+    display: grid;
+    gap: 10px;
+}
+
+.assignment-mode-row > div,
+.assignment-mode-row ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin: 4px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.assignment-mode-row li {
+    margin: 0;
+}
+
+.assignment-mode-row input[type="radio"] {
+    margin-right: 6px;
+}
+
+.assignment-detail-panel {
+    margin: 2px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid #d7e1ef;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.assignment-detail-panel h3,
+.sex-cage-section h3 {
+    margin: 0 0 6px;
+    font-size: 0.98rem;
+    color: #243447;
+}
+
+.assignment-detail-panel > .muted:first-of-type,
+.sex-cage-section > .muted:first-of-type {
+    margin-top: 0;
+}
+
+.sex-cage-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+}
+
+.wean-extra-cage-list {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.wean-extra-cage-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 8px;
+    border: 1px solid #e4ebf5;
+    border-radius: 6px;
+    background: #f8fbff;
+}
+
+.wean-extra-cage-row h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #243447;
+}
+
+.wean-extra-cage-row .form-row {
+    margin: 0;
+}
+
+.wean-extra-cage-row > .button {
+    justify-self: start;
+}
+
+.wean-extra-cage-subpanel {
+    margin: 0;
+    background: #ffffff;
+}
+
+.wean-extra-cage-refresh-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+[data-extra-cage-lookup-status]:empty,
+[data-extra-cage-selected-summary]:empty {
+    display: none;
+}
+
+.pup-cage-slot-row select {
+    min-width: min(100%, 240px);
+}
+
 .small-print {
     font-size: 0.88rem;
 }
@@ -2257,27 +2390,33 @@ body.col-resize-active * {
 
 .data-table--end-breeding {
     table-layout: fixed;
-    min-width: 760px;
+    min-width: 940px;
 }
 
 .data-table--end-breeding .end-breeding-col-mouse {
-    width: 26%;
+    width: 22%;
 }
 
 .data-table--end-breeding .end-breeding-col-sex {
-    width: 10%;
+    width: 9%;
 }
 
 .data-table--end-breeding .end-breeding-col-current {
-    width: 20%;
+    width: 18%;
+}
+
+.data-table--end-breeding .end-breeding-col-action {
+    width: 18%;
 }
 
 .data-table--end-breeding .end-breeding-col-destination {
-    width: 44%;
+    width: 33%;
 }
 
+.data-table--end-breeding th,
 .data-table--end-breeding td {
     vertical-align: top;
+    overflow-wrap: anywhere;
 }
 
 .data-table--end-breeding select[name^="destination_cage_"] {
@@ -2285,8 +2424,48 @@ body.col-resize-active * {
     max-width: 100%;
 }
 
+.end-breeding-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    align-items: center;
+}
+
+.end-breeding-quick-actions .button {
+    max-width: 220px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.end-breeding-quick-actions .small-print {
+    flex: 1 1 260px;
+}
+
+.end-breeding-row--terminal td {
+    background: #f8fafc;
+}
+
+.end-terminal-outcome-note {
+    margin: 0;
+    color: #64748b;
+}
+
 .end-cage-row-actions {
     margin-top: 6px;
+}
+
+.breeding-alert-explain,
+.breeding-alert-actions {
+    margin-top: 3px;
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+
+.breeding-alert-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .end-cage-exception {

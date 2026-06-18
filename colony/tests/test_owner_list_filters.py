@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from colony.models import Cage, Mouse, StrainLine
+from colony.models import Mouse, StrainLine
 from core.models import Project
 from users.models import UserProfile
 

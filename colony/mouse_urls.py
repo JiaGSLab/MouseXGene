@@ -4,6 +4,7 @@ from .picker_api import mouse_picker_api, mouse_strain_line_map_api, mouse_uid_c
 from .views import (
     family_tree,
     mouse_create,
+    mouse_correct_sex,
     mouse_detail,
     mouse_edit,
     mouse_end,
@@ -37,6 +38,7 @@ urlpatterns = [
     path("export/xlsx/", mice_export_xlsx, name="mice_export_xlsx"),
     path("", mouse_list, name="mouse_list"),
     path("<int:pk>/edit/", mouse_edit, name="mouse_edit"),
+    path("<int:pk>/correct-sex/", mouse_correct_sex, name="mouse_correct_sex"),
     path("<int:pk>/move/", mouse_move, name="mouse_move"),
     path("<int:pk>/end/", mouse_end, name="mouse_end"),
     path("<int:pk>/restore/", mouse_restore, name="mouse_restore"),

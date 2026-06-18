@@ -15,10 +15,7 @@
                 <a class="button" href="{% url 'litters:litter_wean' litter.pk %}">Wean litter</a>
             {% endif %}
             {% if litter.litter_status != 'ended' and litter.litter_status != 'archived' %}
-                <form method="post" action="{% url 'litters:litter_end' litter.pk %}" class="action-inline-form" onsubmit="return confirm('End this litter workflow? You can still view it from archived filters.');">
-                    {% csrf_token %}
-                    <button type="submit" class="button">End litter</button>
-                </form>
+                <a class="button button-danger" href="{% url 'litters:litter_end' litter.pk %}">End litter</a>
             {% endif %}
         {% endif %}
         <a class="button" href="{% url 'litters:litter_list' %}">All litters</a>

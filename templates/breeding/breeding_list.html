@@ -169,6 +169,21 @@
                             title="{{ breeding.litter_timing_alert.days_without_litter }} days without litter"
                         >{{ breeding.litter_timing_alert.label }}</span>
                         <div class="breeding-alert-days" style="{{ breeding.alert_days_style }}">{{ breeding.litter_timing_alert.days_without_litter }}d</div>
+                        <div class="breeding-alert-explain">
+                            {% if breeding.litter_timing_alert.has_litter %}
+                                No recent litter recorded.
+                            {% else %}
+                                No litter recorded since setup.
+                            {% endif %}
+                        </div>
+                        {% if can_manage_breeding %}
+                            <div class="breeding-alert-actions">
+                                <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
+                                {% if breeding.status != "closed" or breeding.active %}
+                                    <a href="{% url 'breeding:breeding_end' breeding.pk %}">End breeding</a>
+                                {% endif %}
+                            </div>
+                        {% endif %}
                     {% else %}
                         <span class="muted">—</span>
                     {% endif %}

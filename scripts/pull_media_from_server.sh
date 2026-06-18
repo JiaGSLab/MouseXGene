@@ -15,7 +15,8 @@ fi
 
 mkdir -p "${ROOT}/media"
 
+REMOTE_MEDIA="$(printf '%q' "${REMOTE_DIR}/media/")"
 echo "Syncing media ${SERVER}:${REMOTE_DIR}/media/ -> ${ROOT}/media/"
-rsync -avz "${SERVER}:${REMOTE_DIR}/media/" "${ROOT}/media/"
+rsync -avz "${SERVER}:${REMOTE_MEDIA}" "${ROOT}/media/"
 
 echo "Done."

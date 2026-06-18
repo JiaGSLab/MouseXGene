@@ -4,6 +4,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.db.models import Count, Max, Q
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -28,7 +29,7 @@ from .models import AuditLog
 from .models import Project, ProjectMembership, format_project_owner_label
 from users.permissions import (
     authenticated_required,
-    can_import,
+    can_create_project,
     can_manage_project_settings,
     can_view_audit,
     is_admin,
@@ -328,7 +329,7 @@ def audit_log_list(request: HttpRequest) -> HttpResponse:
     return render(request, "core/audit_list.html", context)
 
 
-def _enrich_projects_for_list(projects) -> None:
+def _enrich_projects_for_list(projects, user) -> None:
     project_rows = list(projects)
     if not project_rows:
         return
@@ -344,6 +345,7 @@ def _enrich_projects_for_list(projects) -> None:
         labels = memberships_by_project.get(project.pk, [])
         project.member_labels = labels
         project.members_display = ", ".join(labels) if labels else "—"
+        project.can_manage = can_manage_project_settings(user, project)
 
 
 @authenticated_required
@@ -363,8 +365,8 @@ def project_list(request: HttpRequest) -> HttpResponse:
     projects = apply_list_sort(projects, request, PROJECT_LIST_SORT)
     active_projects = list(projects.filter(is_active=True))
     inactive_projects = list(projects.filter(is_active=False))
-    _enrich_projects_for_list(active_projects)
-    _enrich_projects_for_list(inactive_projects)
+    _enrich_projects_for_list(active_projects, request.user)
+    _enrich_projects_for_list(inactive_projects, request.user)
     context = {
         "active_projects": active_projects,
         "inactive_projects": inactive_projects,
@@ -432,8 +434,8 @@ def project_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def project_create(request: HttpRequest) -> HttpResponse:
-    if not (is_admin(request.user) or can_import(request.user)):
-        raise PermissionDenied("Only admin or project managers can create projects.")
+    if not can_create_project(request.user):
+        raise PermissionDenied("Only lab admins or lab managers can create projects.")
     if request.method == "POST":
         form = ProjectForm(request.POST)
         if form.is_valid():
@@ -524,12 +526,15 @@ def permission_denied(request: HttpRequest, exception: PermissionDenied) -> Http
     message = str(exception) or "You do not have permission to perform this action."
     if request.user.is_authenticated:
         messages.error(request, message)
-        referer = request.META.get("HTTP_REFERER", "").strip()
-        if referer:
-            try:
-                if referer != request.build_absolute_uri():
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            referer = request.META.get("HTTP_REFERER", "").strip()
+            if referer and referer != request.build_absolute_uri():
+                if url_has_allowed_host_and_scheme(
+                    referer,
+                    allowed_hosts={request.get_host()},
+                    require_https=request.is_secure(),
+                ):
                     return redirect(referer)
-            except Exception:
-                pass
-        return redirect(reverse("home"))
+            return redirect(reverse("home"))
+        return render(request, "403.html", {"message": message}, status=403)
     return redirect(reverse("login") + f"?next={request.path}")

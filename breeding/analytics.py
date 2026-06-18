@@ -83,10 +83,18 @@ def mendelian_single_locus_review_for_breeding(
     breeding: Breeding,
     offspring: list[Mouse],
     *,
+    sire: Mouse | None = None,
+    dams: list[Mouse] | None = None,
     min_sample_size: int = 8,
 ) -> list[dict]:
-    sire_components = {c.locus_name: c for c in breeding.male.genotype_components.all() if c.locus_name}
-    dam_components = {c.locus_name: c for c in breeding.female_1.genotype_components.all() if c.locus_name}
+    sire = sire or breeding.male
+    dams = dams if dams is not None else [breeding.female_1]
+    dams = [dam for dam in dams if dam is not None]
+    if sire is None or len(dams) != 1:
+        return []
+    dam = dams[0]
+    sire_components = {c.locus_name: c for c in sire.genotype_components.all() if c.locus_name}
+    dam_components = {c.locus_name: c for c in dam.genotype_components.all() if c.locus_name}
     common_loci = sorted(set(sire_components.keys()) & set(dam_components.keys()))
     if not common_loci:
         return []

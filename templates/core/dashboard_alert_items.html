@@ -54,6 +54,15 @@
             <li>
                 <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
                 - {{ breeding.get_status_display }}
+                <div class="muted small-print">
+                    No litter has been recorded for this active setup.
+                    {% if can_manage_breeding %}
+                        <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
+                        {% if breeding.status != "closed" or breeding.active %}
+                            · <a href="{% url 'breeding:breeding_end' breeding.pk %}">End breeding</a>
+                        {% endif %}
+                    {% endif %}
+                </div>
             </li>
         {% empty %}
             <li class="dashboard-alert-empty">All clear</li>
@@ -66,6 +75,19 @@
                 <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
                 - {{ breeding.litter_timing_alert.label }}
                 ({{ breeding.litter_timing_alert.days_without_litter }}d)
+                <div class="muted small-print">
+                    {% if breeding.litter_timing_alert.has_litter %}
+                        No recent litter has been recorded.
+                    {% else %}
+                        No litter has been recorded since setup.
+                    {% endif %}
+                    {% if can_manage_breeding %}
+                        <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
+                        {% if breeding.status != "closed" or breeding.active %}
+                            · <a href="{% url 'breeding:breeding_end' breeding.pk %}">End breeding</a>
+                        {% endif %}
+                    {% endif %}
+                </div>
             </li>
         {% empty %}
             <li class="dashboard-alert-empty">All clear</li>

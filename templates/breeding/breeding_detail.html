@@ -76,14 +76,25 @@
         <dd>{{ setup_by_display|default:"—" }}</dd>
     </dl>
     {% if litter_timing_alert %}
-        <p class="muted">
-            <strong>{{ litter_timing_alert.label }}</strong> -
-            {% if latest_litter_date %}
-                latest litter: {{ latest_litter_date }}; {{ litter_timing_alert.days_without_litter }} days since.
-            {% else %}
-                no litter yet; {{ litter_timing_alert.days_without_litter }} days since setup.
+        <div class="workflow-note workflow-note--warning">
+            <strong>{{ litter_timing_alert.label }}</strong>
+            <span>
+                {% if latest_litter_date %}
+                    Latest litter was {{ latest_litter_date }}; {{ litter_timing_alert.days_without_litter }} days have passed without another recorded litter.
+                {% else %}
+                    No litter has been recorded; {{ litter_timing_alert.days_without_litter }} days have passed since setup.
+                {% endif %}
+                Record a litter if pups were born, or end breeding if this setup should stop.
+            </span>
+            {% if can_manage_breeding %}
+                <span class="inline-actions">
+                    <a class="button button-light button-small" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
+                    {% if breeding.status != "closed" or breeding.active %}
+                        <a class="button button-light button-small" href="{% url 'breeding:breeding_end' breeding.pk %}">End Breeding</a>
+                    {% endif %}
+                </span>
             {% endif %}
-        </p>
+        </div>
     {% endif %}
 </section>
 

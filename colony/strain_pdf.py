@@ -63,3 +63,16 @@ def validate_strain_line_pdf_file(uploaded: UploadedFile) -> None:
     content_type = (getattr(uploaded, "content_type", "") or "").lower()
     if content_type and content_type not in ("application/pdf", "application/x-pdf"):
         raise ValidationError(f"{name} must have PDF content type (got {content_type}).")
+    try:
+        pos = uploaded.tell()
+    except (AttributeError, OSError):
+        pos = None
+    try:
+        header = uploaded.read(5)
+    finally:
+        if pos is not None:
+            uploaded.seek(pos)
+        else:
+            uploaded.seek(0)
+    if header != b"%PDF-":
+        raise ValidationError(f"{name or 'File'} does not look like a valid PDF.")

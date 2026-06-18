@@ -1,5 +1,6 @@
 from django.contrib import admin
 
+from .cage_lifecycle import reconcile_mouse_cage_membership
 from .models import Cage, CageMembership, Colony, Mouse, MouseGenotypeComponent, StrainLine
 
 
@@ -71,6 +72,14 @@ class MouseAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
     search_fields = ("mouse_uid", "ear_tag", "toe_tag", "origin", "coat_color", "death_reason", "notes")
     list_filter = ("sex", "status", "strain_line", "colony", "project")
     inlines = (MouseGenotypeComponentInline,)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        reconcile_mouse_cage_membership(
+            obj,
+            reason="Django admin cage history sync.",
+            apply=True,
+        )
 
 
 @admin.register(CageMembership)

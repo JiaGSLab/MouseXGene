@@ -121,7 +121,13 @@ class LitterWeanPageTests(TestCase):
         self.assertIn('id="id_male_cage"', html)
         self.assertIn('id="id_female_cage"', html)
         self.assertIn('id="wean-sex-summary"', html)
-        self.assertIn("Cage Assignment", html)
+        self.assertIn("Weaning Cage Setup", html)
+        self.assertIn("Male pups -> cage", html)
+        self.assertIn("Female pups -> cage", html)
+        self.assertIn("Add male cage", html)
+        self.assertIn("Add female cage", html)
+        self.assertIn("Weaning cage", html)
+        self.assertLess(html.index("Weaning Cage Setup"), html.index("Pup Entries"))
         self.assertIn('id="wean-submit-btn"', html)
 
     def test_wean_all_male_single_cage(self):
@@ -222,6 +228,20 @@ class LitterWeanPageTests(TestCase):
         self.assertEqual(pup.strain_line_id, dam_strain.pk)
 
     def test_wean_creates_new_strain_line(self):
+        sire_strain = StrainLine.objects.create(
+            line_name="SireNewLineTemplate",
+            name="SireNewLineTemplate",
+            expected_loci_template="GeneA",
+        )
+        dam_strain = StrainLine.objects.create(
+            line_name="DamNewLineTemplate",
+            name="DamNewLineTemplate",
+            expected_loci_template="GeneB",
+        )
+        self.sire.strain_line = sire_strain
+        self.sire.save(update_fields=["strain_line", "updated_at"])
+        self.dam.strain_line = dam_strain
+        self.dam.save(update_fields=["strain_line", "updated_at"])
         response = self._wean_post(
             male_pup_count="0",
             female_pup_count="1",
@@ -242,6 +262,11 @@ class LitterWeanPageTests(TestCase):
         self.assertEqual(pup.strain_line_id, new_line.pk)
         self.assertIn(self.project.pk, new_line.projects.values_list("pk", flat=True))
         self.assertEqual(pup.current_cage_id, self.female_cage.pk)
+        self.assertEqual(new_line.expected_loci_list(), ["GeneA", "GeneB"])
+        self.assertEqual(
+            [entry["locus_name"] for entry in new_line.expected_loci_entries()],
+            ["GeneA", "GeneB"],
+        )
 
     def test_wean_rejects_duplicate_new_strain_line_name(self):
         StrainLine.objects.create(line_name="ExistingStrain", name="ExistingStrain")
@@ -322,6 +347,91 @@ class LitterWeanPageTests(TestCase):
         self.assertEqual(female_cage.cage_type, Cage.CageType.WEANING)
         self.assertEqual(male_cage.project_id, self.project.pk)
         self.assertEqual(female_cage.project_id, self.project.pk)
+
+    def test_wean_can_split_each_sex_across_multiple_auto_cages(self):
+        response = self._wean_post(
+            male_pup_count="2",
+            female_pup_count="2",
+            male_cage_assignment_mode="auto",
+            male_auto_cage_id="AUTO-WEAN-M-DEFAULT",
+            male_extra_cage_count="1",
+            male_extra_cage_id_1="AUTO-WEAN-M-EXTRA",
+            female_cage_assignment_mode="auto",
+            female_auto_cage_id="AUTO-WEAN-F-DEFAULT",
+            female_extra_cage_count="1",
+            female_extra_cage_id_1="AUTO-WEAN-F-EXTRA",
+            **{
+                "pups-0-mouse_uid": "M-WEAN-MULTI-M-1",
+                "pups-0-sex": "M",
+                "pups-0-cage_slot": "male-default",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+                "pups-1-mouse_uid": "M-WEAN-MULTI-M-2",
+                "pups-1-sex": "M",
+                "pups-1-cage_slot": "male-extra-1",
+                "pups-1-ear_tag": "",
+                "pups-1-coat_color": "",
+                "pups-1-notes": "",
+                "pups-2-mouse_uid": "M-WEAN-MULTI-F-1",
+                "pups-2-sex": "F",
+                "pups-2-cage_slot": "female-default",
+                "pups-2-ear_tag": "",
+                "pups-2-coat_color": "",
+                "pups-2-notes": "",
+                "pups-3-mouse_uid": "M-WEAN-MULTI-F-2",
+                "pups-3-sex": "F",
+                "pups-3-cage_slot": "female-extra-1",
+                "pups-3-ear_tag": "",
+                "pups-3-coat_color": "",
+                "pups-3-notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        expected = {
+            "M-WEAN-MULTI-M-1": "AUTO-WEAN-M-DEFAULT",
+            "M-WEAN-MULTI-M-2": "AUTO-WEAN-M-EXTRA",
+            "M-WEAN-MULTI-F-1": "AUTO-WEAN-F-DEFAULT",
+            "M-WEAN-MULTI-F-2": "AUTO-WEAN-F-EXTRA",
+        }
+        for uid, cage_id in expected.items():
+            pup = Mouse.objects.get(mouse_uid=uid)
+            cage = Cage.objects.get(cage_id=cage_id)
+            self.assertEqual(pup.current_cage_id, cage.pk)
+            self.assertEqual(cage.cage_type, Cage.CageType.WEANING)
+            self.assertEqual(cage.project_id, self.project.pk)
+
+    def test_wean_extra_cage_can_use_existing_active_cage(self):
+        male_extra_cage = Cage.objects.create(cage_id="WEAN-M-EXTRA-EXISTING", purpose=Cage.Purpose.HOLDING)
+        response = self._wean_post(
+            male_pup_count="2",
+            female_pup_count="0",
+            male_cage_lookup=self.male_cage.cage_id,
+            male_extra_cage_count="1",
+            male_extra_cage_mode_1="existing",
+            male_extra_cage_lookup_1=male_extra_cage.cage_id,
+            **{
+                "pups-0-mouse_uid": "M-WEAN-EXISTING-DEFAULT",
+                "pups-0-sex": "M",
+                "pups-0-cage_slot": "male-default",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+                "pups-1-mouse_uid": "M-WEAN-EXISTING-EXTRA",
+                "pups-1-sex": "M",
+                "pups-1-cage_slot": "male-extra-1",
+                "pups-1-ear_tag": "",
+                "pups-1-coat_color": "",
+                "pups-1-notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        default_pup = Mouse.objects.get(mouse_uid="M-WEAN-EXISTING-DEFAULT")
+        extra_pup = Mouse.objects.get(mouse_uid="M-WEAN-EXISTING-EXTRA")
+        self.assertEqual(default_pup.current_cage_id, self.male_cage.pk)
+        self.assertEqual(extra_pup.current_cage_id, male_extra_cage.pk)
 
     def test_wean_trio_uses_breeding_cage_possible_dams_by_default(self):
         dam2 = Mouse.objects.create(

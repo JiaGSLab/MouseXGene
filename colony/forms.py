@@ -5,16 +5,16 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.forms import BaseInlineFormSet, inlineformset_factory
+from django.utils.html import format_html
 from django.utils import timezone
-from django.utils.safestring import mark_safe
 
 from users.import_prefix import get_effective_import_prefix
-from users.permissions import is_admin
+from users.permissions import can_manage_strain_lines, is_admin
 from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
-from .cage_lifecycle import validate_active_sex_compatible_with_cage
+from .cage_lifecycle import TERMINAL_MOUSE_STATUSES, validate_active_sex_compatible_with_cage
 from .id_uniqueness import normalize_identifier, validate_cage_id_available, validate_mouse_uid_available
 from .models import Cage, Colony, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
@@ -23,6 +23,66 @@ from .strain_line_choices import (
     preset_select_initial,
     resolve_choice_or_custom,
 )
+
+
+MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024
+
+ADMIN_CORRECTION_REASON_CHOICES = [
+    ("", "— Select reason —"),
+    ("Initial data entry correction", "Initial data entry correction"),
+    ("Historical import correction", "Historical import correction"),
+    ("Wrong record selected during workflow", "Wrong record selected during workflow"),
+    ("Project manager reviewed correction", "Project manager reviewed correction"),
+    ("Admin reviewed correction", "Admin reviewed correction"),
+    ("Other approved data correction", "Other approved data correction"),
+]
+
+MOUSE_RESTORE_REASON_CHOICES = [
+    ("", "— Select reason —"),
+    ("Mistaken endpoint / euthanasia entry", "Mistaken endpoint / euthanasia entry"),
+    ("Wrong mouse was ended", "Wrong mouse was ended"),
+    ("Historical import correction", "Historical import correction"),
+    ("Project manager reviewed correction", "Project manager reviewed correction"),
+    ("Admin reviewed correction", "Admin reviewed correction"),
+    ("Other approved data correction", "Other approved data correction"),
+]
+
+CAGE_RESTORE_REASON_CHOICES = [
+    ("", "— Select reason —"),
+    ("Mistaken cage close / retire entry", "Mistaken cage close / retire entry"),
+    ("Wrong cage was retired", "Wrong cage was retired"),
+    ("Cage card / ID still in use", "Cage card / ID still in use"),
+    ("Historical import correction", "Historical import correction"),
+    ("Project manager reviewed correction", "Project manager reviewed correction"),
+    ("Admin reviewed correction", "Admin reviewed correction"),
+    ("Other approved data correction", "Other approved data correction"),
+]
+
+MOUSE_SEX_CORRECTION_REASON_CHOICES = [
+    ("", "— Select reason —"),
+    ("Sex entered incorrectly at weaning", "Sex entered incorrectly at weaning"),
+    ("Sex entered incorrectly during import", "Sex entered incorrectly during import"),
+    ("Physical recheck confirmed sex", "Physical recheck confirmed sex"),
+    ("Genotype or breeding record review confirmed sex", "Genotype or breeding record review confirmed sex"),
+    ("Project manager reviewed correction", "Project manager reviewed correction"),
+    ("Admin reviewed correction", "Admin reviewed correction"),
+    ("Other approved data correction", "Other approved data correction"),
+]
+
+
+def validate_import_file_upload(uploaded, *, max_bytes: int = MAX_IMPORT_FILE_BYTES):
+    name = (getattr(uploaded, "name", "") or "").strip()
+    lower_name = name.lower()
+    if not (lower_name.endswith(".csv") or lower_name.endswith(".xlsx")):
+        raise ValidationError("Upload a .csv or .xlsx file.")
+    size = getattr(uploaded, "size", 0) or 0
+    if size <= 0:
+        raise ValidationError(f"{name or 'File'} is empty.")
+    if size > max_bytes:
+        raise ValidationError(
+            f"{name or 'File'} is too large ({size // (1024 * 1024)} MB). Maximum is {max_bytes // (1024 * 1024)} MB."
+        )
+    return uploaded
 
 
 def _append_widget_class(field, css_class: str) -> None:
@@ -45,6 +105,81 @@ def _lock_field(field) -> None:
     _append_widget_class(field, "input-locked")
 
 
+def _limited_codes(queryset, attr: str = "breeding_code", *, limit: int = 5) -> str:
+    values = list(queryset.values_list(attr, flat=True)[: limit + 1])
+    if not values:
+        return ""
+    suffix = "..." if len(values) > limit else ""
+    return ", ".join(str(value) for value in values[:limit]) + suffix
+
+
+def mouse_sex_correction_conflicts(mouse: Mouse, target_sex: str) -> list[str]:
+    conflicts: list[str] = []
+    if target_sex not in {Mouse.Sex.MALE, Mouse.Sex.FEMALE, Mouse.Sex.UNKNOWN}:
+        return ["Select a valid sex."]
+
+    if mouse.status == Mouse.Status.ACTIVE and mouse.current_cage_id:
+        try:
+            validate_active_sex_compatible_with_cage(
+                mouse.current_cage,
+                [target_sex],
+                exclude_mouse_ids=[mouse.pk],
+            )
+        except ValidationError as exc:
+            conflicts.extend(exc.messages)
+
+    from breeding.models import Breeding
+
+    sire_breedings = Breeding.objects.filter(male=mouse).order_by("breeding_code")
+    sire_member_breedings = Breeding.objects.filter(
+        breeding_members__mouse=mouse,
+        breeding_members__role=Breeding.MemberRole.SIRE,
+    ).order_by("breeding_code")
+    dam_breedings = Breeding.objects.filter(
+        Q(female_1=mouse) | Q(female_2=mouse) | Q(extra_female_links__mouse=mouse)
+    ).distinct().order_by("breeding_code")
+    dam_member_breedings = Breeding.objects.filter(
+        breeding_members__mouse=mouse,
+        breeding_members__role=Breeding.MemberRole.DAM,
+    ).order_by("breeding_code")
+
+    if target_sex != Mouse.Sex.MALE:
+        sire_codes = _limited_codes(sire_breedings)
+        member_codes = _limited_codes(sire_member_breedings)
+        if sire_codes or member_codes:
+            codes = ", ".join(part for part in [sire_codes, member_codes] if part)
+            conflicts.append(f"This mouse is recorded as sire in breeding(s): {codes}.")
+        if mouse.offspring_from_sire.exists():
+            conflicts.append("This mouse is recorded as sire for offspring records.")
+
+    if target_sex != Mouse.Sex.FEMALE:
+        dam_codes = _limited_codes(dam_breedings)
+        member_codes = _limited_codes(dam_member_breedings)
+        if dam_codes or member_codes:
+            codes = ", ".join(part for part in [dam_codes, member_codes] if part)
+            conflicts.append(f"This mouse is recorded as dam in breeding(s): {codes}.")
+        if mouse.offspring_from_dam.exists() or mouse.possible_offspring_from_dam.exists():
+            conflicts.append("This mouse is recorded as dam or possible dam for offspring records.")
+
+    genotype_rows = mouse.genotype_components.all()
+    if target_sex == Mouse.Sex.FEMALE:
+        if genotype_rows.filter(chromosome_type=MouseGenotypeComponent.ChromosomeType.Y_LINKED).exists():
+            conflicts.append("This mouse has Y-linked genotype rows, which are not valid for female mice.")
+        if genotype_rows.filter(
+            chromosome_type=MouseGenotypeComponent.ChromosomeType.X_LINKED,
+            allele_display_2__iexact="Y",
+        ).exists():
+            conflicts.append("This mouse has X-linked X/Y genotype rows, which are not valid for female mice.")
+    elif target_sex == Mouse.Sex.MALE:
+        invalid_x_rows = genotype_rows.filter(
+            chromosome_type=MouseGenotypeComponent.ChromosomeType.X_LINKED,
+        ).exclude(Q(allele_display_2__iexact="Y") | Q(allele_display_2=""))
+        if invalid_x_rows.exists():
+            conflicts.append("This mouse has female-style X-linked genotype rows; correct genotype rows first.")
+
+    return conflicts
+
+
 def _cage_project_queryset_for_user(user):
     projects = Project.objects.filter(is_active=True).order_by("name")
     if user is None or is_admin(user):
@@ -65,16 +200,31 @@ def _default_cage_project_for_user(user, project_queryset):
     return None
 
 
+def _strain_line_project_queryset_for_user(user):
+    projects = Project.objects.filter(is_active=True).order_by("name")
+    if user is None or can_manage_strain_lines(user):
+        return projects
+    if not getattr(user, "is_authenticated", False):
+        return Project.objects.none()
+    return projects.filter(Q(owner=user) | Q(memberships__user=user)).distinct()
+
+
 class AdminCorrectionFormMixin:
     admin_correction_frozen_fields: set[str] = set()
 
-    def _configure_admin_correction(self, *, user=None, admin_correction_unlocked: bool = False) -> None:
+    def _configure_admin_correction(
+        self,
+        *,
+        user=None,
+        admin_correction_unlocked: bool = False,
+        correction_allowed: bool = False,
+    ) -> None:
         if user is None:
             self.admin_correction_is_admin = False
             self.admin_correction_unlocked = False
             self.admin_correction_available = False
             return
-        self.admin_correction_is_admin = is_admin(user) if user is not None else False
+        self.admin_correction_is_admin = bool(is_admin(user) or correction_allowed)
         self.admin_correction_unlocked = bool(self.admin_correction_is_admin and admin_correction_unlocked)
         self.admin_correction_available = bool(self.instance and self.instance.pk and self.admin_correction_is_admin)
         if not (self.instance and self.instance.pk):
@@ -97,7 +247,6 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
         "created_date",
         "project",
         "colony",
-        "cage_use",
         "status",
     }
 
@@ -259,6 +408,19 @@ class CageForm(AdminCorrectionFormMixin, forms.ModelForm):
                     "project",
                     "Project is required for new cages. Select the project this cage belongs to.",
                 )
+        if self.instance and self.instance.pk:
+            current_use = self.instance.cage_use
+            target_use = cleaned.get("cage_use") or current_use
+            manager_workflow_uses = {Cage.CageUse.HOLDING, Cage.CageUse.BREEDING}
+            if (
+                target_use != current_use
+                and not is_admin(self.user)
+                and {current_use, target_use} - manager_workflow_uses
+            ):
+                self.add_error(
+                    "cage_use",
+                    "Users with cage edit access can switch Cage Use between Holding and Breeding. Other cage-use corrections require an admin.",
+                )
         return cleaned
 
     def save(self, commit=True):
@@ -321,6 +483,52 @@ class CageRetireForm(forms.Form):
         )
         if active_breeding_exists:
             self.add_error(None, "End linked active breeding records before retiring this cage.")
+        return cleaned
+
+
+class CageRestoreForm(forms.Form):
+    restore_date = forms.DateField(
+        label="Restore Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    cage_use = forms.ChoiceField(
+        label="Cage Use",
+        choices=[],
+        initial=Cage.CageUse.HOLDING,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=CAGE_RESTORE_REASON_CHOICES,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    confirm = forms.BooleanField(
+        label="I confirm this cage should return to active cage pickers.",
+    )
+
+    def __init__(self, *args, cage: Cage, **kwargs):
+        self.cage = cage
+        super().__init__(*args, **kwargs)
+        self.fields["cage_use"].choices = Cage.cage_use_choices(include_retired=False)
+        if not self.is_bound:
+            current_use = cage.cage_use
+            if current_use == Cage.CageUse.RETIRED:
+                current_use = Cage.CageUse.HOLDING
+            self.initial.setdefault("cage_use", current_use or Cage.CageUse.HOLDING)
+
+    def clean_restore_date(self):
+        restore_date = self.cleaned_data["restore_date"]
+        if restore_date > timezone.localdate():
+            raise forms.ValidationError("Restore date cannot be in the future.")
+        return restore_date
+
+    def clean(self):
+        cleaned = super().clean()
+        if self.cage.status == Cage.Status.ACTIVE:
+            self.add_error(None, "This cage is already active.")
+        if self.cage.status == Cage.Status.ARCHIVED:
+            self.add_error(None, "Archived cages must be reviewed by an admin outside this workflow.")
         return cleaned
 
 
@@ -681,6 +889,30 @@ class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         if self.instance and self.instance.pk:
+            previous_sex = self.instance.sex
+            target_sex = cleaned_data.get("sex")
+            if target_sex != previous_sex:
+                self.add_error(
+                    "sex",
+                    "Use Correct Sex so cage occupancy, breeding roles, pedigree, and sex-linked genotype checks run together.",
+                )
+            previous_status = self.instance.status
+            target_status = cleaned_data.get("status")
+            if target_status != previous_status and (
+                previous_status in TERMINAL_MOUSE_STATUSES
+                or target_status in TERMINAL_MOUSE_STATUSES
+            ):
+                if previous_status in TERMINAL_MOUSE_STATUSES:
+                    message = (
+                        "Use Restore Mouse to reactivate a terminal mouse so cage occupancy "
+                        "and history stay consistent."
+                    )
+                else:
+                    message = (
+                        "Use End Mouse, or End Breeding for breeders, to mark a mouse as terminal. "
+                        "That workflow updates cage occupancy, memberships, and linked breedings together."
+                    )
+                self.add_error("status", message)
             cleaned_data["current_cage"] = self.instance.current_cage
             _clean_mouse_parentage(self, cleaned_data)
             return cleaned_data
@@ -880,10 +1112,11 @@ class MouseRestoreForm(forms.Form):
         widget=forms.DateInput(attrs={"type": "date"}),
         initial=timezone.localdate,
     )
-    reason = forms.CharField(
-        max_length=255,
-        initial="Correct mistaken terminal status",
-        widget=forms.TextInput(attrs={"class": "filter-control"}),
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=MOUSE_RESTORE_REASON_CHOICES,
+        initial="Mistaken endpoint / euthanasia entry",
+        widget=forms.Select(attrs={"class": "filter-control"}),
     )
     confirm = forms.BooleanField(
         label="I confirm this mouse is alive and should be restored to active cage occupancy.",
@@ -924,6 +1157,43 @@ class MouseRestoreForm(forms.Form):
         except ValidationError as exc:
             raise forms.ValidationError(exc.messages) from exc
         return destination_cage
+
+
+class MouseSexCorrectionForm(forms.Form):
+    sex = forms.ChoiceField(
+        label="Correct Sex",
+        choices=Mouse.Sex.choices,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=MOUSE_SEX_CORRECTION_REASON_CHOICES,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    confirm = forms.BooleanField(
+        label="I confirm this is a data correction and the listed impact has been reviewed.",
+    )
+
+    def __init__(self, *args, mouse: Mouse, **kwargs):
+        self.mouse = mouse
+        super().__init__(*args, **kwargs)
+        if not self.is_bound:
+            self.initial.setdefault("sex", mouse.sex)
+
+    def clean_sex(self):
+        sex = self.cleaned_data["sex"]
+        if sex == self.mouse.sex:
+            raise forms.ValidationError("Select a different sex to save a correction.")
+        return sex
+
+    def clean(self):
+        cleaned = super().clean()
+        target_sex = cleaned.get("sex")
+        if target_sex:
+            conflicts = mouse_sex_correction_conflicts(self.mouse, target_sex)
+            for conflict in conflicts:
+                self.add_error(None, conflict)
+        return cleaned
 
 
 class MouseEndForm(forms.Form):
@@ -1007,12 +1277,15 @@ class CageImportForm(forms.Form):
         self.user = user
         super().__init__(*args, **kwargs)
 
+    def clean_data_file(self):
+        return validate_import_file_upload(self.cleaned_data["data_file"])
+
     def clean(self):
         cleaned = super().clean()
         if cleaned.get("apply_import_prefix") and self.user is not None:
             if not get_effective_import_prefix(self.user):
                 raise ValidationError(
-                    mark_safe(
+                    format_html(
                         'Set your import ID prefix in the <a href="#import-prefix">Import ID prefix</a> '
                         "section on this page first."
                     )
@@ -1069,12 +1342,15 @@ class MouseImportForm(forms.Form):
         self.user = user
         super().__init__(*args, **kwargs)
 
+    def clean_data_file(self):
+        return validate_import_file_upload(self.cleaned_data["data_file"])
+
     def clean(self):
         cleaned = super().clean()
         if cleaned.get("apply_import_prefix") and self.user is not None:
             if not get_effective_import_prefix(self.user):
                 raise ValidationError(
-                    mark_safe(
+                    format_html(
                         'Set your import ID prefix in the <a href="#import-prefix">Import ID prefix</a> '
                         "section on this page first."
                     )
@@ -1213,12 +1489,19 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
         else:
             self.initial.setdefault("category", StrainLine.Category.COMPOUND_STRAIN)
             self.initial.setdefault("background", StrainLine.BackgroundPreset.C57BL_6J)
-        self.fields["owner"].queryset = get_user_model().objects.order_by("username")
+        user_model = get_user_model()
+        if user is not None and getattr(user, "is_authenticated", False) and not can_manage_strain_lines(user):
+            self.fields["owner"].queryset = user_model.objects.filter(pk=user.pk)
+            self.fields["owner"].initial = user
+            self.initial.setdefault("owner", user.pk)
+            self.fields["owner"].disabled = True
+        else:
+            self.fields["owner"].queryset = user_model.objects.order_by("username")
         self.fields["owner"].required = False
         self.fields["owner"].label_from_instance = (
             lambda u: (format_project_owner_label(u) or u.get_username() or "").strip() or str(u.pk)
         )
-        project_qs = Project.objects.filter(is_active=True)
+        project_qs = _strain_line_project_queryset_for_user(user)
         if self.instance and self.instance.pk:
             project_qs = (project_qs | self.instance.projects.all()).distinct()
         self.fields["projects"].queryset = project_qs.order_by("name")
@@ -1241,6 +1524,7 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
         self._configure_admin_correction(
             user=user,
             admin_correction_unlocked=admin_correction_unlocked,
+            correction_allowed=can_manage_strain_lines(user),
         )
 
     def clean(self):
@@ -1283,10 +1567,13 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
                     continue
                 if locus_type == "x_linked":
                     # Backward-compatible upgrade from old schema.
-                    locus_type = StrainLine.LocusType.CUSTOM
+                    locus_type = StrainLine.LocusType.OTHER_CUSTOM
                     chromosome_type = StrainLine.ChromosomeType.X_LINKED
-                if locus_type not in StrainLine.LocusType.values:
-                    locus_type = StrainLine.LocusType.CUSTOM
+                locus_type = StrainLine.normalize_locus_type(
+                    locus_type,
+                    locus_name=locus,
+                    line_name=cleaned.get("name") or getattr(self.instance, "line_name", ""),
+                )
                 if chromosome_type not in StrainLine.ChromosomeType.values:
                     chromosome_type = StrainLine.ChromosomeType.AUTOSOMAL
                 if locus in seen:
@@ -1315,7 +1602,7 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
                 parsed.append(
                     {
                         "locus_name": normalized,
-                        "locus_type": StrainLine.LocusType.CUSTOM,
+                        "locus_type": StrainLine.LocusType.OTHER_CUSTOM,
                         "chromosome_type": StrainLine.ChromosomeType.AUTOSOMAL,
                     }
                 )

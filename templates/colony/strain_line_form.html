@@ -351,18 +351,35 @@
     let lociLocked = hidden.disabled || hiddenConfig.disabled;
 
     const LOCUS_TYPES = [
-        ["standard_autosomal", "Standard autosomal"],
-        ["flox", "Flox"],
-        ["cre_transgene", "Cre/CreERT2 knock-in"],
-        ["reporter_ki", "Reporter KI"],
-        ["tg_pos_neg", "Tg (pos/neg)"],
-        ["custom", "Custom"],
+        ["ko_null", "KO / null allele"],
+        ["floxed_allele", "Floxed allele"],
+        ["knock_in", "Knock-in"],
+        ["cre_ki", "Cre knock-in"],
+        ["cre_ert2_ki", "CreERT2 knock-in"],
+        ["transgene", "Transgene"],
+        ["reporter_knock_in", "Reporter knock-in"],
+        ["reporter_transgene", "Reporter transgene"],
+        ["point_variant", "Point mutation / variant"],
+        ["other_custom", "Other / custom"],
     ];
+    const LEGACY_LOCUS_TYPE_MAP = {
+        standard_autosomal: "other_custom",
+        flox: "floxed_allele",
+        cre_transgene: "cre_ki",
+        reporter_ki: "reporter_knock_in",
+        tg_pos_neg: "transgene",
+        custom: "other_custom",
+        x_linked: "other_custom",
+    };
     const CHROMOSOME_TYPES = [
         ["autosomal", "autosomal"],
         ["x_linked", "x_linked"],
         ["y_linked", "y_linked"],
     ];
+    function normalizeLocusType(value) {
+        const raw = String(value || "other_custom").trim() || "other_custom";
+        return LEGACY_LOCUS_TYPE_MAP[raw] || raw;
+    }
 
     function valuesFromHidden() {
         const raw = (hiddenConfig.value || "").trim();
@@ -373,7 +390,7 @@
                     const fromConfig = parsed
                         .map(item => ({
                             locus_name: String(item?.locus_name || "").trim(),
-                            locus_type: String(item?.locus_type || "custom").trim() || "custom",
+                            locus_type: normalizeLocusType(item?.locus_type),
                             chromosome_type: String(item?.chromosome_type || "autosomal").trim() || "autosomal",
                         }))
                         .filter(item => item.locus_name);
@@ -387,7 +404,7 @@
         if (!text) return [];
         return text
             .split(/\n+/)
-            .map(v => ({ locus_name: v.trim(), locus_type: "custom", chromosome_type: "autosomal" }))
+            .map(v => ({ locus_name: v.trim(), locus_type: "other_custom", chromosome_type: "autosomal" }))
             .filter(v => v.locus_name);
     }
 
@@ -398,7 +415,7 @@
                 const typeSelect = wrap.querySelector("select[data-locus-type]");
                 const chrSelect = wrap.querySelector("select[data-chromosome-type]");
                 const locus_name = (locusInput?.value || "").trim();
-                const locus_type = (typeSelect?.value || "custom").trim() || "custom";
+                const locus_type = normalizeLocusType(typeSelect?.value);
                 const chromosome_type = (chrSelect?.value || "autosomal").trim() || "autosomal";
                 if (!locus_name) return null;
                 return { locus_name, locus_type, chromosome_type };
@@ -408,10 +425,11 @@
         hiddenConfig.value = JSON.stringify(values);
     }
 
-    function appendRow(value = { locus_name: "", locus_type: "custom", chromosome_type: "autosomal" }) {
+    function appendRow(value = { locus_name: "", locus_type: "other_custom", chromosome_type: "autosomal" }) {
         const wrap = document.createElement("div");
         wrap.className = "form-row loci-row";
         wrap.setAttribute("data-locus-row", "1");
+        const selectedLocusType = normalizeLocusType(value.locus_type);
 
         const input = document.createElement("input");
         input.type = "text";
@@ -428,7 +446,7 @@
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = label;
-            if ((value.locus_type || "custom") === val) {
+            if (selectedLocusType === val) {
                 opt.selected = true;
             }
             typeSelect.appendChild(opt);

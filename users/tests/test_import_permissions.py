@@ -26,8 +26,7 @@ class ImportPermissionTests(TestCase):
         client = Client()
         client.force_login(self.manager)
         response = client.get(reverse("mice:mouse_import"))
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("home"))
+        self.assertEqual(response.status_code, 403)
 
     def test_admin_can_open_mouse_import_page(self):
         client = Client()

@@ -32,9 +32,15 @@ def get_env_int(name: str, default: int) -> int:
 
 
 # 🔐 基础配置
-SECRET_KEY = get_env("DJANGO_SECRET_KEY", "change-me-in-production")
+DEBUG = get_env_bool("DJANGO_DEBUG", default=False)
 
-DEBUG = get_env("DJANGO_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
+_dev_secret_key = "insecure-dev-secret-key-only-for-local-debug" if DEBUG else None
+SECRET_KEY = get_env("DJANGO_SECRET_KEY", _dev_secret_key)
+if not DEBUG and SECRET_KEY in {
+    "change-me-in-production",
+    "insecure-dev-secret-key-only-for-local-debug",
+}:
+    raise ValueError("DJANGO_SECRET_KEY must be set to a unique production secret when DJANGO_DEBUG=0.")
 
 # Bumped on each deploy; used for static cache-busting and support checks.
 APP_RELEASE = get_env("APP_RELEASE", "20260529e")
@@ -118,7 +124,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": get_env("POSTGRES_DB", "mousexgene"),
         "USER": get_env("POSTGRES_USER", "mousexgene"),
-        "PASSWORD": get_env("POSTGRES_PASSWORD", "mousexgene_dev_password"),
+        "PASSWORD": get_env("POSTGRES_PASSWORD", "mousexgene_dev_password" if DEBUG else None),
         "HOST": _db_host if _db_host else get_env("POSTGRES_HOST", "db"),
         "PORT": _db_port if _db_port else get_env("POSTGRES_PORT", "5432"),
         "CONN_MAX_AGE": get_env_int("DB_CONN_MAX_AGE", 60),
@@ -180,11 +186,11 @@ if not DEBUG:
             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
         },
     }
-    if get_env_bool("DJANGO_SECURE_PROXY_SSL_HEADER", default=False):
+    if get_env_bool("DJANGO_SECURE_PROXY_SSL_HEADER", default=True):
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = get_env_bool("DJANGO_SECURE_SSL_REDIRECT", default=False)
-    SESSION_COOKIE_SECURE = get_env_bool("DJANGO_SESSION_COOKIE_SECURE", default=False)
-    CSRF_COOKIE_SECURE = get_env_bool("DJANGO_CSRF_COOKIE_SECURE", default=False)
+    SESSION_COOKIE_SECURE = get_env_bool("DJANGO_SESSION_COOKIE_SECURE", default=True)
+    CSRF_COOKIE_SECURE = get_env_bool("DJANGO_CSRF_COOKIE_SECURE", default=True)
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
 

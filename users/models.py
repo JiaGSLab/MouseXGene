@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 
 from .import_prefix import validate_import_prefix_format
 
@@ -36,3 +38,21 @@ class UserProfile(models.Model):
 
     def __str__(self) -> str:
         return self.display_name or self.user.get_username()
+
+
+def _sync_owned_project_names(user) -> None:
+    from core.models import Project, format_project_owner_label
+
+    label = format_project_owner_label(user)
+    Project.objects.filter(owner=user).update(owner_name=label)
+
+
+@receiver(post_save, sender=UserProfile)
+def sync_project_owner_names_from_profile(sender, instance: UserProfile, **kwargs) -> None:
+    _sync_owned_project_names(instance.user)
+
+
+@receiver(post_save, sender=User)
+def sync_project_owner_names_from_user(sender, instance: User, **kwargs) -> None:
+    if hasattr(instance, "profile"):
+        _sync_owned_project_names(instance)

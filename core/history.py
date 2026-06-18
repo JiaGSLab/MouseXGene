@@ -58,8 +58,8 @@ def _infer_import_actor_label(record: Any) -> str | None:
             import_type=import_type,
             success=True,
             user_id__isnull=False,
-            created_at__gte=created_at - timedelta(minutes=10),
-            created_at__lte=created_at + timedelta(minutes=15),
+            created_at__gte=created_at - timedelta(seconds=30),
+            created_at__lte=created_at + timedelta(minutes=2),
         ).select_related("user", "user__profile")
     )
     if not logs:

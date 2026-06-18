@@ -10,6 +10,7 @@ from core.models import Project, format_project_owner_label
 from users.permissions import is_admin
 
 OWNER_FILTER_ALL = "all"
+INVALID_OWNER_FILTER = "0"
 
 
 def resolve_project_owner_filter(request: HttpRequest) -> str:
@@ -18,7 +19,7 @@ def resolve_project_owner_filter(request: HttpRequest) -> str:
         owner = (request.GET.get("owner") or request.GET.get("owner_id") or "").strip()
         if owner == OWNER_FILTER_ALL:
             return ""
-        return owner
+        return owner if owner.isdigit() else INVALID_OWNER_FILTER
     if (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip():
         return ""
     if getattr(request.user, "is_authenticated", False):
@@ -54,6 +55,7 @@ def breeding_project_owner_filter_q(owner_id: str | int) -> Q:
         | Q(female_1__project__owner_id=owner_id)
         | Q(female_2__project__owner_id=owner_id)
         | Q(extra_female_links__mouse__project__owner_id=owner_id)
+        | Q(breeding_members__mouse__project__owner_id=owner_id)
     )
 
 
@@ -63,4 +65,5 @@ def litter_project_owner_filter_q(owner_id: str | int) -> Q:
         | Q(breeding__female_1__project__owner_id=owner_id)
         | Q(breeding__female_2__project__owner_id=owner_id)
         | Q(breeding__extra_female_links__mouse__project__owner_id=owner_id)
+        | Q(breeding__breeding_members__mouse__project__owner_id=owner_id)
     )

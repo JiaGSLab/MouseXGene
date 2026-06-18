@@ -127,7 +127,7 @@ class MouseStrainLineLockTests(TestCase):
             reverse("mice:mouse_edit", args=[self.mouse.pk]),
             {
                 "admin_correction_unlocked": "1",
-                "admin_correction_reason": "wrong strain selected during setup",
+                "admin_correction_reason": "Admin reviewed correction",
                 "mouse_uid": self.mouse.mouse_uid,
                 "sex": self.mouse.sex,
                 "birth_date": "",

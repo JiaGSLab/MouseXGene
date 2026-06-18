@@ -11,6 +11,9 @@
     </div>
     <div class="action-links">
         <a class="button" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        {% if can_correct_mouse_sex %}
+            <a class="button button-light" href="{% url 'mice:mouse_correct_sex' mouse.pk %}">Correct Sex</a>
+        {% endif %}
         <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
         {% if can_move_mouse %}
             <a class="button" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>

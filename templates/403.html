@@ -5,7 +5,7 @@
 {% block content %}
 <section class="page-header">
     <h1>Permission denied</h1>
-    <p class="muted">You do not have permission to perform this action.</p>
+    <p class="muted">{{ message|default:"You do not have permission to perform this action." }}</p>
 </section>
 <section class="card">
     <p><a class="button" href="{% url 'home' %}">Back to home</a></p>

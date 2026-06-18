@@ -2,7 +2,6 @@ from io import BytesIO
 
 import pandas as pd
 from django.contrib.auth import get_user_model
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 
@@ -22,8 +21,8 @@ class MouseImportGenotypeTests(TestCase):
             name="ImportStrain",
             expected_loci_template="Foxp3\nCustomGene",
             expected_loci_config=[
-                {"locus_name": "Foxp3", "locus_type": "custom", "chromosome_type": "autosomal"},
-                {"locus_name": "CustomGene", "locus_type": "custom", "chromosome_type": "autosomal"},
+                {"locus_name": "Foxp3", "locus_type": "other_custom", "chromosome_type": "autosomal"},
+                {"locus_name": "CustomGene", "locus_type": "other_custom", "chromosome_type": "autosomal"},
             ],
         )
         self.project = Project.objects.create(name="ImportProject", owner=self.user)
@@ -207,7 +206,7 @@ class MouseImportGenotypeTests(TestCase):
             name="OtherStrain",
             expected_loci_template="OtherGene",
             expected_loci_config=[
-                {"locus_name": "OtherGene", "locus_type": "custom", "chromosome_type": "autosomal"},
+                {"locus_name": "OtherGene", "locus_type": "other_custom", "chromosome_type": "autosomal"},
             ],
         )
         self.assertIsNotNone(strain_b.pk)

@@ -144,19 +144,26 @@ def close_active_breedings_for_terminal_mouse(
     """Close active breeding records that still reference a terminal mouse."""
     if mouse.status not in TERMINAL_MOUSE_STATUSES:
         return ()
-    qs = (
-        Breeding.objects.select_for_update()
+    candidate_qs = (
+        Breeding.objects
         .filter(active=True)
         .exclude(status=Breeding.Status.CLOSED)
         .filter(_active_breeding_q_for_mouse(mouse))
         .distinct()
     )
     if exclude_breeding_id:
-        qs = qs.exclude(pk=exclude_breeding_id)
+        candidate_qs = candidate_qs.exclude(pk=exclude_breeding_id)
+    breeding_ids = list(candidate_qs.values_list("pk", flat=True))
     closed_codes: list[str] = []
     affected_cages: list[Cage] = []
     with transaction.atomic():
-        for breeding in qs.select_related("cage"):
+        locked_breedings = (
+            Breeding.objects.select_for_update()
+            .filter(pk__in=breeding_ids)
+            .select_related("cage")
+            .order_by("breeding_code")
+        )
+        for breeding in locked_breedings:
             breeding.status = Breeding.Status.CLOSED
             breeding.active = False
             if not breeding.archived_at:
@@ -293,6 +300,113 @@ def remove_terminal_mouse_from_current_cage(
     return tuple(sorted(cage.cage_id for cage in affected_cages.values()))
 
 
+def _membership_end_date(start_date: date | None, fallback: date) -> date:
+    if start_date and fallback < start_date:
+        return start_date
+    return fallback
+
+
+def reconcile_mouse_cage_membership(
+    mouse: Mouse,
+    *,
+    repair_date: date | None = None,
+    reason: str = "Admin cage history reconciliation.",
+    apply: bool = True,
+) -> dict:
+    """
+    Align CageMembership current rows with Mouse.current_cage.
+
+    This is intentionally a reconciliation helper, not a replacement for normal
+    workflows such as Move Cage, End Mouse, Restore Mouse, breeding end, or wean.
+    It repairs historical/import/admin-edit drift while preserving existing rows.
+    """
+    resolved_date = repair_date or timezone.localdate()
+    membership_reason = (reason or "Admin cage history reconciliation.")[:128]
+    result = {
+        "mouse_uid": mouse.mouse_uid,
+        "status": mouse.status,
+        "target_cage": "",
+        "closed_membership_cages": [],
+        "created_membership": False,
+        "terminal_cleanup": False,
+        "changed": False,
+    }
+
+    def inspect_and_optionally_apply(locked_mouse: Mouse) -> dict:
+        current_memberships = list(
+            CageMembership.objects.filter(mouse=locked_mouse, is_current=True)
+            .select_related("cage")
+            .order_by("-start_date", "-created_at", "-pk")
+        )
+        result["mouse_uid"] = locked_mouse.mouse_uid
+        result["status"] = locked_mouse.status
+        result["target_cage"] = locked_mouse.current_cage.cage_id if locked_mouse.current_cage_id else ""
+
+        if locked_mouse.status in TERMINAL_MOUSE_STATUSES:
+            if locked_mouse.current_cage_id or current_memberships:
+                result["terminal_cleanup"] = True
+                result["closed_membership_cages"] = [
+                    membership.cage.cage_id for membership in current_memberships
+                ]
+                result["changed"] = True
+                if apply:
+                    remove_terminal_mouse_from_current_cage(
+                        locked_mouse,
+                        exit_date=resolved_date,
+                        reason=membership_reason,
+                    )
+            return result
+
+        if not locked_mouse.current_cage_id:
+            to_close = current_memberships
+            result["closed_membership_cages"] = [membership.cage.cage_id for membership in to_close]
+            result["changed"] = bool(to_close)
+            if apply:
+                for membership in to_close:
+                    membership.end_date = _membership_end_date(membership.start_date, resolved_date)
+                    membership.is_current = False
+                    membership.reason = membership_reason
+                    membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+            return result
+
+        matching = [
+            membership for membership in current_memberships if membership.cage_id == locked_mouse.current_cage_id
+        ]
+        stale = [
+            membership for membership in current_memberships if membership.cage_id != locked_mouse.current_cage_id
+        ]
+        duplicate_matching = matching[1:]
+        to_close = stale + duplicate_matching
+        result["closed_membership_cages"] = [membership.cage.cage_id for membership in to_close]
+        result["created_membership"] = not matching
+        result["changed"] = bool(to_close) or not matching
+
+        if apply:
+            for membership in to_close:
+                membership.end_date = _membership_end_date(membership.start_date, resolved_date)
+                membership.is_current = False
+                membership.reason = membership_reason
+                membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])
+            if not matching:
+                CageMembership.objects.create(
+                    mouse=locked_mouse,
+                    cage=locked_mouse.current_cage,
+                    start_date=resolved_date,
+                    end_date=None,
+                    is_current=True,
+                    reason=membership_reason,
+                )
+        return result
+
+    if apply:
+        with transaction.atomic():
+            locked = Mouse.objects.select_for_update(of=("self",)).get(pk=mouse.pk)
+            return inspect_and_optionally_apply(locked)
+
+    inspected = Mouse.objects.select_related("current_cage").get(pk=mouse.pk)
+    return inspect_and_optionally_apply(inspected)
+
+
 def sync_cage_status_for_cage_id(cage_id: int | None) -> bool:
     if not cage_id:
         return False
@@ -316,7 +430,7 @@ def ensure_breeding_for_cage(cage: Cage | None) -> Breeding | None:
         return None
 
     sire = males[0]
-    dams = females[:3]
+    dams = females
     breeding_type = Breeding.BreedingType.PAIR
     if len(dams) == 2:
         breeding_type = Breeding.BreedingType.TRIO
@@ -478,6 +592,12 @@ def sync_breeding_member_cages(breeding: Breeding | None) -> int:
         breeding_cage = Cage.objects.select_for_update().get(pk=breeding.cage_id)
         for member in breeding.member_mice():
             mouse = Mouse.objects.select_for_update().get(pk=member.pk)
+            if mouse.status != Mouse.Status.ACTIVE:
+                remove_terminal_mouse_from_current_cage(
+                    mouse,
+                    reason=f"Terminal mouse skipped during breeding cage sync: {breeding.breeding_code}",
+                )
+                continue
             if mouse.current_cage_id == breeding_cage.pk:
                 if not CageMembership.objects.filter(mouse=mouse, cage=breeding_cage, is_current=True).exists():
                     for membership in (

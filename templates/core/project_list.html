@@ -10,7 +10,7 @@
         <p class="muted">Project-scoped collaboration and membership.</p>
     </div>
     <div class="action-links action-links--primary">
-        {% if can_import or is_admin %}
+        {% if can_create_project %}
             <a href="{% url 'project_create' %}" class="button">New Project</a>
         {% endif %}
     </div>
@@ -47,7 +47,7 @@
                         <td>{{ project.owner_display }}</td>
                         <td>{{ project.members_display }}</td>
                         <td>
-                            {% if can_import or is_admin %}
+                            {% if project.can_manage %}
                                 <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
                             {% endif %}
                         </td>
@@ -83,7 +83,7 @@
                         <td>{{ project.owner_display }}</td>
                         <td>{{ project.members_display }}</td>
                         <td>
-                            {% if can_import or is_admin %}
+                            {% if project.can_manage %}
                                 <a class="link-primary" href="{% url 'project_edit' project.pk %}">Edit</a>
                             {% endif %}
                         </td>

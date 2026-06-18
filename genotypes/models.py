@@ -1,15 +1,9 @@
 from django.db import models
+from django.db.models import Q
 from django.core.exceptions import ValidationError
 
 from colony.models import Mouse
-
-
-class TimeStampedModel(models.Model):
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
+from core.models import TimeStampedModel
 
 
 class Gene(TimeStampedModel):
@@ -72,8 +66,14 @@ class MouseGenotype(TimeStampedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["mouse", "gene", "locus_name"],
+                condition=Q(gene__isnull=False),
                 name="uniq_mouse_gene_locus_genotype",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["mouse", "locus_name"],
+                condition=Q(gene__isnull=True),
+                name="uniq_mouse_locus_null_gene_genotype",
+            ),
         ]
 
     def clean(self) -> None:

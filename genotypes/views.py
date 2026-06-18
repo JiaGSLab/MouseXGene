@@ -1,14 +1,14 @@
 import csv
-from io import BytesIO
 
 from django import forms
 from django.contrib import messages
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.db.models import Q
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
-from openpyxl import Workbook
+from django.urls import reverse
 
 from colony.models import Mouse
 from .forms import GeneForm, GenotypeImportForm, MouseGenotypeForm
@@ -16,9 +16,11 @@ from .importers import GENOTYPE_EXPECTED_COLUMNS, parse_genotype_import
 from .models import Gene, MouseGenotype
 from colony.models import StrainLine
 from core.audit import log_audit_event
+from core.exporting import xlsx_response
 from core.models import AuditLog, ImportLog, Project
 from users.permissions import (
     authenticated_required,
+    can_manage_strain_lines,
     can_edit_project_data,
     can_import,
     ensure_can_edit_project_data,
@@ -26,23 +28,30 @@ from users.permissions import (
 )
 
 
-def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = sheet_name
-    worksheet.append(headers)
-    for row in rows:
-        worksheet.append(row)
+GENOTYPE_RECORDS_PAGE_SIZE = 100
 
-    buffer = BytesIO()
-    workbook.save(buffer)
-    buffer.seek(0)
-    response = HttpResponse(
-        buffer.getvalue(),
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    return response
+
+def _pagination_hrefs(request: HttpRequest, page_obj, viewname: str) -> dict[str, str | None]:
+    def href(n: int) -> str:
+        q = request.GET.copy()
+        if n <= 1:
+            q.pop("page", None)
+        else:
+            q["page"] = str(n)
+        qs = q.urlencode()
+        base = reverse(viewname)
+        return f"{base}?{qs}" if qs else base
+
+    return {
+        "first": href(1) if page_obj.has_previous() else None,
+        "prev": href(page_obj.previous_page_number()) if page_obj.has_previous() else None,
+        "next": href(page_obj.next_page_number()) if page_obj.has_next() else None,
+        "last": href(page_obj.paginator.num_pages) if page_obj.has_next() else None,
+    }
+
+
+def build_xlsx_response(filename: str, sheet_name: str, headers: list[str], rows: list[list]) -> HttpResponse:
+    return xlsx_response(filename, sheet_name, headers, rows)
 
 
 def record_import_log(
@@ -181,19 +190,35 @@ def genotype_record_list(request: HttpRequest) -> HttpResponse:
         records = records.filter(mouse__mouse_uid__icontains=mouse_uid)
     if locus_name:
         records = records.filter(locus_name__icontains=locus_name)
-    if project:
+    if project and project.isdigit():
         records = records.filter(mouse__project_id=project)
+    elif project:
+        records = records.none()
     if is_confirmed == "yes":
         records = records.filter(is_confirmed=True)
     elif is_confirmed == "no":
         records = records.filter(is_confirmed=False)
     if assay_date:
         records = records.filter(assay_date=assay_date)
-    if strain_line:
+    if strain_line and strain_line.isdigit():
         records = records.filter(mouse__strain_line_id=strain_line)
+    elif strain_line:
+        records = records.none()
+
+    records = records.order_by("-assay_date", "mouse__mouse_uid", "locus_name")
+    paginator = Paginator(records, GENOTYPE_RECORDS_PAGE_SIZE)
+    try:
+        page_obj = paginator.page(request.GET.get("page") or 1)
+    except PageNotAnInteger:
+        page_obj = paginator.page(1)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
 
     context = {
-        "records": records.order_by("-assay_date", "mouse__mouse_uid", "locus_name"),
+        "records": page_obj.object_list,
+        "page_obj": page_obj,
+        "pagination_hrefs": _pagination_hrefs(request, page_obj, "genotypes:genotype_record_list"),
+        "total_count": paginator.count,
         "mouse_uid": mouse_uid,
         "locus_name": locus_name,
         "project": project,
@@ -206,7 +231,7 @@ def genotype_record_list(request: HttpRequest) -> HttpResponse:
     return render(request, "genotypes/genotype_record_list.html", context)
 
 
-@authenticated_required
+@role_required(can_manage_strain_lines)
 def gene_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = GeneForm(request.POST)
@@ -223,15 +248,15 @@ def gene_create(request: HttpRequest) -> HttpResponse:
     )
 
 
-@authenticated_required
+@role_required(can_manage_strain_lines)
 def gene_edit(request: HttpRequest, pk: int) -> HttpResponse:
     gene = get_object_or_404(Gene, pk=pk)
     previous_active = gene.is_active
     if request.method == "POST":
         form = GeneForm(request.POST, instance=gene)
         if form.is_valid():
-            if form.cleaned_data.get("is_active") != previous_active and not can_import(request.user):
-                raise PermissionDenied("Only managers or admins can archive/deactivate genotype definitions.")
+            if form.cleaned_data.get("is_active") != previous_active and not can_manage_strain_lines(request.user):
+                raise PermissionDenied("Only lab admins or lab managers can archive/deactivate genotype definitions.")
             form.save()
             messages.success(request, "Genotype definition updated.")
             return redirect("genotypes:gene_list")

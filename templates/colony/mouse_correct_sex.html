@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Correct Sex {{ mouse.mouse_uid }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>Correct Sex {{ mouse.mouse_uid }}</h1>
+    <p class="muted">Controlled correction for sex recorded incorrectly during entry, import, or review.</p>
+</section>
+
+<section class="card">
+    <h2>Mouse Summary</h2>
+    <dl class="detail-grid">
+        <dt>Mouse UID</dt><dd>{{ mouse.mouse_uid }}</dd>
+        <dt>Current Sex</dt><dd>{{ mouse.get_sex_display }}</dd>
+        <dt>Status</dt><dd>{{ mouse.get_status_display }}</dd>
+        <dt>Current Cage</dt>
+        <dd>
+            {% if mouse.current_cage %}
+                <a class="link-primary" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+        <dt>Project</dt>
+        <dd>
+            {% if mouse.project %}
+                <a class="link-primary" href="{% url 'project_detail' mouse.project_id %}">{{ mouse.project.name }}</a>
+            {% else %}
+                —
+            {% endif %}
+        </dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Impact Check</h2>
+    <dl class="detail-grid">
+        {% for row in impact_rows %}
+            <dt>{{ row.label }}</dt><dd>{{ row.value }}</dd>
+        {% endfor %}
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Correction Record</h2>
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% if form.non_field_errors %}
+            <div class="form-errors">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <div class="form-row">
+            <label for="{{ form.sex.id_for_label }}">{{ form.sex.label }}</label>
+            {{ form.sex }}
+            {% if form.sex.errors %}
+                <div class="field-error">{% for error in form.sex.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% if form.reason.errors %}
+                <div class="field-error">{% for error in form.reason.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label class="checkbox-inline" for="{{ form.confirm.id_for_label }}">
+                {{ form.confirm }}
+                <span>{{ form.confirm.label }}</span>
+            </label>
+            {% if form.confirm.errors %}
+                <div class="field-error">{% for error in form.confirm.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="button">Save Sex Correction</button>
+            <a href="{% url 'mice:mouse_detail' mouse.pk %}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
