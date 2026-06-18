@@ -19,7 +19,7 @@ class StrainLine(ActorStampedModel):
         KNOCK_IN = "knock_in", "Knock-in"
         CRE_KI = "cre_ki", "Cre knock-in"
         CRE_ERT2_KI = "cre_ert2_ki", "CreERT2 knock-in"
-        TRANSGENE = "transgene", "Transgene"
+        TRANSGENE = "transgene", "Transgene (Cre/CreERT2)"
         REPORTER_KI = "reporter_knock_in", "Reporter knock-in"
         REPORTER_TG = "reporter_transgene", "Reporter transgene"
         POINT_VARIANT = "point_variant", "Point mutation / variant"

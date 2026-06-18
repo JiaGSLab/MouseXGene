@@ -7,6 +7,9 @@ from colony.models import StrainLine
 
 
 class StrainLineFormLociTests(TestCase):
+    def test_transgene_locus_type_label_clarifies_cre_driver_use(self):
+        self.assertEqual(StrainLine.LocusType.TRANSGENE.label, "Transgene (Cre/CreERT2)")
+
     def test_save_preserves_new_locus_type(self):
         line = StrainLine.objects.create(
             line_name="Test Loci",

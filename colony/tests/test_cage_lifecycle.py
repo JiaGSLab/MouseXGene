@@ -222,7 +222,7 @@ class DashboardAlertTests(TestCase):
         self.client.login(username="dashuser", password="x")
 
     def test_empty_cage_alert_counts_only_long_empty_cages(self):
-        cage = Cage.objects.create(cage_id="EMPTY-DASH")
+        cage = Cage.objects.create(cage_id="EMPTY-DASH", project=self.project)
         Cage.objects.filter(pk=cage.pk).update(created_at=timezone.now() - timedelta(days=20))
         response = self.client.get(reverse("home"))
         self.assertContains(response, "Active Cages Empty &gt;14 Days")
@@ -320,7 +320,7 @@ class DashboardAlertTests(TestCase):
         self.assertNotContains(response, "Tail-tagged Pups Missing Genotype")
 
     def test_dashboard_alert_links_use_actionable_filters(self):
-        cage = Cage.objects.create(cage_id="EMPTY-LINK")
+        cage = Cage.objects.create(cage_id="EMPTY-LINK", project=self.project)
         Cage.objects.filter(pk=cage.pk).update(created_at=timezone.now() - timedelta(days=20))
         strain = StrainLine.objects.create(line_name="Dash Link Strain", name="Dash Link Strain")
         Mouse.objects.create(
@@ -338,7 +338,7 @@ class DashboardAlertTests(TestCase):
         self.assertContains(response, f'href="/breedings/?alert=cage_mismatch&amp;owner={self.user.pk}"')
 
     def test_recent_lists_show_created_dates(self):
-        Cage.objects.create(cage_id="REC-CAGE", created_at=timezone.now() - timedelta(days=1))
+        Cage.objects.create(cage_id="REC-CAGE", project=self.project, created_at=timezone.now() - timedelta(days=1))
         response = self.client.get(reverse("home"))
         self.assertContains(response, "Recently Created Cages")
         self.assertContains(response, "mini-list__date")

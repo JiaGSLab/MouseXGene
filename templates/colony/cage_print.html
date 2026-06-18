@@ -12,7 +12,6 @@
     <article class="cage-card">
         <header class="cage-card-header">
             <h1>{{ cage.cage_id }}</h1>
-            <div class="qr-placeholder">QR</div>
         </header>
 
         <div class="cage-meta">
@@ -20,7 +19,15 @@
             <div><strong>Rack:</strong> {{ cage.rack|default:"-" }}</div>
             <div><strong>Pos:</strong> {{ cage.position|default:"-" }}</div>
             <div><strong>Use:</strong> {{ cage.get_cage_use_display }}</div>
-            <div>
+            <div class="cage-meta-wide">
+                <strong>Project:</strong>
+                {% for pr in project_rows %}
+                    {% if not forloop.first %}; {% endif %}{{ pr.project.name }}
+                {% empty %}
+                    -
+                {% endfor %}
+            </div>
+            <div class="cage-meta-wide">
                 <strong>Owner:</strong>
                 {% for pr in project_rows %}
                     {% if not forloop.first %}; {% endif %}{{ pr.owner_display }}
@@ -28,7 +35,6 @@
                     -
                 {% endfor %}
             </div>
-            <div><strong>Status:</strong> {{ cage.get_status_display }}</div>
         </div>
 
         {% if cage.notes %}
@@ -44,6 +50,7 @@
                     <tr>
                         <th>UID</th>
                         <th>Sex</th>
+                        <th>DOB</th>
                         <th>Genotype</th>
                     </tr>
                 </thead>
@@ -52,11 +59,12 @@
                     <tr>
                         <td>{{ row.mouse.mouse_uid }}</td>
                         <td>{{ row.mouse.get_sex_display }}</td>
+                        <td>{{ row.mouse.birth_date|date:"Y-m-d"|default:"-" }}</td>
                         <td>{{ row.genotype_summary }}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="3">No mice in cage.</td>
+                        <td colspan="4">No mice in cage.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -1263,10 +1263,6 @@ body.col-resize-active * {
 }
 
 .cage-card-header {
-    display: flex;
-    align-items: start;
-    justify-content: space-between;
-    gap: 8px;
     margin-bottom: 2mm;
 }
 
@@ -1274,17 +1270,7 @@ body.col-resize-active * {
     margin: 0;
     font-size: 16px;
     letter-spacing: 0.5px;
-}
-
-.qr-placeholder {
-    width: 14mm;
-    height: 14mm;
-    border: 1px dashed #4b5563;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9px;
-    font-weight: 700;
+    line-height: 1.1;
 }
 
 .cage-meta {
@@ -1292,6 +1278,10 @@ body.col-resize-active * {
     grid-template-columns: 1fr 1fr;
     gap: 1.5mm 3mm;
     margin-bottom: 2mm;
+}
+
+.cage-meta-wide {
+    grid-column: 1 / -1;
 }
 
 .cage-notes {
@@ -1309,7 +1299,7 @@ body.col-resize-active * {
 .cage-mice table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 9px;
+    font-size: 8.5px;
 }
 
 .cage-mice th,
@@ -1320,9 +1310,16 @@ body.col-resize-active * {
     vertical-align: top;
 }
 
+.cage-mice th:nth-child(2),
+.cage-mice td:nth-child(2),
+.cage-mice th:nth-child(3),
+.cage-mice td:nth-child(3) {
+    white-space: nowrap;
+}
+
 @page {
     size: 86mm 54mm;
-    margin: 2mm;
+    margin: 0;
 }
 
 @media print {

@@ -44,7 +44,7 @@ DASHBOARD_STATS_CACHE_TIMEOUT = 30
 def _dashboard_stats_cache_key(user, owner: str) -> str:
     user_key = getattr(user, "pk", None) or "anon"
     owner_key = owner or "all"
-    return f"dashboard-stats:v4:user:{user_key}:owner:{owner_key}"
+    return f"dashboard-stats:v5:user:{user_key}:owner:{owner_key}"
 
 
 def _dashboard_alert_href(viewname: str, params: dict | None = None) -> str:
@@ -77,7 +77,7 @@ def home(request: HttpRequest) -> HttpResponse:
                 litter_project_owner_filter_q(home_owner)
             ).distinct()
             cages_queryset = cages_queryset.filter(
-                Q(current_mice__isnull=True) | Q(current_mice__project__owner_id=home_owner)
+                Q(project__owner_id=home_owner) | Q(current_mice__project__owner_id=home_owner)
             ).distinct()
 
     mice_without_cage_qs = mice_queryset.filter(current_cage__isnull=True).select_related(
