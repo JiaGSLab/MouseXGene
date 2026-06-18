@@ -841,7 +841,7 @@ def _filtered_mice_queryset(request: HttpRequest):
         mice = mice.filter(current_cage_id=current_cage)
     if project:
         mice = mice.filter(project_id=project)
-    if owner and not strain_line:
+    if owner:
         mice = mice.filter(project__owner_id=owner)
 
     return mice

@@ -39,6 +39,24 @@ class MouseListOwnerFilterTests(TestCase):
         self.assertContains(response, "M-OWNER-A")
         self.assertContains(response, "M-OWNER-B")
 
+    def test_explicit_owner_filter_applies_with_strain_line_filter(self):
+        response = self.client.get(
+            self.url,
+            {
+                "strain_line_id": self.strain.pk,
+                "owner": self.user_a.pk,
+            },
+        )
+
+        self.assertContains(response, "M-OWNER-A")
+        self.assertNotContains(response, "M-OWNER-B")
+
+    def test_strain_line_filter_without_owner_shows_all_owners(self):
+        response = self.client.get(self.url, {"strain_line_id": self.strain.pk})
+
+        self.assertContains(response, "M-OWNER-A")
+        self.assertContains(response, "M-OWNER-B")
+
     def test_admin_defaults_to_all_owners(self):
         admin = get_user_model().objects.create_user(username="mouseadmin", password="x")
         UserProfile.objects.filter(user=admin).update(role=UserProfile.Role.ADMIN)
