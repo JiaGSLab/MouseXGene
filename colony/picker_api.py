@@ -90,8 +90,12 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
         "project__owner__profile",
         "strain_line",
     )
+    selected_mice = base_mice.filter(pk__in=selected_ids) if selected_ids else base_mice.none()
+    if not include_inactive:
+        selected_mice = selected_mice.filter(status=Mouse.Status.ACTIVE)
+
     if selected_only:
-        mice = base_mice.filter(pk__in=selected_ids) if selected_ids else base_mice.none()
+        mice = selected_mice
     else:
         mice = base_mice
     if not include_inactive:
@@ -111,7 +115,7 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
             | Q(toe_tag__icontains=q)
         )
     if selected_ids:
-        mice = (mice | base_mice.filter(pk__in=selected_ids)).distinct()
+        mice = (mice | selected_mice).distinct()
     mice = mice.order_by("mouse_uid")
     mice = list(mice[:PICKER_MOUSE_LIMIT])
     mouse_ids = [m.pk for m in mice]
@@ -157,6 +161,7 @@ def cage_picker_api(request: HttpRequest) -> JsonResponse:
     strain_line_id = _parse_int_param(request.GET.get("strain_line_id") or request.GET.get("strain_line"))
     q = (request.GET.get("q") or "").strip()
     cages = filter_active_cage_choices_payload(
+        user=request.user,
         project_id=project_id,
         owner_id=owner_id,
         strain_line_id=strain_line_id,
@@ -214,10 +219,9 @@ def mouse_uid_check_api(request: HttpRequest) -> JsonResponse:
 def mouse_strain_line_map_api(request: HttpRequest) -> JsonResponse:
     """Mouse id -> strain_line_id for selected parents in genotype template JS."""
     ids = _parse_int_list_params(request, limit=200)
-    rows_qs = Mouse.objects.filter(strain_line_id__isnull=False)
-    if ids:
-        rows_qs = rows_qs.filter(pk__in=ids)
-    rows = rows_qs.values_list("pk", "strain_line_id")
     if not ids:
-        rows = rows[:5000]
+        return JsonResponse({})
+    rows_qs = Mouse.objects.filter(strain_line_id__isnull=False)
+    rows_qs = rows_qs.filter(pk__in=ids)
+    rows = rows_qs.values_list("pk", "strain_line_id")
     return JsonResponse({str(pk): str(strain_id) for pk, strain_id in rows})

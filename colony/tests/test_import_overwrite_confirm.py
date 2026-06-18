@@ -64,6 +64,21 @@ class ImportOverwriteConfirmTests(TestCase):
         self.assertEqual(self.cage.room, "Room-B")
         self.assertEqual(self.cage.notes, "Updated note")
 
+    def test_cage_import_blocks_closing_cage_with_active_mice(self):
+        csv_content = (
+            "cage_id,created_date,room,rack,position,cage_type,purpose,status,notes\n"
+            "SYJ-GMZ-01,2026-04-10,Room-B,Rack-2,B2,standard,holding,closed,Should not close\n"
+        )
+        upload = SimpleUploadedFile("c.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        url = reverse("colony:cage_import")
+        self.client.post(url, {"data_file": upload, "update_existing": "on"})
+        response = self.client.post(url, {"confirm_overwrite": "1"})
+
+        self.assertRedirects(response, url)
+        self.cage.refresh_from_db()
+        self.assertEqual(self.cage.status, Cage.Status.ACTIVE)
+        self.assertNotEqual(self.cage.notes, "Should not close")
+
     def test_cage_import_cancel_clears_staged_overwrite(self):
         csv_content = (
             "cage_id,created_date,room,rack,position,cage_type,purpose,status,notes\n"

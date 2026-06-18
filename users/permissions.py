@@ -207,8 +207,8 @@ def ensure_can_edit_cage(user, cage) -> None:
     )
     if not project_ids:
         return
-    for pid in project_ids:
-        ensure_can_edit_project_data(user, Project.objects.get(pk=pid))
+    for project in Project.objects.filter(pk__in=project_ids):
+        ensure_can_edit_project_data(user, project)
 
 
 def ensure_cage_status_change(user, cage, previous: str, new: str) -> None:
@@ -229,11 +229,11 @@ def ensure_cage_status_change(user, cage, previous: str, new: str) -> None:
         return
     project_ids = set(Mouse.objects.filter(current_cage=cage).values_list("project_id", flat=True).distinct())
     if new in inactive or previous in inactive:
-        for pid in project_ids:
-            ensure_can_archive_or_change_terminal_status(user, Project.objects.get(pk=pid))
+        for project in Project.objects.filter(pk__in=project_ids):
+            ensure_can_archive_or_change_terminal_status(user, project)
     else:
-        for pid in project_ids:
-            ensure_can_edit_project_data(user, Project.objects.get(pk=pid))
+        for project in Project.objects.filter(pk__in=project_ids):
+            ensure_can_edit_project_data(user, project)
 
 
 def role_required(check_fn, denied_message: str = "You do not have permission to access this page."):

@@ -4,6 +4,7 @@ from django.db import IntegrityError, OperationalError, ProgrammingError, transa
 from django.db.models import Q
 from django.utils import timezone
 
+from colony.cage_form_helpers import editable_active_cage_queryset
 from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
 from colony.models import Cage, Mouse
 from core.models import format_project_owner_label
@@ -22,15 +23,20 @@ CAGE_LOOKUP_MATCH_LIMIT = 20
 BREEDING_CODE_RETRY_LIMIT = 5
 
 
-def resolve_cage_from_lookup(lookup: str) -> tuple[Cage | None, str | None]:
+def _is_breeding_code_integrity_error(exc: IntegrityError) -> bool:
+    return "breeding_code" in str(exc).lower()
+
+
+def resolve_cage_from_lookup(lookup: str, *, queryset=None) -> tuple[Cage | None, str | None]:
     """Resolve a cage from manual entry. Supports exact and partial (icontains) match."""
     query = (lookup or "").strip()
     if not query:
         return None, None
-    exact = Cage.objects.filter(cage_id__iexact=query).first()
+    cages = queryset if queryset is not None else Cage.objects.all()
+    exact = cages.filter(cage_id__iexact=query).first()
     if exact is not None:
         return exact, None
-    matches = list(Cage.objects.filter(cage_id__icontains=query).order_by("cage_id")[: CAGE_LOOKUP_MATCH_LIMIT + 1])
+    matches = list(cages.filter(cage_id__icontains=query).order_by("cage_id")[: CAGE_LOOKUP_MATCH_LIMIT + 1])
     if not matches:
         return None, f'No cage found matching "{query}". Create the cage first, then return to this form.'
     if len(matches) == 1:
@@ -116,7 +122,8 @@ class BreedingForm(forms.ModelForm):
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
         super().__init__(*args, **kwargs)
         self._auto_generated_breeding_code = False
         self.created_auto_cage: Cage | None = None
@@ -127,7 +134,10 @@ class BreedingForm(forms.ModelForm):
         )
         if self.instance.pk:
             self.fields["cage_assignment_mode"].initial = self.CageAssignmentMode.EXISTING
-        self.fields["cage"].queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        self.active_cage_queryset = (
+            editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        ).order_by("cage_id")
+        self.fields["cage"].queryset = self.active_cage_queryset
         self.fields["cage"].required = False
         male_qs = Mouse.objects.filter(sex=Mouse.Sex.MALE).order_by("mouse_uid")
         self.fields["male"].queryset = male_qs
@@ -358,7 +368,7 @@ class BreedingForm(forms.ModelForm):
         else:
             self.instance._allow_pending_auto_cage = False
             if lookup:
-                resolved, err = resolve_cage_from_lookup(lookup)
+                resolved, err = resolve_cage_from_lookup(lookup, queryset=self.active_cage_queryset)
                 if err:
                     self.add_error("cage_lookup", err)
                 elif resolved is not None:
@@ -411,7 +421,7 @@ class BreedingForm(forms.ModelForm):
                     breeding = super().save(commit=True)
                 break
             except IntegrityError as exc:
-                if not self._auto_generated_breeding_code:
+                if not self._auto_generated_breeding_code or not _is_breeding_code_integrity_error(exc):
                     raise
                 last_error = exc
                 self.cleaned_data["breeding_code"] = self._generate_breeding_code()
@@ -469,13 +479,16 @@ class EndBreedingForm(forms.Form):
         label="Notes",
     )
 
-    def __init__(self, *args, breeding: Breeding, members: list[Mouse], **kwargs):
+    def __init__(self, *args, breeding: Breeding, members: list[Mouse], user=None, **kwargs):
         self.breeding = breeding
         self.members = list(members)
+        self.user = user
         self.destination_map: dict[int, Cage | None] = {}
         self.action_map: dict[int, str] = {}
         super().__init__(*args, **kwargs)
-        cage_queryset = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        cage_queryset = (
+            editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        ).order_by("cage_id")
         if self.breeding.cage_id:
             cage_queryset = cage_queryset.exclude(pk=self.breeding.cage_id)
         for mouse in self.members:
@@ -643,11 +656,7 @@ class LitterRecordForm(forms.ModelForm):
 
 
 def litter_has_weaned(litter: Litter) -> bool:
-    return bool(
-        litter.wean_date
-        or litter.litter_status == Litter.LitterStatus.WEANED
-        or litter.pups.filter(mouse__isnull=False).exists()
-    )
+    return bool(litter.wean_date or litter.litter_status == Litter.LitterStatus.WEANED)
 
 
 class EndLitterForm(forms.Form):
@@ -835,6 +844,7 @@ class WeanLitterForm(forms.Form):
         dam_project=None,
         sire_strain=None,
         dam_strain=None,
+        user=None,
         parent_breeding=None,
         parent_breeding_queryset=None,
         parent_sire=None,
@@ -843,6 +853,7 @@ class WeanLitterForm(forms.Form):
         pup_female_count=0,
         **kwargs,
     ):
+        self.user = user
         super().__init__(*args, **kwargs)
         self.wean_extra_cage_requests = {Mouse.Sex.MALE: [], Mouse.Sex.FEMALE: []}
         self.wean_pup_cage_slots: dict[int, str] = {}
@@ -876,7 +887,10 @@ class WeanLitterForm(forms.Form):
                 self.initial.setdefault("wean_sire", parent_sire.pk)
             if self.default_parent_dams:
                 self.initial.setdefault("wean_possible_dams", [dam.pk for dam in self.default_parent_dams])
-        active_cages = Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id")
+        active_cages = (
+            editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        ).order_by("cage_id")
+        self.active_cage_queryset = active_cages
         self.fields["male_cage"].queryset = active_cages
         self.fields["female_cage"].queryset = active_cages
         sire_label = sire_project.name if sire_project else "Sire project"
@@ -946,6 +960,7 @@ class WeanLitterForm(forms.Form):
         requested_ids: dict[str, str] = {}
         existing_cage_slots: dict[int, str] = {}
         assigned_slots = self._raw_assigned_cage_slots()
+        active_cages = self.active_cage_queryset
 
         def remember_requested_id(raw_id: str, label: str, error_field: str | None = None) -> str:
             requested_id = ""
@@ -1026,11 +1041,11 @@ class WeanLitterForm(forms.Form):
                 else:
                     if cage_id_raw:
                         try:
-                            existing_cage = Cage.objects.get(pk=cage_id_raw)
+                            existing_cage = active_cages.get(pk=cage_id_raw)
                         except (Cage.DoesNotExist, ValueError):
                             self.add_error(None, f"{label.capitalize()} extra cage {index}: selected cage was not found.")
                     if lookup and existing_cage is None:
-                        resolved, err = resolve_cage_from_lookup(lookup)
+                        resolved, err = resolve_cage_from_lookup(lookup, queryset=active_cages)
                         if err:
                             self.add_error(None, f"{label.capitalize()} extra cage {index}: {err}")
                         else:
@@ -1258,7 +1273,7 @@ def _resolve_wean_cage_assignment(form, cleaned_data, *, cage_field: str, lookup
     cage = cleaned_data.get(cage_field)
     lookup = (cleaned_data.get(lookup_field) or "").strip()
     if lookup and not cage:
-        resolved, err = resolve_cage_from_lookup(lookup)
+        resolved, err = resolve_cage_from_lookup(lookup, queryset=form.active_cage_queryset)
         if err:
             form.add_error(lookup_field, err)
             return None

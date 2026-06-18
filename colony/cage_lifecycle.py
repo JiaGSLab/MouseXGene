@@ -86,15 +86,15 @@ def mark_cage_as_breeding(cage: Cage | None) -> None:
 
 
 def sync_cage_status_from_mice(cage: Cage | None) -> bool:
-    """Close active cages whose current occupants are all non-active. Returns True if status changed."""
+    """Close active cages whose current occupants are all terminal statuses."""
     if cage is None:
         return False
-    mice = list(cage.current_mice.all())
-    if not mice:
-        return False
-    if any(mouse.status == Mouse.Status.ACTIVE for mouse in mice):
-        return False
     if cage.status != Cage.Status.ACTIVE:
+        return False
+    current_mice = list(cage.current_mice.all())
+    if not current_mice:
+        return False
+    if any(mouse.status == Mouse.Status.ACTIVE for mouse in current_mice):
         return False
     cage.status = Cage.Status.CLOSED
     cage.save(update_fields=["status", "updated_at"])

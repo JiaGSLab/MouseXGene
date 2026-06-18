@@ -150,9 +150,7 @@ def mouse_family_pedigree(mouse: Mouse) -> MouseFamilyPedigree:
     breeding = infer_source_breeding_for_mouse(mouse)
     if breeding is not None:
         sire, dams = breeding_sire_and_dams(breeding)
-        if mouse.sire_id and sire is None:
-            sire = mouse.sire
-        elif mouse.sire_id:
+        if mouse.sire_id:
             sire = mouse.sire
         if possible_dams:
             dams = _merge_dams(possible_dams, [])

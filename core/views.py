@@ -96,7 +96,9 @@ def home(request: HttpRequest) -> HttpResponse:
     weaning_due_soon_qs = litters_queryset.filter(
         birth_date__isnull=False,
         wean_date__isnull=True,
-        birth_date__range=(today - timedelta(days=21), wean_due_end - timedelta(days=21)),
+        birth_date__lte=wean_due_end - timedelta(days=21),
+    ).exclude(
+        litter_status__in=[Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED],
     ).select_related("breeding")
 
     empty_cutoff = timezone.now() - timedelta(days=14)
@@ -293,7 +295,10 @@ def audit_log_list(request: HttpRequest) -> HttpResponse:
     if object_type:
         logs = logs.filter(object_type=object_type)
     if user_id:
-        logs = logs.filter(user_id=user_id)
+        if user_id.isdigit():
+            logs = logs.filter(user_id=int(user_id))
+        else:
+            logs = logs.none()
 
     context = {
         "logs": logs.order_by("-created_at")[:200],

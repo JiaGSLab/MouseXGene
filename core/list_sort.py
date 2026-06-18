@@ -158,10 +158,12 @@ def _prepare_cage_use_sort(qs: QuerySet) -> QuerySet:
 def _prepare_mouse_breeding_sort(qs: QuerySet) -> QuerySet:
     active = Q(sired_breedings__active=True)
     active_dam = Q(maternal_breedings_primary__active=True)
+    active_member = Q(breeding_memberships__breeding__active=True)
     return qs.annotate(
         _sort_breed_s=Min("sired_breedings__breeding_code", filter=active),
         _sort_breed_d=Min("maternal_breedings_primary__breeding_code", filter=active_dam),
-    ).annotate(_sort_breeding=Coalesce("_sort_breed_s", "_sort_breed_d", Value("")))
+        _sort_breed_member=Min("breeding_memberships__breeding__breeding_code", filter=active_member),
+    ).annotate(_sort_breeding=Coalesce("_sort_breed_s", "_sort_breed_d", "_sort_breed_member", Value("")))
 
 
 def _prepare_breeding_alert_sort(qs: QuerySet) -> QuerySet:

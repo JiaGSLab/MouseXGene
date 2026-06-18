@@ -156,6 +156,36 @@ class MousePickerApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["mice"], [])
 
+    def test_mouse_picker_selected_inactive_requires_include_inactive(self):
+        response = self.client.get(
+            reverse("mice:mouse_picker_api"),
+            {
+                "selected_ids": str(self.archived_mouse.pk),
+                "selected_only": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mice"], [])
+
+        response = self.client.get(
+            reverse("mice:mouse_picker_api"),
+            {
+                "selected_ids": str(self.archived_mouse.pk),
+                "selected_only": "1",
+                "include_inactive": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["uid"] for row in response.json()["mice"]], [self.archived_mouse.mouse_uid])
+
+    def test_mouse_strain_map_without_ids_is_empty(self):
+        response = self.client.get(reverse("mice:mouse_strain_line_map_api"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {})
+
     def test_mouse_strain_map_can_limit_to_selected_ids(self):
         other_strain = StrainLine.objects.create(line_name="Other Picker Strain", is_active=True)
         other_mouse = Mouse.objects.create(

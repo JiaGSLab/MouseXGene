@@ -14,6 +14,7 @@ from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
+from .cage_form_helpers import editable_active_cage_queryset, editable_cage_queryset
 from .cage_lifecycle import (
     TERMINAL_MOUSE_STATUSES,
     validate_active_breeding_cage_entry,
@@ -565,6 +566,18 @@ def _selected_cage_queryset(*values, active_only: bool = True):
     return cages.order_by("cage_id")
 
 
+def _editable_selected_cage_queryset(user, *values, active_only: bool = True):
+    ids = {_coerce_positive_int(value) for value in values}
+    ids.discard(None)
+    if not ids:
+        return Cage.objects.none()
+    if active_only:
+        cages = editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+    else:
+        cages = Cage.objects.all() if is_admin(user) else Cage.objects.filter(pk__in=ids)
+    return cages.filter(pk__in=ids).order_by("cage_id")
+
+
 class MouseParentageMode:
     NONE = "none"
     BREEDING_CAGE = "breeding_cage"
@@ -844,15 +857,18 @@ class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
         selected_cage_id = _coerce_positive_int(
             self.data.get("current_cage") if self.is_bound else self.initial.get("current_cage")
         )
-        current_cage_qs = Cage.objects.none()
+        active_cage_qs = editable_active_cage_queryset(self.user) if self.user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        self.active_cage_queryset = active_cage_qs.order_by("cage_id")
+        current_cage_ids: list[int] = []
         if selected_cage_id:
-            current_cage_qs = current_cage_qs | Cage.objects.filter(
-                pk=selected_cage_id,
-                status=Cage.Status.ACTIVE,
+            current_cage_ids.extend(
+                self.active_cage_queryset.filter(pk=selected_cage_id).values_list("pk", flat=True)
             )
         if self.instance and self.instance.pk and self.instance.current_cage_id:
-            current_cage_qs = current_cage_qs | Cage.objects.filter(pk=self.instance.current_cage_id)
-        self.fields["current_cage"].queryset = current_cage_qs.distinct().order_by("cage_id")
+            current_cage_ids.append(self.instance.current_cage_id)
+        self.fields["current_cage"].queryset = Cage.objects.filter(
+            pk__in=list(dict.fromkeys(current_cage_ids))
+        ).order_by("cage_id")
         self.fields["current_cage"].required = False
         if self.instance.pk and self.instance.current_cage_id:
             self.fields["current_cage"].initial = self.instance.current_cage_id
@@ -923,7 +939,7 @@ class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
 
         lookup = (cleaned_data.get("current_cage_lookup") or "").strip()
         if lookup:
-            resolved, err = resolve_cage_from_lookup(lookup)
+            resolved, err = resolve_cage_from_lookup(lookup, queryset=self.active_cage_queryset)
             if err:
                 self.add_error("current_cage_lookup", err)
             elif resolved is not None:
@@ -999,8 +1015,16 @@ class MouseBatchSharedForm(forms.Form):
         self.user = user
         super().__init__(*args, **kwargs)
         self.fields["strain_line"].queryset = StrainLine.objects.filter(is_active=True).order_by("line_name")
-        self.fields["current_cage"].queryset = _selected_cage_queryset(
+        self.active_cage_queryset = (
+            editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        ).order_by("cage_id")
+        selected_cage_id = _coerce_positive_int(
             self.data.get("current_cage") if self.is_bound else self.initial.get("current_cage")
+        )
+        self.fields["current_cage"].queryset = (
+            self.active_cage_queryset.filter(pk=selected_cage_id)
+            if selected_cage_id
+            else Cage.objects.none()
         )
         self.fields["sire"].queryset = _selected_mouse_queryset(
             self.data.get("sire") if self.is_bound else self.initial.get("sire")
@@ -1015,7 +1039,7 @@ class MouseBatchSharedForm(forms.Form):
         cleaned_data = super().clean()
         lookup = (cleaned_data.get("current_cage_lookup") or "").strip()
         if lookup:
-            resolved, err = resolve_cage_from_lookup(lookup)
+            resolved, err = resolve_cage_from_lookup(lookup, queryset=self.active_cage_queryset)
             if err:
                 self.add_error("current_cage_lookup", err)
             elif resolved is not None:
@@ -1064,17 +1088,16 @@ class MoveCageForm(forms.Form):
     reason = forms.CharField(max_length=128, required=False)
     notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 4}), required=False)
 
-    def __init__(self, *args, mouse: Mouse, **kwargs):
+    def __init__(self, *args, mouse: Mouse, user=None, **kwargs):
         self.mouse = mouse
+        self.user = user
         super().__init__(*args, **kwargs)
+        active_cages = editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
         selected_id = _coerce_positive_int(
             self.data.get("destination_cage") if self.is_bound else self.initial.get("destination_cage")
         )
         if selected_id:
-            self.fields["destination_cage"].queryset = Cage.objects.filter(
-                pk=selected_id,
-                status=Cage.Status.ACTIVE,
-            ).order_by("cage_id")
+            self.fields["destination_cage"].queryset = active_cages.filter(pk=selected_id).order_by("cage_id")
         else:
             self.fields["destination_cage"].queryset = Cage.objects.none()
         self.fields["destination_cage"].widget.attrs.update({"class": "filter-control"})
@@ -1134,18 +1157,21 @@ class MouseRestoreForm(forms.Form):
         label="I confirm this mouse is alive and should be restored to active cage occupancy.",
     )
 
-    def __init__(self, *args, mouse: Mouse, **kwargs):
+    def __init__(self, *args, mouse: Mouse, user=None, **kwargs):
         self.mouse = mouse
+        self.user = user
         super().__init__(*args, **kwargs)
         selected_id = _coerce_positive_int(
             self.data.get("destination_cage") if self.is_bound else self.initial.get("destination_cage")
         )
         qs = Cage.objects.none()
         if selected_id:
-            qs = Cage.objects.filter(
-                pk=selected_id,
-                status__in=[Cage.Status.ACTIVE, Cage.Status.CLOSED],
+            active_or_closed = (
+                editable_cage_queryset(user, statuses=[Cage.Status.ACTIVE, Cage.Status.CLOSED])
+                if user is not None
+                else Cage.objects.filter(status__in=[Cage.Status.ACTIVE, Cage.Status.CLOSED])
             )
+            qs = active_or_closed.filter(pk=selected_id)
         self.fields["destination_cage"].queryset = qs.order_by("cage_id")
         self.fields["destination_cage"].widget.attrs.update({"class": "filter-control"})
 
@@ -1282,7 +1308,7 @@ class BulkMouseClearExperimentForm(forms.Form):
 
 class BulkMouseMoveCageForm(forms.Form):
     destination_cage = forms.ModelChoiceField(
-        queryset=Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id"),
+        queryset=Cage.objects.none(),
         label="Destination Cage",
         widget=forms.Select(attrs={"class": "filter-control"}),
     )
@@ -1300,9 +1326,13 @@ class BulkMouseMoveCageForm(forms.Form):
     notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False)
     confirm = forms.BooleanField(label="I confirm these mice should be moved to the selected cage.")
 
-    def __init__(self, *args, mice: list[Mouse], **kwargs):
+    def __init__(self, *args, mice: list[Mouse], user=None, **kwargs):
         self.mice = mice
+        self.user = user
         super().__init__(*args, **kwargs)
+        self.fields["destination_cage"].queryset = (
+            editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+        ).order_by("cage_id")
 
     def clean_move_date(self):
         move_date = self.cleaned_data["move_date"]

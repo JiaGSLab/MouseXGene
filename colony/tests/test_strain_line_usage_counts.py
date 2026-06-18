@@ -151,13 +151,13 @@ class StrainLineUsageCountTests(TestCase):
             start_date="2026-01-01",
             active=True,
         )
-        viewer = get_user_model().objects.create_user(username="breedkeep", password="x")
+        get_user_model().objects.create_user(username="breedkeep", password="x")
         self.client.login(username="breedkeep", password="x")
         response = self.client.get(
             reverse("breeding:breeding_list"),
             {
                 "strain_line_id": self.strain.pk,
-                "owner": str(viewer.pk),
+                "owner": str(self.user.pk),
             },
         )
         self.assertContains(response, "BR-KEEP-FILTER")
@@ -171,6 +171,50 @@ class StrainLineUsageCountTests(TestCase):
         )
         self.assertContains(response, "BR-KEEP-FILTER")
         self.assertNotContains(response, "BR-KEEP-OTHER")
+
+    def test_breeding_list_owner_filter_applies_with_strain_line_filter(self):
+        Breeding.objects.create(
+            breeding_code="BR-OWNER-ME",
+            cage=self.breeding_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        other_owner = get_user_model().objects.create_user(username="otherbreedowner", password="x")
+        other_project = Project.objects.create(name="Other Breed Owner Project", owner=other_owner)
+        other_sire = Mouse.objects.create(
+            mouse_uid="M-BREED-OTHER-S",
+            sex=Mouse.Sex.MALE,
+            strain_line=self.strain,
+            project=other_project,
+        )
+        other_dam = Mouse.objects.create(
+            mouse_uid="M-BREED-OTHER-D",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=other_project,
+        )
+        Breeding.objects.create(
+            breeding_code="BR-OWNER-OTHER",
+            cage=self.other_cage,
+            male=other_sire,
+            female_1=other_dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        self.client.login(username="straincounts", password="x")
+
+        response = self.client.get(
+            reverse("breeding:breeding_list"),
+            {
+                "strain_line_id": self.strain.pk,
+                "owner": str(self.user.pk),
+            },
+        )
+
+        self.assertContains(response, "BR-OWNER-ME")
+        self.assertNotContains(response, "BR-OWNER-OTHER")
 
     def test_cage_list_strain_line_includes_breeding_cage(self):
         Breeding.objects.create(

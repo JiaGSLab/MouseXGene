@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import OperationalError, ProgrammingError, models
 from django.core.exceptions import ValidationError
 
 from colony.models import Cage, Mouse
@@ -78,7 +78,7 @@ class Breeding(ActorStampedModel):
         """All sire/dam mice on this breeding, including extra females."""
         try:
             members = [row.mouse for row in self.breeding_members.select_related("mouse").all()]
-        except Exception:
+        except (OperationalError, ProgrammingError):
             members = []
         if members:
             return members

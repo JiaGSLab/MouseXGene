@@ -6,6 +6,7 @@ from django.db.models import Exists, OuterRef, Q
 
 from core.models import Project
 from core.owner_filters import project_owner_wean_options
+from users.permissions import is_admin
 
 from .models import Cage, Mouse, StrainLine
 
@@ -14,8 +15,45 @@ def active_cage_choices_payload() -> list[dict]:
     return filter_active_cage_choices_payload(limit=2000)
 
 
+def editable_cage_queryset(user, *, statuses: list[str] | tuple[str, ...] | set[str] | None = None):
+    """Cages a user may target from write workflows."""
+    cages = Cage.objects.all()
+    if statuses is not None:
+        cages = cages.filter(status__in=statuses)
+    if not getattr(user, "is_authenticated", False):
+        return cages.none()
+    if is_admin(user):
+        return cages
+
+    editable_project_ids = list(
+        Project.objects.filter(Q(owner=user) | Q(memberships__user=user))
+        .distinct()
+        .values_list("id", flat=True)
+    )
+    has_current_mice = Mouse.objects.filter(current_cage_id=OuterRef("pk"))
+    has_editable_mice = has_current_mice.filter(project_id__in=editable_project_ids)
+    return (
+        cages.annotate(
+            _has_current_mice=Exists(has_current_mice),
+            _has_editable_mice=Exists(has_editable_mice),
+        )
+        .filter(
+            Q(project_id__in=editable_project_ids)
+            | Q(_has_editable_mice=True)
+            | Q(project_id__isnull=True, _has_current_mice=False)
+        )
+        .distinct()
+    )
+
+
+def editable_active_cage_queryset(user):
+    """Active cages a user may target from write workflows."""
+    return editable_cage_queryset(user, statuses=[Cage.Status.ACTIVE])
+
+
 def filter_active_cage_choices_payload(
     *,
+    user=None,
     project_id: int | None = None,
     owner_id: int | None = None,
     strain_line_id: int | None = None,
@@ -23,9 +61,8 @@ def filter_active_cage_choices_payload(
     limit: int = 400,
 ) -> list[dict]:
     mice_for_cage = Mouse.objects.filter(current_cage_id=OuterRef("pk"))
-    cages = Cage.objects.filter(status=Cage.Status.ACTIVE).annotate(
-        _has_current_mice=Exists(mice_for_cage),
-    )
+    cages = editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
+    cages = cages.annotate(_has_current_mice=Exists(mice_for_cage))
     if q:
         cages = cages.filter(cage_id__icontains=q)
     if project_id:

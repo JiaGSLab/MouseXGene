@@ -93,6 +93,34 @@ class MouseBulkActionTests(TestCase):
         self.assertIsNone(assignment.ended_at)
         self.assertEqual(assignment.note, "behavior assay")
 
+    def test_bulk_action_rejects_more_than_selection_limit(self):
+        many_ids = []
+        for index in range(201):
+            mouse = Mouse.objects.create(
+                mouse_uid=f"BULK-LIMIT-{index:03d}",
+                sex=Mouse.Sex.FEMALE,
+                status=Mouse.Status.ACTIVE,
+                birth_date=date(2026, 1, 1),
+                project=self.project,
+                strain_line=self.strain,
+            )
+            many_ids.append(mouse.pk)
+
+        response = self.client.post(
+            reverse("mice:mouse_bulk_action"),
+            {
+                "bulk_action": "mark_experiment",
+                "confirm_bulk_action": "1",
+                "mouse_ids": many_ids,
+                "note": "too many",
+                "confirm": "on",
+                "next": reverse("mice:mouse_list"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertFalse(MouseExperimentAssignment.objects.filter(note="too many").exists())
+
     def test_clear_experiment_ends_active_assignment(self):
         assignment = MouseExperimentAssignment.objects.create(
             mouse=self.extra_female,

@@ -55,7 +55,7 @@ from .breeding_pedigree import (
     mouse_family_pedigree_from_prefetch,
     resolve_breeding_for_import_cage,
 )
-from .cage_form_helpers import cage_filter_form_context
+from .cage_form_helpers import cage_filter_form_context, editable_active_cage_queryset
 from .models import (
     Cage,
     CageMembership,
@@ -87,6 +87,7 @@ from colony.cage_lifecycle import (
     breeding_setup_message,
     close_active_breedings_for_terminal_mouse,
     remove_terminal_mouse_from_current_cage,
+    sync_cage_after_occupancy_change,
     sync_cage_breeding_workflow,
     sync_cage_status_from_mice,
     validate_active_sex_compatible_with_cage,
@@ -293,8 +294,23 @@ def _apply_cage_import_rows(rows: list[dict], *, acting_user) -> tuple[int, int]
         cages_by_id = Cage.objects.in_bulk([row["cage_id"] for row in update_rows], field_name="cage_id")
         now = timezone.now()
         cages_to_update: list[Cage] = []
+        inactive_statuses = {
+            Cage.Status.CLOSED,
+            Cage.Status.SANITIZING,
+            Cage.Status.RETIRED,
+            Cage.Status.ARCHIVED,
+        }
         for row in update_rows:
             cage = cages_by_id[row["cage_id"]]
+            next_status = row.get("status")
+            if next_status in inactive_statuses and Mouse.objects.filter(
+                current_cage=cage,
+                status=Mouse.Status.ACTIVE,
+            ).exists():
+                raise ValidationError(
+                    f"Cage {cage.cage_id} has active mice. Move or end the mice before importing status "
+                    f"{Cage.Status(next_status).label}."
+                )
             for field in CAGE_IMPORT_UPDATE_FIELDS:
                 setattr(cage, field, row[field])
             cage.updated_by = acting_user
@@ -703,7 +719,7 @@ def _filtered_cages_queryset(request: HttpRequest):
             if include_inactive != "yes":
                 project_mice = project_mice.filter(status=Mouse.Status.ACTIVE)
             cages = cages.filter(Q(project_id=project_pk) | Exists(project_mice))
-    if owner and not strain_line:
+    if owner:
         owner_mice = Mouse.objects.filter(current_cage_id=OuterRef("pk"), project__owner_id=owner)
         if include_inactive != "yes":
             owner_mice = owner_mice.filter(status=Mouse.Status.ACTIVE)
@@ -1089,6 +1105,8 @@ BULK_MOUSE_ACTION_CREATE_BREEDING = "create_breeding"
 BULK_MOUSE_ACTION_MOVE_CAGE = "move_cage"
 BULK_MOUSE_ACTION_END = "end"
 
+BULK_MOUSE_MAX_SELECTION = 200
+
 BULK_MOUSE_ACTION_LABELS = {
     BULK_MOUSE_ACTION_MARK_EXPERIMENT: "Mark in experiment",
     BULK_MOUSE_ACTION_CLEAR_EXPERIMENT: "Clear experiment status",
@@ -1098,7 +1116,7 @@ BULK_MOUSE_ACTION_LABELS = {
 }
 
 
-def _parse_bulk_mouse_ids(raw_ids: list[str]) -> list[int]:
+def _parse_bulk_mouse_ids(raw_ids: list[str], *, limit: int = BULK_MOUSE_MAX_SELECTION + 1) -> list[int]:
     ids: list[int] = []
     seen: set[int] = set()
     for raw in raw_ids:
@@ -1109,6 +1127,8 @@ def _parse_bulk_mouse_ids(raw_ids: list[str]) -> list[int]:
             if value and value not in seen:
                 seen.add(value)
                 ids.append(value)
+                if len(ids) >= limit:
+                    return ids
     return ids
 
 
@@ -1241,13 +1261,13 @@ def _bulk_mouse_action_errors(action: str, mice: list[Mouse]) -> list[str]:
     return errors
 
 
-def _bulk_mouse_form_for_action(action: str, *, data=None, mice: list[Mouse]):
+def _bulk_mouse_form_for_action(action: str, *, data=None, mice: list[Mouse], user=None):
     if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
         return BulkMouseExperimentForm(data=data)
     if action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
         return BulkMouseClearExperimentForm(data=data)
     if action == BULK_MOUSE_ACTION_MOVE_CAGE:
-        return BulkMouseMoveCageForm(data=data, mice=mice)
+        return BulkMouseMoveCageForm(data=data, mice=mice, user=user)
     if action == BULK_MOUSE_ACTION_END:
         return BulkMouseEndForm(data=data, mice=mice)
     return None
@@ -1285,7 +1305,7 @@ def _bulk_action_confirm_context(
                 or cage.cage_type == Cage.CageType.BREEDING,
                 "use": cage.get_cage_use_display(),
             }
-            for cage in Cage.objects.filter(status=Cage.Status.ACTIVE)
+            for cage in editable_active_cage_queryset(request.user)
             .only("id", "cage_id", "purpose", "cage_type")
             .order_by("cage_id")
         ]
@@ -1364,8 +1384,11 @@ def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMove
         origin_cages = Cage.objects.in_bulk(
             [mouse.current_cage_id for mouse in locked_mice if mouse.current_cage_id]
         )
+        affected_cage_ids: set[int] = {destination_cage.pk}
         for mouse in locked_mice:
             origin_cage = origin_cages.get(mouse.current_cage_id)
+            if origin_cage:
+                affected_cage_ids.add(origin_cage.pk)
             if mouse.current_cage_id == destination_cage.pk:
                 continue
             current_memberships = CageMembership.objects.select_for_update().filter(
@@ -1392,6 +1415,8 @@ def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMove
                 message=f"Bulk moved mouse {mouse.mouse_uid} from cage {source_label} to {destination_cage.cage_id}.",
             )
             moved += 1
+        for cage in Cage.objects.filter(pk__in=affected_cage_ids):
+            sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage)
     return moved
 
 
@@ -1451,6 +1476,9 @@ def mouse_bulk_action(request: HttpRequest) -> HttpResponse:
     if not ids:
         messages.error(request, "Select at least one mouse before applying a bulk action.")
         return redirect(next_url)
+    if len(ids) > BULK_MOUSE_MAX_SELECTION:
+        messages.error(request, f"Select at most {BULK_MOUSE_MAX_SELECTION} mice at once.")
+        return redirect(next_url)
 
     mice = _selected_bulk_mice(request, ids)
     if len(mice) != len(ids):
@@ -1478,6 +1506,7 @@ def mouse_bulk_action(request: HttpRequest) -> HttpResponse:
         action,
         data=request.POST if is_confirm else None,
         mice=mice,
+        user=request.user,
     )
 
     if form is None:
@@ -3084,9 +3113,11 @@ def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
     if not _can_upload_strain_line_pdf(request.user):
         raise PermissionDenied("Only managers or admins can upload strain line PDF documents.")
     line = get_object_or_404(StrainLine, pk=pk)
-    next_url = (request.POST.get("next") or "").strip()
-    if not next_url:
-        next_url = reverse("colony:strain_line_detail", kwargs={"pk": line.pk})
+    next_url = _safe_local_next_url(
+        request,
+        request.POST.get("next"),
+        reverse("colony:strain_line_detail", kwargs={"pk": line.pk}),
+    )
 
     uploads = request.FILES.getlist("pdf_files")
     legacy_upload = request.FILES.get("pdf_file")
@@ -3167,9 +3198,11 @@ def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> H
     if not _can_delete_strain_line_pdf(request.user):
         raise PermissionDenied("Only admins can remove strain line PDF documents.")
     doc = get_object_or_404(StrainLineDocument, pk=doc_pk, strain_line_id=pk)
-    next_url = (request.POST.get("next") or "").strip()
-    if not next_url:
-        next_url = reverse("colony:strain_line_detail", kwargs={"pk": pk})
+    next_url = _safe_local_next_url(
+        request,
+        request.POST.get("next"),
+        reverse("colony:strain_line_detail", kwargs={"pk": pk}),
+    )
     label = doc.display_name
     if doc.file:
         doc.file.delete(save=False)
@@ -3290,6 +3323,17 @@ def _safe_cage_create_next_url(request: HttpRequest, raw_url: str | None) -> str
     ):
         return url
     return ""
+
+
+def _safe_local_next_url(request: HttpRequest, raw_url: str | None, fallback: str) -> str:
+    url = (raw_url or "").strip()
+    if url and url_has_allowed_host_and_scheme(
+        url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return url
+    return fallback
 
 
 def _safe_cage_create_select_field(raw_field: str | None) -> str:
@@ -3589,7 +3633,20 @@ def cage_import(request: HttpRequest) -> HttpResponse:
                 errors=result.errors,
             )
         else:
-            created_count, updated_count = _apply_cage_import_rows(result.rows, acting_user=request.user)
+            try:
+                created_count, updated_count = _apply_cage_import_rows(result.rows, acting_user=request.user)
+            except ValidationError as exc:
+                row_errors = exc.messages if hasattr(exc, "messages") else [str(exc)]
+                messages.error(request, row_errors[0] if row_errors else "Cage import failed validation.")
+                record_import_log(
+                    user=request.user,
+                    import_type=ImportLog.ImportType.CAGE,
+                    filename=upload_name,
+                    success=False,
+                    created_count=0,
+                    errors=row_errors,
+                )
+                return redirect("colony:cage_import")
             total = created_count + updated_count
             log_audit_event(
                 user=request.user,
@@ -3664,10 +3721,35 @@ def cage_import(request: HttpRequest) -> HttpResponse:
                         row_errors = [str(exc)]
                         overwrite_context = {}
                 else:
-                    created_count, updated_count = _apply_cage_import_rows(
-                        result.rows,
-                        acting_user=request.user,
-                    )
+                    try:
+                        created_count, updated_count = _apply_cage_import_rows(
+                            result.rows,
+                            acting_user=request.user,
+                        )
+                    except ValidationError as exc:
+                        row_errors = exc.messages if hasattr(exc, "messages") else [str(exc)]
+                        record_import_log(
+                            user=request.user,
+                            import_type=ImportLog.ImportType.CAGE,
+                            filename=upload_name,
+                            success=False,
+                            created_count=0,
+                            errors=row_errors,
+                        )
+                        created_count = updated_count = None
+                    if created_count is None:
+                        overwrite_context = {}
+                        return render(
+                            request,
+                            "colony/cage_import.html",
+                            {
+                                "form": form,
+                                "prefix_form": prefix_form,
+                                "row_errors": row_errors,
+                                "overwrite_context": overwrite_context,
+                                "import_prefix_hint": get_effective_import_prefix(request.user),
+                            },
+                        )
                     total = created_count + updated_count
                     log_audit_event(
                         user=request.user,
@@ -4454,7 +4536,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         mice = mice.filter(strain_line_id=strain_line)
     if project:
         mice = mice.filter(project_id=project)
-    if owner and not strain_line:
+    if owner:
         mice = mice.filter(project__owner_id=owner)
     if parent == "breeding":
         mice = mice.filter(source_breeding__isnull=False)
@@ -4840,7 +4922,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("mice:mouse_detail", pk=mouse.pk)
 
     if request.method == "POST":
-        form = MoveCageForm(request.POST, mouse=mouse)
+        form = MoveCageForm(request.POST, mouse=mouse, user=request.user)
         if form.is_valid():
             destination_cage = form.cleaned_data["destination_cage"]
             move_date = form.cleaned_data["move_date"]
@@ -4850,6 +4932,9 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
             with transaction.atomic():
                 mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
                 origin_cage = mouse_locked.current_cage
+                affected_cage_ids = {destination_cage.pk}
+                if origin_cage:
+                    affected_cage_ids.add(origin_cage.pk)
 
                 current_memberships = CageMembership.objects.select_for_update().filter(
                     mouse=mouse_locked,
@@ -4870,6 +4955,8 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
                     reason=reason,
                     notes=notes,
                 )
+                for cage in Cage.objects.filter(pk__in=affected_cage_ids):
+                    sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage)
 
             source_label = origin_cage.cage_id if origin_cage else "None"
             log_audit_event(
@@ -4887,7 +4974,7 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
             )
             return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
-        form = MoveCageForm(mouse=mouse)
+        form = MoveCageForm(mouse=mouse, user=request.user)
 
     context = {
         "mouse": mouse,
@@ -5080,7 +5167,7 @@ def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
     }
 
     if request.method == "POST":
-        form = MouseRestoreForm(request.POST, mouse=mouse, initial=initial)
+        form = MouseRestoreForm(request.POST, mouse=mouse, user=request.user, initial=initial)
         if form.is_valid():
             destination_cage = form.cleaned_data["destination_cage"]
             restore_date = form.cleaned_data["restore_date"]
@@ -5154,7 +5241,8 @@ def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
                 )
                 sync_cage_status_from_mice(destination_cage)
                 for cage_id in previous_cage_ids - {destination_cage.pk}:
-                    sync_cage_status_from_mice(Cage.objects.filter(pk=cage_id).first())
+                    cage = Cage.objects.filter(pk=cage_id).first()
+                    sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage)
 
             membership_action = "reopened previous cage membership" if reopened_existing_membership else "created cage membership"
             log_audit_event(
@@ -5173,7 +5261,7 @@ def mouse_restore(request: HttpRequest, pk: int) -> HttpResponse:
             )
             return redirect("mice:mouse_detail", pk=mouse_locked.pk)
     else:
-        form = MouseRestoreForm(mouse=mouse, initial=initial)
+        form = MouseRestoreForm(mouse=mouse, user=request.user, initial=initial)
 
     return render(
         request,

@@ -47,6 +47,18 @@ class CageListOwnerFilterTests(TestCase):
         self.assertNotContains(response, "OWN-CAGE-A")
         self.assertContains(response, "OWN-CAGE-B")
 
+    def test_cage_list_owner_filter_applies_with_strain_line_filter(self):
+        response = self.client.get(
+            reverse("colony:cage_list"),
+            {
+                "owner": str(self.user_a.pk),
+                "strain_line": str(self.strain.pk),
+            },
+        )
+
+        self.assertContains(response, "OWN-CAGE-A")
+        self.assertNotContains(response, "OWN-CAGE-B")
+
     def test_cage_list_all_owners_shows_every_cage(self):
         response = self.client.get(reverse("colony:cage_list"), {"owner": "all"})
         self.assertContains(response, "OWN-CAGE-A")

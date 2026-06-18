@@ -69,3 +69,52 @@ class LitterListWeanGroupingTests(TestCase):
         self.assertIn("litter-section-row--weaned", html)
         self.assertIn("Weaned / closed", html)
         self.assertLess(html.find(active_litter.litter_code), html.find(weaned_litter.litter_code))
+
+    def test_litter_list_owner_filter_applies_with_strain_line_filter(self):
+        owned_litter = Litter.objects.create(
+            breeding=self.breeding,
+            litter_code="LL-OWNER-ME",
+            birth_date=date(2026, 2, 1),
+        )
+        other_user = get_user_model().objects.create_user(username="litter_other_owner", password="x")
+        other_project = Project.objects.create(name="Litter Other Project", owner=other_user, is_active=True)
+        other_cage = Cage.objects.create(cage_id="LL-OTHER-CAGE", status=Cage.Status.ACTIVE)
+        other_sire = Mouse.objects.create(
+            mouse_uid="LL-OTHER-SIRE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            project=other_project,
+            strain_line=self.strain,
+            current_cage=other_cage,
+        )
+        other_dam = Mouse.objects.create(
+            mouse_uid="LL-OTHER-DAM",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            project=other_project,
+            strain_line=self.strain,
+            current_cage=other_cage,
+        )
+        other_breeding = Breeding.objects.create(
+            breeding_code="LL-OTHER-BR",
+            cage=other_cage,
+            male=other_sire,
+            female_1=other_dam,
+            start_date=date(2026, 1, 1),
+        )
+        Litter.objects.create(
+            breeding=other_breeding,
+            litter_code="LL-OWNER-OTHER",
+            birth_date=date(2026, 2, 2),
+        )
+
+        response = self.client.get(
+            reverse("litters:litter_list"),
+            {
+                "strain_line_id": self.strain.pk,
+                "owner": str(self.user.pk),
+            },
+        )
+
+        self.assertContains(response, owned_litter.litter_code)
+        self.assertNotContains(response, "LL-OWNER-OTHER")
