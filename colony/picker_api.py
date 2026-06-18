@@ -82,6 +82,7 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
     sex = (request.GET.get("sex") or "").strip().upper()
     exclude_breeding_id = _parse_int_param(request.GET.get("exclude_breeding_id"))
     include_inactive = _truthy_param(request.GET.get("include_inactive"))
+    selected_only = _truthy_param(request.GET.get("selected_only"))
 
     base_mice = Mouse.objects.select_related(
         "project",
@@ -89,7 +90,10 @@ def mouse_picker_api(request: HttpRequest) -> JsonResponse:
         "project__owner__profile",
         "strain_line",
     )
-    mice = base_mice
+    if selected_only:
+        mice = base_mice.filter(pk__in=selected_ids) if selected_ids else base_mice.none()
+    else:
+        mice = base_mice
     if not include_inactive:
         mice = mice.filter(status=Mouse.Status.ACTIVE)
     if owner_ids:
