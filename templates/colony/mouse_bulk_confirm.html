@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action_label }} | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header">
+    <h1>{{ action_label }}</h1>
+    <p class="muted">Review the selected mice before MouseXGene changes any records.</p>
+</section>
+
+<section class="card">
+    <h2>Selected Mice</h2>
+    <div class="table-wrap">
+        <table class="data-table data-table--compact">
+            <thead>
+                <tr>
+                    <th>Mouse UID</th>
+                    <th>Sex</th>
+                    <th>Status</th>
+                    <th>Current Cage</th>
+                    <th>Strain Line</th>
+                    <th>Project</th>
+                    <th>Breeding</th>
+                    <th>Experiment</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for mouse in selected_mice %}
+                    <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.active_breeding_badges %}row-breeding-active {% endif %}{% if mouse.is_in_experiment %}row-experiment-active{% endif %}">
+                        <td><a class="table-link" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
+                        <td>{{ mouse.get_sex_display }}</td>
+                        <td>{{ mouse.get_status_display }}</td>
+                        <td>
+                            {% if mouse.current_cage %}
+                                <a class="table-link" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                            {% else %}
+                                <span class="cell-empty">—</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ mouse.strain_line }}</td>
+                        <td>{{ mouse.project }}</td>
+                        <td>
+                            {% if mouse.active_breeding_badges %}
+                                {% for b in mouse.active_breeding_badges %}
+                                    <a class="breeding-badge breeding-badge-link" href="{% url 'breeding:breeding_detail' b.id %}">{{ b.role }} · {{ b.code }}</a>
+                                {% endfor %}
+                            {% else %}
+                                <span class="cell-empty">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if mouse.is_in_experiment %}
+                                <span class="status-pill status-pill--experiment">In experiment</span>
+                            {% else %}
+                                <span class="cell-empty">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Confirm Action</h2>
+    {% if blocking_errors %}
+        <div class="form-errors">
+            {% for error in blocking_errors %}
+                <div>{{ error }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if form.non_field_errors %}
+        <div class="form-errors">
+            {% for error in form.non_field_errors %}
+                <div>{{ error }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if blocking_errors and action == "create_breeding" %}
+        <div class="workflow-note workflow-note--warning">
+            <strong>Create breeding blocked.</strong>
+            <span>Select exactly 1 active male and 1-3 active females. Selected mice must not already be in active breeding or active experiment, and each must have a current cage.</span>
+        </div>
+    {% endif %}
+    {% if action == "move_cage" and selected_mixed_sexes %}
+        <div class="workflow-note workflow-note--warning">
+            <strong>Mixed-sex move selected.</strong>
+            <span>Selected mice include both male and female. Choose a Breeding cage, or move males and females separately into same-sex holding cages.</span>
+        </div>
+    {% endif %}
+
+    <form method="post" class="form-layout" id="mouse-bulk-confirm-form">
+        {% csrf_token %}
+        <input type="hidden" name="bulk_action" value="{{ action }}">
+        <input type="hidden" name="confirm_bulk_action" value="1">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        {% for mouse in selected_mice %}
+            <input type="hidden" name="mouse_ids" value="{{ mouse.pk }}">
+        {% endfor %}
+
+        {% if not blocking_errors %}
+            {% for field in form %}
+                <div class="form-row">
+                    {% if field.field.widget.input_type == "checkbox" %}
+                        <label class="checkbox-inline" for="{{ field.id_for_label }}">
+                            {{ field }}
+                            <span>{{ field.label }}</span>
+                        </label>
+                    {% else %}
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                    {% endif %}
+                    {% if field.help_text %}
+                        <p class="muted small-print">{{ field.help_text }}</p>
+                    {% endif %}
+                    {% if action == "move_cage" and field.name == "destination_cage" %}
+                        <p class="muted small-print" id="bulk-move-cage-rule-summary" aria-live="polite"></p>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <div class="form-actions">
+            {% if not blocking_errors %}
+                <button type="submit" class="button{% if is_danger_action %} button-danger{% endif %}">Confirm {{ action_label }}</button>
+            {% endif %}
+            <a href="{{ next_url }}" class="button button-light">Cancel</a>
+        </div>
+    </form>
+</section>
+
+{% if action == "move_cage" %}
+    <div class="rule-dialog-backdrop" id="bulk-move-rule-dialog" hidden>
+        <div class="rule-dialog" role="alertdialog" aria-modal="true" aria-labelledby="bulk-move-rule-dialog-title" aria-describedby="bulk-move-rule-dialog-message">
+            <h2 id="bulk-move-rule-dialog-title">Move blocked</h2>
+            <p id="bulk-move-rule-dialog-message"></p>
+            <div class="form-actions">
+                <button type="button" class="button" id="bulk-move-rule-dialog-ok">OK</button>
+            </div>
+        </div>
+    </div>
+{% endif %}
+{% if show_blocking_dialog %}
+    <div class="rule-dialog-backdrop" id="bulk-blocking-rule-dialog">
+        <div class="rule-dialog" role="alertdialog" aria-modal="true" aria-labelledby="bulk-blocking-rule-dialog-title" aria-describedby="bulk-blocking-rule-dialog-message">
+            <h2 id="bulk-blocking-rule-dialog-title">{{ blocking_dialog_title }}</h2>
+            <div id="bulk-blocking-rule-dialog-message">
+                <ul class="rule-dialog-list">
+                    {% for error in blocking_errors %}
+                        <li>{{ error }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="button" id="bulk-blocking-rule-dialog-ok">OK</button>
+            </div>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+    {% if show_blocking_dialog %}
+        <script>
+        (() => {
+            const dialog = document.getElementById("bulk-blocking-rule-dialog");
+            const ok = document.getElementById("bulk-blocking-rule-dialog-ok");
+            if (!dialog || !ok) return;
+            function closeDialog() {
+                dialog.hidden = true;
+            }
+            ok.addEventListener("click", closeDialog);
+            dialog.addEventListener("click", (event) => {
+                if (event.target === dialog) closeDialog();
+            });
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Escape" && !dialog.hidden) closeDialog();
+            });
+            ok.focus();
+        })();
+        </script>
+    {% endif %}
+    {% if action == "move_cage" %}
+        {{ bulk_move_cage_meta|json_script:"bulk-move-cage-meta" }}
+        <script>
+        (() => {
+            const form = document.getElementById("mouse-bulk-confirm-form");
+            const cageSelect = document.getElementById("id_destination_cage");
+            const summary = document.getElementById("bulk-move-cage-rule-summary");
+            const dataEl = document.getElementById("bulk-move-cage-meta");
+            const ruleDialog = document.getElementById("bulk-move-rule-dialog");
+            const ruleDialogMessage = document.getElementById("bulk-move-rule-dialog-message");
+            const ruleDialogOk = document.getElementById("bulk-move-rule-dialog-ok");
+            const selectedMixedSexes = {{ selected_mixed_sexes|yesno:"true,false" }};
+            if (!form || !cageSelect || !summary || !dataEl) return;
+            const cages = JSON.parse(dataEl.textContent || "[]");
+            const cageById = Object.fromEntries(cages.map((cage) => [String(cage.id), cage]));
+
+            function selectedCage() {
+                return cageById[String(cageSelect.value || "")] || null;
+            }
+
+            function ruleMessage(cage) {
+                if (!selectedMixedSexes) {
+                    return "";
+                }
+                if (!cage) {
+                    return "Selected mice include both male and female. Choose a Breeding cage, or move males and females separately.";
+                }
+                if (cage.allows_mixed) {
+                    return `OK: ${cage.cage_id} is a ${cage.use} cage and can receive mixed-sex breeders.`;
+                }
+                return `Cannot move mixed-sex mice to ${cage.cage_id}: it is a ${cage.use} cage. Choose a Breeding cage, or move males and females separately into same-sex holding cages.`;
+            }
+
+            function syncRuleSummary() {
+                const cage = selectedCage();
+                const message = ruleMessage(cage);
+                summary.textContent = message;
+                summary.className = selectedMixedSexes && cage && !cage.allows_mixed
+                    ? "field-error small-print"
+                    : "muted small-print";
+            }
+
+            function showRuleDialog(message) {
+                if (!ruleDialog || !ruleDialogMessage || !ruleDialogOk) return;
+                ruleDialogMessage.textContent = message;
+                ruleDialog.hidden = false;
+                ruleDialogOk.focus();
+            }
+
+            function hideRuleDialog() {
+                if (ruleDialog) ruleDialog.hidden = true;
+                cageSelect.focus();
+            }
+
+            cageSelect.addEventListener("change", syncRuleSummary);
+            ruleDialogOk?.addEventListener("click", hideRuleDialog);
+            ruleDialog?.addEventListener("click", (event) => {
+                if (event.target === ruleDialog) hideRuleDialog();
+            });
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Escape" && ruleDialog && !ruleDialog.hidden) {
+                    hideRuleDialog();
+                }
+            });
+            form.addEventListener("submit", (event) => {
+                const cage = selectedCage();
+                if (selectedMixedSexes && cage && !cage.allows_mixed) {
+                    event.preventDefault();
+                    syncRuleSummary();
+                    showRuleDialog(ruleMessage(cage));
+                }
+            });
+            syncRuleSummary();
+        })();
+        </script>
+    {% endif %}
+{% endblock %}

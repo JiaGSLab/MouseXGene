@@ -1259,6 +1259,125 @@ class MouseEndForm(forms.Form):
         return cleaned
 
 
+class BulkMouseExperimentForm(forms.Form):
+    note = forms.CharField(
+        label="Experiment note",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Optional experiment note"}),
+    )
+    confirm = forms.BooleanField(label="I confirm these mice should be marked as in experiment.")
+
+
+class BulkMouseClearExperimentForm(forms.Form):
+    confirm = forms.BooleanField(label="I confirm these mice should be cleared from active experiment status.")
+
+
+class BulkMouseMoveCageForm(forms.Form):
+    destination_cage = forms.ModelChoiceField(
+        queryset=Cage.objects.filter(status=Cage.Status.ACTIVE).order_by("cage_id"),
+        label="Destination Cage",
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    move_date = forms.DateField(
+        label="Move Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    reason = forms.CharField(
+        max_length=128,
+        required=False,
+        initial="Bulk move",
+        widget=forms.TextInput(attrs={"class": "filter-control"}),
+    )
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False)
+    confirm = forms.BooleanField(label="I confirm these mice should be moved to the selected cage.")
+
+    def __init__(self, *args, mice: list[Mouse], **kwargs):
+        self.mice = mice
+        super().__init__(*args, **kwargs)
+
+    def clean_move_date(self):
+        move_date = self.cleaned_data["move_date"]
+        if move_date > timezone.localdate():
+            raise forms.ValidationError("Move date cannot be in the future.")
+        earliest_birth = min((m.birth_date for m in self.mice if m.birth_date), default=None)
+        if earliest_birth and move_date < earliest_birth:
+            raise forms.ValidationError("Move date cannot be earlier than selected mouse birth dates.")
+        return move_date
+
+    def clean_destination_cage(self):
+        destination_cage = self.cleaned_data["destination_cage"]
+        if self.mice and all(m.current_cage_id == destination_cage.pk for m in self.mice):
+            raise forms.ValidationError("All selected mice are already in this cage.")
+        from breeding.consistency import active_breedings_for_mouse
+
+        active_conflicts: list[str] = []
+        for mouse in self.mice:
+            codes = sorted({breeding.breeding_code for breeding in active_breedings_for_mouse(mouse)})
+            if codes:
+                active_conflicts.append(f"{mouse.mouse_uid}: {', '.join(codes)}")
+        if active_conflicts:
+            raise forms.ValidationError(
+                "Selected mice include active breeders. End the breeding first: "
+                + "; ".join(active_conflicts)
+            )
+        try:
+            validate_active_sex_compatible_with_cage(
+                destination_cage,
+                [m.sex for m in self.mice if m.status == Mouse.Status.ACTIVE],
+                exclude_mouse_ids=[m.pk for m in self.mice],
+            )
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages) from exc
+        return destination_cage
+
+
+class BulkMouseEndForm(forms.Form):
+    terminal_status = forms.ChoiceField(
+        label="Final Status",
+        choices=[
+            (Mouse.Status.EUTHANIZED, Mouse.Status.EUTHANIZED.label),
+            (Mouse.Status.DEAD, Mouse.Status.DEAD.label),
+            (Mouse.Status.CULLED, Mouse.Status.CULLED.label),
+        ],
+        initial=Mouse.Status.EUTHANIZED,
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    end_date = forms.DateField(
+        label="End Date",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        initial=timezone.localdate,
+    )
+    reason = forms.ChoiceField(
+        label="Reason",
+        choices=[
+            ("Scheduled endpoint", "Scheduled endpoint"),
+            ("Experimental endpoint", "Experimental endpoint"),
+            ("Health/welfare endpoint", "Health/welfare endpoint"),
+            ("Found dead", "Found dead"),
+            ("Breeding colony management", "Breeding colony management"),
+            ("Other", "Other"),
+        ],
+        initial="Scheduled endpoint",
+        widget=forms.Select(attrs={"class": "filter-control"}),
+    )
+    notes = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), required=False)
+    confirm = forms.BooleanField(label="I confirm these mice should be ended and removed from cage occupancy.")
+
+    def __init__(self, *args, mice: list[Mouse], **kwargs):
+        self.mice = mice
+        super().__init__(*args, **kwargs)
+
+    def clean_end_date(self):
+        end_date = self.cleaned_data["end_date"]
+        if end_date > timezone.localdate():
+            raise forms.ValidationError("End date cannot be in the future.")
+        for mouse in self.mice:
+            if mouse.birth_date and end_date < mouse.birth_date:
+                raise forms.ValidationError(f"End date cannot be earlier than {mouse.mouse_uid}'s birth date.")
+        return end_date
+
+
 class CageImportForm(forms.Form):
     data_file = forms.FileField(
         label="CSV or XLSX file",

@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .cage_lifecycle import reconcile_mouse_cage_membership
-from .models import Cage, CageMembership, Colony, Mouse, MouseGenotypeComponent, StrainLine
+from .models import Cage, CageMembership, Colony, Mouse, MouseExperimentAssignment, MouseGenotypeComponent, StrainLine
 
 
 class NoHardDeleteAdminMixin:
@@ -87,3 +87,10 @@ class CageMembershipAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
     list_display = ("mouse", "cage", "start_date", "end_date", "is_current", "reason")
     search_fields = ("mouse__mouse_uid", "cage__cage_id", "reason", "notes")
     list_filter = ("is_current",)
+
+
+@admin.register(MouseExperimentAssignment)
+class MouseExperimentAssignmentAdmin(NoHardDeleteAdminMixin, admin.ModelAdmin):
+    list_display = ("mouse", "started_at", "ended_at", "created_by", "ended_by")
+    search_fields = ("mouse__mouse_uid", "note")
+    list_filter = ("ended_at", "started_at")

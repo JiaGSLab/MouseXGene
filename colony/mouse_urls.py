@@ -3,6 +3,7 @@ from django.urls import path
 from .picker_api import mouse_picker_api, mouse_strain_line_map_api, mouse_uid_check_api
 from .views import (
     family_tree,
+    mouse_bulk_action,
     mouse_create,
     mouse_correct_sex,
     mouse_detail,
@@ -31,6 +32,7 @@ urlpatterns = [
     path("api/uid-check/", mouse_uid_check_api, name="mouse_uid_check_api"),
     path("family-tree/", family_tree, name="family_tree"),
     path("new/", mouse_create, name="mouse_create"),
+    path("bulk/", mouse_bulk_action, name="mouse_bulk_action"),
     path("import/", mouse_import, name="mouse_import"),
     path("import/template/", mouse_import_template, name="mouse_import_template"),
     path("import/template/xlsx/", mouse_import_template_xlsx, name="mouse_import_template_xlsx"),

@@ -421,6 +421,12 @@ a.link-primary:hover {
     color: #355578;
 }
 
+.button:disabled,
+.button[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .button-secondary {
     background: #fff;
     color: var(--primary);
@@ -543,6 +549,17 @@ a.col-uid-link {
 .data-table--mice {
     table-layout: auto;
     width: 100%;
+}
+
+.data-table--mice col.col-w-select {
+    width: 36px;
+}
+
+.data-table--mice th.col-select,
+.data-table--mice td.col-select {
+    width: 36px;
+    text-align: center;
+    vertical-align: middle;
 }
 
 .data-table--mice col.col-w-genotype {
@@ -785,6 +802,89 @@ body.col-resize-active * {
 
 .row-inactive a {
     color: #6b7280;
+}
+
+.data-table tbody tr.row-experiment-active > td {
+    background: #fff8d6;
+}
+
+.data-table tbody tr.row-breeding-active > td {
+    background: #fde8e8;
+}
+
+.data-table tbody tr.row-inactive > td {
+    background: #f9fafb;
+}
+
+.status-pill--experiment {
+    margin-left: 4px;
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #92400e;
+}
+
+.bulk-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    background: #f8fafc;
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.bulk-toolbar__count {
+    min-width: 80px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.rule-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgb(15 23 42 / 0.42);
+}
+
+.rule-dialog-backdrop[hidden] {
+    display: none;
+}
+
+.rule-dialog {
+    width: min(460px, 100%);
+    padding: 20px;
+    border: 1px solid #eac6c4;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 22px 55px rgb(15 23 42 / 0.2);
+}
+
+.rule-dialog h2 {
+    margin: 0 0 10px;
+    font-size: 1.2rem;
+    color: #7f1d1d;
+}
+
+.rule-dialog p {
+    margin: 0 0 16px;
+    color: #374151;
+    line-height: 1.5;
+}
+
+.rule-dialog-list {
+    margin: 0 0 16px;
+    padding-left: 20px;
+    color: #374151;
+    line-height: 1.5;
+}
+
+.rule-dialog-list li + li {
+    margin-top: 6px;
 }
 
 .empty-row {

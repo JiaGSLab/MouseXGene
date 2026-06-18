@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.text import get_valid_filename
 
 from django.conf import settings
@@ -831,6 +832,44 @@ class Mouse(ActorStampedModel):
         MouseGenotypeComponent.objects.bulk_create(to_create)
         self.rebuild_genotype_summary(save=True)
         return len(to_create)
+
+
+class MouseExperimentAssignment(ActorStampedModel):
+    """History row for mice currently assigned to an experiment."""
+
+    mouse = models.ForeignKey(Mouse, on_delete=models.CASCADE, related_name="experiment_assignments")
+    started_at = models.DateTimeField(default=timezone.now)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "-created_at")
+        indexes = [
+            models.Index(fields=["mouse", "ended_at"], name="colony_mouse_exp_active"),
+            models.Index(fields=["started_at"], name="colony_mouse_exp_started"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mouse"],
+                condition=models.Q(ended_at__isnull=True),
+                name="colony_mouse_one_active_exp",
+            )
+        ]
+
+    @property
+    def is_active(self) -> bool:
+        return self.ended_at is None
+
+    def __str__(self) -> str:
+        state = "active" if self.is_active else "ended"
+        return f"{self.mouse.mouse_uid} experiment assignment ({state})"
 
 
 class MouseGenotypeComponent(TimeStampedModel):

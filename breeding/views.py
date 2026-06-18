@@ -1025,6 +1025,27 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     return render(request, "breeding/breeding_list.html", context)
 
 
+def _breeding_initial_from_request(request: HttpRequest) -> dict:
+    sire_id = _parse_positive_int(request.GET.get("sire") or "")
+    dam_ids: list[int] = []
+    for chunk in (request.GET.get("dams") or "").replace(",", " ").split():
+        parsed = _parse_positive_int(chunk)
+        if parsed and parsed not in dam_ids:
+            dam_ids.append(parsed)
+    initial: dict = {}
+    if sire_id:
+        initial["sire"] = sire_id
+    if dam_ids:
+        initial["dams"] = dam_ids
+        if len(dam_ids) == 1:
+            initial["breeding_type"] = Breeding.BreedingType.PAIR
+        elif len(dam_ids) == 2:
+            initial["breeding_type"] = Breeding.BreedingType.TRIO
+        else:
+            initial["breeding_type"] = Breeding.BreedingType.CUSTOM
+    return initial
+
+
 @authenticated_required
 def breeding_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
@@ -1072,7 +1093,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                 "Please review member selection and try again.",
             )
     else:
-        form = BreedingForm()
+        form = BreedingForm(initial=_breeding_initial_from_request(request))
 
     context = {
         "form": form,

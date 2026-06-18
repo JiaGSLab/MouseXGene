@@ -162,6 +162,29 @@ class BreedingForm(forms.ModelForm):
                 bound_mice = Mouse.objects.filter(pk__in=bound_ids)
                 self.fields["sire"].queryset = bound_mice.filter(sex=Mouse.Sex.MALE)
                 self.fields["dams"].queryset = bound_mice.filter(sex=Mouse.Sex.FEMALE)
+        elif not self.instance.pk:
+            initial_ids: list[int] = []
+            initial_sire = self.initial.get("sire")
+            if str(initial_sire or "").isdigit():
+                initial_ids.append(int(initial_sire))
+            initial_dams = self.initial.get("dams") or []
+            if isinstance(initial_dams, str):
+                initial_dams = [initial_dams]
+            for raw in initial_dams:
+                raw_text = str(raw or "").strip()
+                if raw_text.isdigit():
+                    initial_ids.append(int(raw_text))
+            if initial_ids:
+                selected_mice = Mouse.objects.filter(pk__in=initial_ids)
+                self.fields["sire"].queryset = selected_mice.filter(sex=Mouse.Sex.MALE)
+                self.fields["dams"].queryset = selected_mice.filter(sex=Mouse.Sex.FEMALE)
+                if str(initial_sire or "").isdigit():
+                    self.fields["sire"].initial = int(initial_sire)
+                self.fields["dams"].initial = [
+                    int(raw)
+                    for raw in initial_dams
+                    if str(raw or "").isdigit()
+                ]
         self.warning_messages: list[str] = []
         self.member_rows: list[dict] = []
         if self.instance.pk:

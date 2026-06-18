@@ -23,6 +23,10 @@ from .forms import (
     CageImportForm,
     CageRetireForm,
     CageRestoreForm,
+    BulkMouseClearExperimentForm,
+    BulkMouseEndForm,
+    BulkMouseExperimentForm,
+    BulkMouseMoveCageForm,
     MOUSE_BATCH_MAX_ROWS,
     MouseBatchEntryForm,
     MouseBatchSharedForm,
@@ -51,7 +55,16 @@ from .breeding_pedigree import (
     resolve_breeding_for_import_cage,
 )
 from .cage_form_helpers import cage_filter_form_context
-from .models import Cage, CageMembership, Colony, Mouse, MouseGenotypeComponent, StrainLine, StrainLineDocument
+from .models import (
+    Cage,
+    CageMembership,
+    Colony,
+    Mouse,
+    MouseExperimentAssignment,
+    MouseGenotypeComponent,
+    StrainLine,
+    StrainLineDocument,
+)
 from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, resolve_pdf_description, unique_pdf_description, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
 from genotypes.models import MouseGenotype
@@ -1039,6 +1052,431 @@ def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, lis
             if row.mouse_id in out:
                 out[row.mouse_id].append({**badge, "role": "Dam"})
     return out
+
+
+BULK_MOUSE_ACTION_MARK_EXPERIMENT = "mark_experiment"
+BULK_MOUSE_ACTION_CLEAR_EXPERIMENT = "clear_experiment"
+BULK_MOUSE_ACTION_CREATE_BREEDING = "create_breeding"
+BULK_MOUSE_ACTION_MOVE_CAGE = "move_cage"
+BULK_MOUSE_ACTION_END = "end"
+
+BULK_MOUSE_ACTION_LABELS = {
+    BULK_MOUSE_ACTION_MARK_EXPERIMENT: "Mark in experiment",
+    BULK_MOUSE_ACTION_CLEAR_EXPERIMENT: "Clear experiment status",
+    BULK_MOUSE_ACTION_CREATE_BREEDING: "Create breeding",
+    BULK_MOUSE_ACTION_MOVE_CAGE: "Move selected mice",
+    BULK_MOUSE_ACTION_END: "End selected mice",
+}
+
+
+def _parse_bulk_mouse_ids(raw_ids: list[str]) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        for chunk in str(raw or "").replace(",", " ").split():
+            if not chunk.isdigit():
+                continue
+            value = int(chunk)
+            if value and value not in seen:
+                seen.add(value)
+                ids.append(value)
+    return ids
+
+
+def _safe_bulk_next_url(request: HttpRequest) -> str:
+    raw = request.POST.get("next") or request.GET.get("next") or reverse("mice:mouse_list")
+    if url_has_allowed_host_and_scheme(raw, allowed_hosts={request.get_host()}):
+        return raw
+    return reverse("mice:mouse_list")
+
+
+def _bulk_mouse_queryset_for_ids(user, ids: list[int]):
+    return (
+        _scoped_mouse_queryset(user)
+        .filter(pk__in=ids)
+        .select_related(
+            "project",
+            "project__owner",
+            "project__owner__profile",
+            "strain_line",
+            "current_cage",
+        )
+        .order_by("mouse_uid")
+    )
+
+
+def _attach_bulk_mouse_state(mice: list[Mouse]) -> None:
+    ids = [m.pk for m in mice]
+    breeding_badges_map = _active_breeding_badges_for_mouse_ids(ids)
+    active_assignments = {
+        row.mouse_id: row
+        for row in MouseExperimentAssignment.objects.filter(mouse_id__in=ids, ended_at__isnull=True)
+        .select_related("created_by", "created_by__profile")
+        .order_by("mouse_id", "-started_at")
+    }
+    for mouse in mice:
+        mouse.active_breeding_badges = breeding_badges_map.get(mouse.pk, [])
+        mouse.active_experiment_assignment = active_assignments.get(mouse.pk)
+        mouse.is_in_experiment = mouse.pk in active_assignments
+
+
+def _selected_bulk_mice(request: HttpRequest, ids: list[int]) -> list[Mouse]:
+    mice = list(_bulk_mouse_queryset_for_ids(request.user, ids))
+    if len(mice) != len(ids):
+        found = {mouse.pk for mouse in mice}
+        missing = [str(pk) for pk in ids if pk not in found]
+        messages.error(request, f"Some selected mice are unavailable or outside your scope: {', '.join(missing)}.")
+    _attach_bulk_mouse_state(mice)
+    return mice
+
+
+def _bulk_permission_check(user, mice: list[Mouse], *, terminal: bool = False) -> None:
+    checked_projects: set[int] = set()
+    checked_terminal: set[int] = set()
+    for mouse in mice:
+        if mouse.project_id and mouse.project_id not in checked_projects:
+            ensure_can_edit_project_data(user, mouse.project)
+            checked_projects.add(mouse.project_id)
+        if terminal and mouse.project_id and mouse.project_id not in checked_terminal:
+            ensure_can_archive_or_change_terminal_status(user, mouse.project)
+            checked_terminal.add(mouse.project_id)
+
+
+def _bulk_active_state_errors(mice: list[Mouse]) -> list[str]:
+    return [
+        f"{mouse.mouse_uid} is {mouse.get_status_display().lower()}, not active."
+        for mouse in mice
+        if mouse.status != Mouse.Status.ACTIVE
+    ]
+
+
+def _bulk_active_breeding_errors(mice: list[Mouse]) -> list[str]:
+    errors: list[str] = []
+    for mouse in mice:
+        badges = getattr(mouse, "active_breeding_badges", [])
+        if badges:
+            codes = ", ".join(sorted({badge["code"] for badge in badges}))
+            errors.append(f"{mouse.mouse_uid} is already in active breeding(s): {codes}.")
+    return errors
+
+
+def _bulk_experiment_errors(mice: list[Mouse], *, require_active: bool) -> list[str]:
+    errors: list[str] = []
+    for mouse in mice:
+        is_active = bool(getattr(mouse, "is_in_experiment", False))
+        if require_active and not is_active:
+            errors.append(f"{mouse.mouse_uid} is not currently marked as in experiment.")
+        if not require_active and is_active:
+            errors.append(f"{mouse.mouse_uid} is already marked as in experiment.")
+    return errors
+
+
+def _bulk_mouse_action_errors(action: str, mice: list[Mouse]) -> list[str]:
+    errors: list[str] = []
+    if not mice:
+        return ["Select at least one mouse."]
+    if action in {
+        BULK_MOUSE_ACTION_MARK_EXPERIMENT,
+        BULK_MOUSE_ACTION_CREATE_BREEDING,
+        BULK_MOUSE_ACTION_MOVE_CAGE,
+        BULK_MOUSE_ACTION_END,
+    }:
+        errors.extend(_bulk_active_state_errors(mice))
+    if action in {
+        BULK_MOUSE_ACTION_MARK_EXPERIMENT,
+        BULK_MOUSE_ACTION_CREATE_BREEDING,
+        BULK_MOUSE_ACTION_MOVE_CAGE,
+        BULK_MOUSE_ACTION_END,
+    }:
+        errors.extend(_bulk_active_breeding_errors(mice))
+    if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
+        errors.extend(_bulk_experiment_errors(mice, require_active=False))
+        for mouse in mice:
+            if not mouse.current_cage_id:
+                errors.append(f"{mouse.mouse_uid} has no current cage. Fix cage occupancy before marking experiment status.")
+    elif action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
+        errors.extend(_bulk_experiment_errors(mice, require_active=True))
+    elif action == BULK_MOUSE_ACTION_CREATE_BREEDING:
+        errors.extend(_bulk_experiment_errors(mice, require_active=False))
+        males = [mouse for mouse in mice if mouse.sex == Mouse.Sex.MALE]
+        females = [mouse for mouse in mice if mouse.sex == Mouse.Sex.FEMALE]
+        unknown = [mouse.mouse_uid for mouse in mice if mouse.sex not in {Mouse.Sex.MALE, Mouse.Sex.FEMALE}]
+        if len(males) != 1:
+            errors.append("Create breeding requires exactly one selected male.")
+        if not (1 <= len(females) <= 3):
+            errors.append("Create breeding requires 1 to 3 selected females.")
+        if unknown:
+            errors.append(f"Unknown-sex mice cannot be used for breeding: {', '.join(unknown)}.")
+        for mouse in mice:
+            if not mouse.current_cage_id:
+                errors.append(f"{mouse.mouse_uid} has no current cage. Fix cage occupancy before creating breeding.")
+    return errors
+
+
+def _bulk_mouse_form_for_action(action: str, *, data=None, mice: list[Mouse]):
+    if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
+        return BulkMouseExperimentForm(data=data)
+    if action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
+        return BulkMouseClearExperimentForm(data=data)
+    if action == BULK_MOUSE_ACTION_MOVE_CAGE:
+        return BulkMouseMoveCageForm(data=data, mice=mice)
+    if action == BULK_MOUSE_ACTION_END:
+        return BulkMouseEndForm(data=data, mice=mice)
+    return None
+
+
+def _bulk_action_confirm_context(
+    request: HttpRequest,
+    *,
+    action: str,
+    mice: list[Mouse],
+    form,
+    errors: list[str],
+    next_url: str,
+) -> dict:
+    context = {
+        "action": action,
+        "action_label": BULK_MOUSE_ACTION_LABELS.get(action, "Bulk action"),
+        "selected_mice": mice,
+        "form": form,
+        "blocking_errors": errors,
+        "next_url": next_url,
+        "is_danger_action": action == BULK_MOUSE_ACTION_END,
+        "show_blocking_dialog": bool(errors and action == BULK_MOUSE_ACTION_CREATE_BREEDING),
+        "blocking_dialog_title": "Create breeding blocked",
+    }
+    if action == BULK_MOUSE_ACTION_MOVE_CAGE:
+        active_sexes = {mouse.sex for mouse in mice if mouse.status == Mouse.Status.ACTIVE}
+        selected_mixed_sexes = Mouse.Sex.MALE in active_sexes and Mouse.Sex.FEMALE in active_sexes
+        context["selected_mixed_sexes"] = selected_mixed_sexes
+        context["bulk_move_cage_meta"] = [
+            {
+                "id": cage.pk,
+                "cage_id": cage.cage_id,
+                "allows_mixed": cage.purpose == Cage.Purpose.BREEDING
+                or cage.cage_type == Cage.CageType.BREEDING,
+                "use": cage.get_cage_use_display(),
+            }
+            for cage in Cage.objects.filter(status=Cage.Status.ACTIVE)
+            .only("id", "cage_id", "purpose", "cage_type")
+            .order_by("cage_id")
+        ]
+    return context
+
+
+def _redirect_to_prefilled_breeding(mice: list[Mouse]) -> HttpResponse:
+    sire = next(mouse for mouse in mice if mouse.sex == Mouse.Sex.MALE)
+    dams = [mouse for mouse in mice if mouse.sex == Mouse.Sex.FEMALE]
+    query = urlencode(
+        {
+            "sire": sire.pk,
+            "dams": ",".join(str(mouse.pk) for mouse in dams),
+            "from_bulk": "1",
+        }
+    )
+    return redirect(f"{reverse('breeding:breeding_create')}?{query}")
+
+
+def _mark_mice_in_experiment(request: HttpRequest, mice: list[Mouse], form: BulkMouseExperimentForm) -> int:
+    now = timezone.now()
+    note = (form.cleaned_data.get("note") or "").strip()
+    rows = [
+        MouseExperimentAssignment(
+            mouse=mouse,
+            started_at=now,
+            note=note,
+            created_by=request.user,
+            updated_by=request.user,
+        )
+        for mouse in mice
+    ]
+    with transaction.atomic():
+        MouseExperimentAssignment.objects.bulk_create(rows)
+    for mouse in mice:
+        log_audit_event(
+            user=request.user,
+            action=AuditLog.Action.UPDATE,
+            obj=mouse,
+            message=f"Marked mouse {mouse.mouse_uid} as in experiment.",
+        )
+    return len(rows)
+
+
+def _clear_mice_experiment(request: HttpRequest, mice: list[Mouse]) -> int:
+    now = timezone.now()
+    mouse_ids = [mouse.pk for mouse in mice]
+    with transaction.atomic():
+        updated = MouseExperimentAssignment.objects.filter(
+            mouse_id__in=mouse_ids,
+            ended_at__isnull=True,
+        ).update(ended_at=now, ended_by=request.user, updated_by=request.user)
+    for mouse in mice:
+        log_audit_event(
+            user=request.user,
+            action=AuditLog.Action.UPDATE,
+            obj=mouse,
+            message=f"Cleared active experiment status for mouse {mouse.mouse_uid}.",
+        )
+    return updated
+
+
+def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMoveCageForm) -> int:
+    destination_cage = form.cleaned_data["destination_cage"]
+    move_date = form.cleaned_data["move_date"]
+    reason = (form.cleaned_data.get("reason") or "Bulk move").strip()
+    notes = (form.cleaned_data.get("notes") or "").strip()
+    moved = 0
+    with transaction.atomic():
+        locked_mice = (
+            Mouse.objects.select_for_update()
+            .filter(pk__in=[mouse.pk for mouse in mice])
+            .select_related("current_cage")
+            .order_by("mouse_uid")
+        )
+        for mouse in locked_mice:
+            origin_cage = mouse.current_cage
+            if mouse.current_cage_id == destination_cage.pk:
+                continue
+            current_memberships = CageMembership.objects.select_for_update().filter(
+                mouse=mouse,
+                is_current=True,
+            )
+            current_memberships.update(end_date=move_date, is_current=False)
+            mouse.current_cage = destination_cage
+            mouse.save(update_fields=["current_cage", "updated_at"])
+            CageMembership.objects.create(
+                mouse=mouse,
+                cage=destination_cage,
+                start_date=move_date,
+                end_date=None,
+                is_current=True,
+                reason=reason[:128],
+                notes=notes,
+            )
+            source_label = origin_cage.cage_id if origin_cage else "None"
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.MOVE_CAGE,
+                obj=mouse,
+                message=f"Bulk moved mouse {mouse.mouse_uid} from cage {source_label} to {destination_cage.cage_id}.",
+            )
+            moved += 1
+    return moved
+
+
+def _end_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseEndForm) -> int:
+    terminal_status = form.cleaned_data["terminal_status"]
+    end_date = form.cleaned_data["end_date"]
+    reason = (form.cleaned_data.get("reason") or "").strip()
+    notes = (form.cleaned_data.get("notes") or "").strip()
+    ended = 0
+    with transaction.atomic():
+        for mouse in mice:
+            previous_status = mouse.status
+            mouse.status = terminal_status
+            mouse.death_date = end_date
+            if terminal_status in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
+                mouse.euthanasia_date = end_date
+            else:
+                mouse.euthanasia_date = None
+            mouse.death_reason = reason
+            mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+            remove_terminal_mouse_from_current_cage(
+                mouse,
+                exit_date=end_date,
+                reason=f"Mouse marked as {mouse.get_status_display()} via bulk End Selected Mice workflow.",
+            )
+            MouseExperimentAssignment.objects.filter(mouse=mouse, ended_at__isnull=True).update(
+                ended_at=timezone.now(),
+                ended_by=request.user,
+                updated_by=request.user,
+            )
+            message = (
+                f"Bulk changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status} "
+                f"on {end_date}. Reason: {reason}"
+            )
+            if notes:
+                message = f"{message}. Notes: {notes}"
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=mouse,
+                message=message[:4000],
+            )
+            ended += 1
+    return ended
+
+
+@authenticated_required
+def mouse_bulk_action(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect("mice:mouse_list")
+    action = (request.POST.get("bulk_action") or "").strip()
+    next_url = _safe_bulk_next_url(request)
+    if action not in BULK_MOUSE_ACTION_LABELS:
+        messages.error(request, "Choose a valid bulk action.")
+        return redirect(next_url)
+    ids = _parse_bulk_mouse_ids(request.POST.getlist("mouse_ids"))
+    if not ids:
+        messages.error(request, "Select at least one mouse before applying a bulk action.")
+        return redirect(next_url)
+
+    mice = _selected_bulk_mice(request, ids)
+    if len(mice) != len(ids):
+        return redirect(next_url)
+
+    terminal_action = action == BULK_MOUSE_ACTION_END
+    _bulk_permission_check(request.user, mice, terminal=terminal_action)
+    errors = _bulk_mouse_action_errors(action, mice)
+
+    if action == BULK_MOUSE_ACTION_CREATE_BREEDING and not errors:
+        return _redirect_to_prefilled_breeding(mice)
+    if action == BULK_MOUSE_ACTION_CREATE_BREEDING:
+        context = _bulk_action_confirm_context(
+            request,
+            action=action,
+            mice=mice,
+            form=None,
+            errors=errors,
+            next_url=next_url,
+        )
+        return render(request, "colony/mouse_bulk_confirm.html", context)
+
+    is_confirm = request.POST.get("confirm_bulk_action") == "1"
+    form = _bulk_mouse_form_for_action(
+        action,
+        data=request.POST if is_confirm else None,
+        mice=mice,
+    )
+
+    if form is None:
+        messages.error(request, "This bulk action is not available yet.")
+        return redirect(next_url)
+
+    if is_confirm and form.is_valid() and not errors:
+        if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
+            count = _mark_mice_in_experiment(request, mice, form)
+            messages.success(request, f"Marked {count} mouse/mice as in experiment.")
+        elif action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
+            count = _clear_mice_experiment(request, mice)
+            messages.success(request, f"Cleared experiment status for {count} mouse/mice.")
+        elif action == BULK_MOUSE_ACTION_MOVE_CAGE:
+            count = _move_bulk_mice(request, mice, form)
+            messages.success(request, f"Moved {count} mouse/mice.")
+        elif action == BULK_MOUSE_ACTION_END:
+            count = _end_bulk_mice(request, mice, form)
+            messages.success(request, f"Ended {count} mouse/mice.")
+        return redirect(next_url)
+
+    context = _bulk_action_confirm_context(
+        request,
+        action=action,
+        mice=mice,
+        form=form,
+        errors=errors,
+        next_url=next_url,
+    )
+    return render(request, "colony/mouse_bulk_confirm.html", context)
 
 
 def _mouse_age_display(birth_date, today=None) -> str:
@@ -3580,9 +4018,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
                 m.age_display = "-"
         else:
             m.age_display = "-"
-    breeding_badges_map = _active_breeding_badges_for_mouse_ids([m.pk for m in mice_page])
-    for m in mice_page:
-        m.active_breeding_badges = breeding_badges_map.get(m.pk, [])
+    _attach_bulk_mouse_state(mice_page)
     return render(request, "colony/mouse_list.html", context)
 
 

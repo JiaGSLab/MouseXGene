@@ -101,8 +101,25 @@
 </section>
 
 <section class="table-wrap table-wrap--data">
+    <form method="post" action="{% url 'mice:mouse_bulk_action' %}" id="mouse-bulk-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <div class="bulk-toolbar" aria-live="polite">
+            <span class="bulk-toolbar__count" id="mouse-bulk-count">0 selected</span>
+            <select name="bulk_action" id="mouse-bulk-action" class="filter-control">
+                <option value="">Bulk action...</option>
+                <option value="mark_experiment">Mark in experiment</option>
+                <option value="clear_experiment">Clear experiment status</option>
+                <option value="create_breeding">Create breeding</option>
+                <option value="move_cage">Move selected mice</option>
+                <option value="end">End selected mice</option>
+            </select>
+            <button type="submit" class="button" id="mouse-bulk-submit" disabled>Apply to selected</button>
+            <span class="muted small-print">Applies to selected rows on this page only.</span>
+        </div>
     <table class="data-table data-table--compact data-table--mice data-table--col-resize" id="mice-list-table" data-col-resize-key="mice-list">
         <colgroup>
+            <col class="col-w-select">
             <col class="col-w-uid">
             <col class="col-w-cage">
             <col class="col-w-genotype" data-min-width="72" data-resizable="1">
@@ -117,6 +134,9 @@
         </colgroup>
         <thead>
             <tr>
+                <th class="col-select">
+                    <input type="checkbox" id="mouse-bulk-select-all" aria-label="Select all mice on this page">
+                </th>
                 {% sort_th "mouse_uid" "Mouse UID" extra_class="col-uid" %}
                 {% sort_th "cage" "Current Cage" %}
                 {% sort_th "genotype" "Genotype Summary" extra_class="col-genotype" %}
@@ -132,7 +152,10 @@
         </thead>
         <tbody>
             {% for mouse in mice %}
-            <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.list_age_band %}mouse-row-age mouse-row-age--{{ mouse.list_age_band }}{% endif %}">
+            <tr class="{% if mouse.status != 'active' %}row-inactive {% endif %}{% if mouse.active_breeding_badges %}row-breeding-active {% endif %}{% if mouse.is_in_experiment %}row-experiment-active {% endif %}{% if mouse.list_age_band %}mouse-row-age mouse-row-age--{{ mouse.list_age_band }}{% endif %}">
+                <td class="col-select">
+                    <input type="checkbox" name="mouse_ids" value="{{ mouse.pk }}" class="mouse-bulk-checkbox" aria-label="Select {{ mouse.mouse_uid }}">
+                </td>
                 <td class="col-uid"><a class="table-link col-uid-link" href="{% url 'mice:mouse_detail' mouse.pk %}">{{ mouse.mouse_uid }}</a></td>
                 <td>
                     {% if mouse.current_cage %}
@@ -172,7 +195,12 @@
                         <span class="cell-empty">—</span>
                     {% endif %}
                 </td>
-                <td><span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span></td>
+                <td>
+                    <span class="status-pill status-pill--mouse status-pill--mouse-{{ mouse.status }}">{{ mouse.get_status_display }}</span>
+                    {% if mouse.is_in_experiment %}
+                        <span class="status-pill status-pill--experiment">Experiment</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if mouse.active_breeding_badges %}
                         {% for b in mouse.active_breeding_badges %}
@@ -199,15 +227,54 @@
             </tr>
             {% empty %}
             <tr>
-                <td colspan="11" class="empty-row">No mice found.</td>
+                <td colspan="12" class="empty-row">No mice found.</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    </form>
     {% include "includes/pagination_nav.html" %}
 </section>
 {% endblock %}
 
 {% block extra_scripts %}
     <script src="{% static 'js/table_col_resize.js' %}?v={{ APP_RELEASE }}"></script>
+    <script>
+    (() => {
+        const form = document.getElementById("mouse-bulk-form");
+        if (!form) return;
+        const selectAll = document.getElementById("mouse-bulk-select-all");
+        const boxes = Array.from(form.querySelectorAll(".mouse-bulk-checkbox"));
+        const action = document.getElementById("mouse-bulk-action");
+        const submit = document.getElementById("mouse-bulk-submit");
+        const count = document.getElementById("mouse-bulk-count");
+        function selectedBoxes() {
+            return boxes.filter((box) => box.checked);
+        }
+        function sync() {
+            const selected = selectedBoxes();
+            if (count) count.textContent = `${selected.length} selected`;
+            if (submit) submit.disabled = !selected.length || !action?.value;
+            if (selectAll) {
+                selectAll.checked = selected.length > 0 && selected.length === boxes.length;
+                selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+            }
+        }
+        selectAll?.addEventListener("change", () => {
+            boxes.forEach((box) => {
+                box.checked = selectAll.checked;
+            });
+            sync();
+        });
+        boxes.forEach((box) => box.addEventListener("change", sync));
+        action?.addEventListener("change", sync);
+        form.addEventListener("submit", (event) => {
+            if (!selectedBoxes().length || !action?.value) {
+                event.preventDefault();
+                sync();
+            }
+        });
+        sync();
+    })();
+    </script>
 {% endblock %}
