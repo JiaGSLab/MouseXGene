@@ -37,6 +37,22 @@ class MouseCageLookupTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["current_cage"], self.cage)
 
+    def test_active_mouse_create_requires_current_cage(self):
+        form = MouseForm(
+            data={
+                "mouse_uid": "M-NO-CAGE",
+                "sex": Mouse.Sex.MALE,
+                "status": Mouse.Status.ACTIVE,
+                "strain_line": self.strain.pk,
+                "project": self.project.pk,
+            },
+            user=self.user,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("current_cage_lookup", form.errors)
+        self.assertIn("Active mice must be assigned to a current cage.", form.errors["current_cage_lookup"])
+
     def test_picker_selected_cage_and_parents_validate_without_full_querysets(self):
         sire = Mouse.objects.create(
             mouse_uid="PARENT-SIRE",

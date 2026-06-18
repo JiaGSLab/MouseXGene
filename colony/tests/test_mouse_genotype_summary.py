@@ -71,3 +71,48 @@ class MouseGenotypeSummaryTests(TestCase):
             f"Pcbp1mut-KI:{GENOTYPE_SUMMARY_UNCHARACTERIZED}; "
             f"Lgr5-CreERT2:{GENOTYPE_SUMMARY_UNCHARACTERIZED}",
         )
+
+    def test_flox_template_loci_do_not_duplicate_normalized_component_names(self):
+        strain = StrainLine.objects.create(
+            line_name="Spp1 flox; Gpnmb flox",
+            name="Spp1 flox; Gpnmb flox",
+            expected_loci_config=[
+                {
+                    "locus_name": "Spp1 flox",
+                    "locus_type": "floxed_allele",
+                    "chromosome_type": "autosomal",
+                },
+                {
+                    "locus_name": "Gpnmb flox",
+                    "locus_type": "floxed_allele",
+                    "chromosome_type": "autosomal",
+                },
+            ],
+        )
+        mouse = Mouse.objects.create(
+            mouse_uid="M-GT-FLOX",
+            strain_line=strain,
+            project=self.project,
+        )
+        MouseGenotypeComponent.objects.create(
+            mouse=mouse,
+            strain_line=strain,
+            locus_name="Spp1 flox",
+            sort_order=1,
+        )
+        MouseGenotypeComponent.objects.create(
+            mouse=mouse,
+            strain_line=strain,
+            locus_name="Gpnmb flox",
+            sort_order=2,
+        )
+
+        summary = mouse.compute_genotype_summary()
+
+        self.assertEqual(
+            summary,
+            f"Spp1 flox:{GENOTYPE_SUMMARY_UNCHARACTERIZED}; "
+            f"Gpnmb flox:{GENOTYPE_SUMMARY_UNCHARACTERIZED}",
+        )
+        self.assertNotIn("Spp1:ND", summary)
+        self.assertNotIn("Gpnmb:ND", summary)

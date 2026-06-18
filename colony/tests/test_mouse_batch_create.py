@@ -55,6 +55,17 @@ class MouseBatchCreateTests(TestCase):
         self.assertTrue(Mouse.objects.filter(mouse_uid="BATCH-M2", ear_tag="E2").exists())
         self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
 
+    def test_active_batch_requires_current_cage(self):
+        payload = self._shared_payload()
+        payload["current_cage"] = ""
+        payload["current_cage_lookup"] = ""
+
+        response = self.client.post(reverse("mice:mouse_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Active mice must be assigned to a current cage.")
+        self.assertFalse(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).exists())
+
     def test_mixed_sex_batch_rejects_shared_sex_linked_genotype(self):
         self.strain.expected_loci_config = [
             {

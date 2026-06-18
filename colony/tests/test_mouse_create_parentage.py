@@ -25,6 +25,11 @@ class MouseCreateParentageTests(TestCase):
             status=Cage.Status.ACTIVE,
             purpose=Cage.Purpose.BREEDING,
         )
+        self.pup_cage = Cage.objects.create(
+            cage_id="PARENTAGE-PUP-CAGE",
+            status=Cage.Status.ACTIVE,
+            purpose=Cage.Purpose.HOLDING,
+        )
         self.sire = Mouse.objects.create(
             mouse_uid="PARENTAGE-SIRE",
             sex=Mouse.Sex.MALE,
@@ -65,6 +70,7 @@ class MouseCreateParentageTests(TestCase):
             "status": Mouse.Status.ACTIVE,
             "strain_line": self.strain.pk,
             "project": self.project.pk,
+            "current_cage": self.pup_cage.pk,
             "parentage_mode": MouseParentageMode.NONE,
         }
         data.update(overrides)
@@ -134,6 +140,7 @@ class MouseCreateParentageTests(TestCase):
                 "status": Mouse.Status.ACTIVE,
                 "strain_line": str(self.strain.pk),
                 "project": str(self.project.pk),
+                "current_cage": str(self.pup_cage.pk),
                 "parentage_mode": MouseParentageMode.BREEDING_CAGE,
                 "source_breeding": str(self.breeding.pk),
                 "batch_row_count": "1",

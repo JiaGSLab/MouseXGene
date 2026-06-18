@@ -926,6 +926,8 @@ class MouseForm(AdminCorrectionFormMixin, forms.ModelForm):
                 cleaned_data["current_cage"] = resolved
 
         current_cage = cleaned_data.get("current_cage")
+        if cleaned_data.get("status") == Mouse.Status.ACTIVE and current_cage is None:
+            self.add_error("current_cage_lookup", "Active mice must be assigned to a current cage.")
         if current_cage is not None and cleaned_data.get("status") == Mouse.Status.ACTIVE:
             try:
                 validate_active_sex_compatible_with_cage(current_cage, [cleaned_data.get("sex")])
@@ -1014,6 +1016,8 @@ class MouseBatchSharedForm(forms.Form):
                 self.add_error("current_cage_lookup", err)
             elif resolved is not None:
                 cleaned_data["current_cage"] = resolved
+        if cleaned_data.get("status") == Mouse.Status.ACTIVE and cleaned_data.get("current_cage") is None:
+            self.add_error("current_cage_lookup", "Active mice must be assigned to a current cage.")
         _clean_mouse_parentage(self, cleaned_data)
         return cleaned_data
 

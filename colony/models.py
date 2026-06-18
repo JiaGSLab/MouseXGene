@@ -741,7 +741,7 @@ class Mouse(ActorStampedModel):
         if self.strain_line_id:
             for entry in self.strain_line.expected_loci_entries():
                 label = entry["locus_name"]
-                key = label.casefold()
+                key = (StrainLine.normalize_locus_name(label) or label).casefold()
                 seen.add(key)
                 parts.append(self._genotype_summary_part(label, comp_by_key.get(key)))
 
