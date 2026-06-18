@@ -14,7 +14,11 @@ from breeding.forms import resolve_cage_from_lookup
 
 from core.models import Project, format_project_owner_label
 
-from .cage_lifecycle import TERMINAL_MOUSE_STATUSES, validate_active_sex_compatible_with_cage
+from .cage_lifecycle import (
+    TERMINAL_MOUSE_STATUSES,
+    validate_active_breeding_cage_entry,
+    validate_active_sex_compatible_with_cage,
+)
 from .id_uniqueness import normalize_identifier, validate_cage_id_available, validate_mouse_uid_available
 from .models import Cage, Colony, Mouse, MouseGenotypeComponent, StrainLine
 from .strain_line_choices import (
@@ -1098,6 +1102,10 @@ class MoveCageForm(forms.Form):
                 f"{self.mouse.mouse_uid} is in active breeding(s) {codes}. "
                 f"Move it only to the breeding cage ({cages}), or end the breeding first."
             )
+        try:
+            validate_active_breeding_cage_entry(destination_cage, [self.mouse])
+        except ValidationError as exc:
+            raise forms.ValidationError(exc.messages) from exc
         validate_active_sex_compatible_with_cage(
             destination_cage,
             [self.mouse.sex] if self.mouse.status == Mouse.Status.ACTIVE else [],
@@ -1313,15 +1321,28 @@ class BulkMouseMoveCageForm(forms.Form):
 
         active_conflicts: list[str] = []
         for mouse in self.mice:
-            codes = sorted({breeding.breeding_code for breeding in active_breedings_for_mouse(mouse)})
-            if codes:
-                active_conflicts.append(f"{mouse.mouse_uid}: {', '.join(codes)}")
+            off_target = [
+                breeding
+                for breeding in active_breedings_for_mouse(mouse)
+                if not breeding.cage_id or breeding.cage_id != destination_cage.pk
+            ]
+            if off_target:
+                codes = ", ".join(breeding.breeding_code for breeding in off_target)
+                cages = ", ".join(
+                    breeding.cage.cage_id
+                    for breeding in off_target
+                    if breeding.cage_id and breeding.cage is not None
+                )
+                target = f" ({cages})" if cages else ""
+                active_conflicts.append(f"{mouse.mouse_uid}: {codes}{target}")
         if active_conflicts:
             raise forms.ValidationError(
-                "Selected mice include active breeders. End the breeding first: "
+                "Selected mice include active breeders. Move them only to their breeding cage, "
+                "or end the breeding first: "
                 + "; ".join(active_conflicts)
             )
         try:
+            validate_active_breeding_cage_entry(destination_cage, self.mice)
             validate_active_sex_compatible_with_cage(
                 destination_cage,
                 [m.sex for m in self.mice if m.status == Mouse.Status.ACTIVE],

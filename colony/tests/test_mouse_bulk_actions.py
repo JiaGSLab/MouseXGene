@@ -239,6 +239,101 @@ class MouseBulkActionTests(TestCase):
         self.assertEqual(self.female.current_cage_id, self.dest_cage.pk)
         self.assertEqual(self.extra_female.current_cage_id, self.dest_cage.pk)
 
+    def test_bulk_move_allows_active_breeder_back_to_own_breeding_cage(self):
+        self.dest_cage.purpose = Cage.Purpose.BREEDING
+        self.dest_cage.cage_type = Cage.CageType.BREEDING
+        self.dest_cage.save(update_fields=["purpose", "cage_type", "updated_at"])
+        Breeding.objects.create(
+            breeding_code="BULK-BR-MOVE-BACK",
+            cage=self.dest_cage,
+            male=self.male,
+            female_1=self.female,
+            start_date=date(2026, 1, 10),
+            active=True,
+        )
+
+        response = self.client.post(
+            reverse("mice:mouse_bulk_action"),
+            {
+                "bulk_action": "move_cage",
+                "confirm_bulk_action": "1",
+                "mouse_ids": [self.female.pk],
+                "destination_cage": self.dest_cage.pk,
+                "move_date": timezone.localdate().isoformat(),
+                "reason": "Repair breeding cage",
+                "confirm": "on",
+                "next": reverse("mice:mouse_list"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.female.refresh_from_db()
+        self.assertEqual(self.female.current_cage_id, self.dest_cage.pk)
+
+    def test_bulk_move_blocks_nonmember_into_active_breeding_cage(self):
+        self.dest_cage.purpose = Cage.Purpose.BREEDING
+        self.dest_cage.cage_type = Cage.CageType.BREEDING
+        self.dest_cage.save(update_fields=["purpose", "cage_type", "updated_at"])
+        breeding = Breeding.objects.create(
+            breeding_code="BULK-BR-BLOCK-INTRUDER",
+            cage=self.dest_cage,
+            male=self.male,
+            female_1=self.female,
+            start_date=date(2026, 1, 10),
+            active=True,
+        )
+
+        response = self.client.post(
+            reverse("mice:mouse_bulk_action"),
+            {
+                "bulk_action": "move_cage",
+                "confirm_bulk_action": "1",
+                "mouse_ids": [self.extra_female.pk],
+                "destination_cage": self.dest_cage.pk,
+                "move_date": timezone.localdate().isoformat(),
+                "reason": "Bulk move",
+                "confirm": "on",
+                "next": reverse("mice:mouse_list"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already has active breeding")
+        self.assertContains(response, breeding.breeding_code)
+        self.extra_female.refresh_from_db()
+        self.assertEqual(self.extra_female.current_cage_id, self.source_cage.pk)
+        self.assertFalse(breeding.extra_female_links.filter(mouse=self.extra_female).exists())
+
+    def test_bulk_move_allows_mouse_without_current_cage(self):
+        no_cage_mouse = Mouse.objects.create(
+            mouse_uid="BULK-NO-CAGE",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            birth_date=date(2026, 1, 1),
+            project=self.project,
+            strain_line=self.strain,
+            current_cage=None,
+        )
+
+        response = self.client.post(
+            reverse("mice:mouse_bulk_action"),
+            {
+                "bulk_action": "move_cage",
+                "confirm_bulk_action": "1",
+                "mouse_ids": [no_cage_mouse.pk],
+                "destination_cage": self.dest_cage.pk,
+                "move_date": timezone.localdate().isoformat(),
+                "reason": "Bulk move",
+                "confirm": "on",
+                "next": reverse("mice:mouse_list"),
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_list"))
+        no_cage_mouse.refresh_from_db()
+        self.assertEqual(no_cage_mouse.current_cage_id, self.dest_cage.pk)
+        self.assertTrue(CageMembership.objects.filter(mouse=no_cage_mouse, cage=self.dest_cage, is_current=True).exists())
+
     def test_bulk_end_removes_cage_occupancy_and_clears_experiment(self):
         assignment = MouseExperimentAssignment.objects.create(
             mouse=self.extra_female,

@@ -3,12 +3,15 @@ from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.db import connection
 from django.test import Client, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from breeding.models import Breeding
-from colony.cage_lifecycle import sync_breeding_member_cages
+from breeding.consistency import active_breeding_cage_mismatches
+from colony.cage_lifecycle import ensure_breeding_for_cage, sync_breeding_member_cages
 from colony.models import Cage, CageMembership, Mouse, StrainLine
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
@@ -110,6 +113,40 @@ class BreedingCageSyncTests(TestCase):
         self.assertEqual(self.sire.current_cage_id, self.new_cage.pk)
         self.assertEqual(self.dam.current_cage_id, self.new_cage.pk)
 
+    def test_existing_active_breeding_cage_sync_does_not_add_intruder_mice(self):
+        breeding = Breeding.objects.create(
+            breeding_code="BR-SYNC-NO-INTRUDER",
+            cage=self.new_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        intruder_male = Mouse.objects.create(
+            mouse_uid="M-SYNC-INTRUDER-M",
+            sex=Mouse.Sex.MALE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.new_cage,
+        )
+        intruder_female = Mouse.objects.create(
+            mouse_uid="M-SYNC-INTRUDER-F",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.new_cage,
+        )
+
+        synced = ensure_breeding_for_cage(self.new_cage)
+
+        self.assertEqual(synced, breeding)
+        breeding.refresh_from_db()
+        self.assertEqual(breeding.male_id, self.sire.pk)
+        self.assertEqual(breeding.female_1_id, self.dam.pk)
+        self.assertIsNone(breeding.female_2_id)
+        self.assertFalse(breeding.extra_female_links.filter(mouse=intruder_female).exists())
+        self.assertFalse(breeding.breeding_members.filter(mouse__in=[intruder_male, intruder_female]).exists())
+
     def test_breeding_detail_warns_when_breeders_are_not_in_breeding_cage(self):
         breeding = Breeding.objects.create(
             breeding_code="BR-SYNC-MISMATCH",
@@ -196,6 +233,40 @@ class BreedingCageSyncTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Breeding Cage Mismatch")
         self.assertContains(response, "BR-SYNC-DASH-MISMATCH")
+
+    def test_active_breeding_cage_mismatch_uses_prefetched_members(self):
+        for idx in range(5):
+            cage = Cage.objects.create(cage_id=f"NEW-CAGE-PREFETCH-{idx}", purpose=Cage.Purpose.BREEDING)
+            sire = Mouse.objects.create(
+                mouse_uid=f"M-SYNC-PREFETCH-S-{idx}",
+                sex=Mouse.Sex.MALE,
+                strain_line=self.strain,
+                project=self.project,
+                current_cage=self.old_cage,
+            )
+            dam = Mouse.objects.create(
+                mouse_uid=f"M-SYNC-PREFETCH-D-{idx}",
+                sex=Mouse.Sex.FEMALE,
+                strain_line=self.strain,
+                project=self.project,
+                current_cage=self.old_cage,
+            )
+            breeding = Breeding.objects.create(
+                breeding_code=f"BR-SYNC-PREFETCH-{idx}",
+                cage=cage,
+                male=sire,
+                female_1=dam,
+                start_date="2026-01-01",
+                active=True,
+            )
+            breeding.sync_members_from_legacy_fields()
+
+        queryset = Breeding.objects.filter(breeding_code__startswith="BR-SYNC-PREFETCH-")
+        with CaptureQueriesContext(connection) as captured:
+            mismatches = active_breeding_cage_mismatches(queryset)
+
+        self.assertEqual(len(mismatches), 5)
+        self.assertLessEqual(len(captured), 5)
 
     def test_breeding_list_displays_breeder_age_as_weeks_and_days(self):
         birth_date = timezone.localdate() - timedelta(days=59)

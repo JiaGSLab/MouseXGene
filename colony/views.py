@@ -1055,21 +1055,31 @@ def _active_breeding_badges_for_mouse_ids(mouse_ids: list[int]) -> dict[int, lis
             | Q(female_1_id__in=mouse_ids)
             | Q(female_2_id__in=mouse_ids)
             | Q(extra_female_links__mouse_id__in=mouse_ids)
+            | Q(breeding_members__mouse_id__in=mouse_ids)
         )
-        .prefetch_related("extra_female_links")
+        .prefetch_related("extra_female_links", "breeding_members")
         .distinct()
     )
+    seen_badges: set[tuple[int, int, str]] = set()
+
+    def add_badge(mouse_id: int | None, breeding: Breeding, role: str) -> None:
+        if mouse_id not in out:
+            return
+        key = (mouse_id, breeding.pk, role)
+        if key in seen_badges:
+            return
+        seen_badges.add(key)
+        out[mouse_id].append({"id": breeding.pk, "code": breeding.breeding_code, "role": role})
+
     for breeding in breedings:
-        badge = {"id": breeding.pk, "code": breeding.breeding_code}
-        if breeding.male_id in out:
-            out[breeding.male_id].append({**badge, "role": "Sire"})
-        if breeding.female_1_id in out:
-            out[breeding.female_1_id].append({**badge, "role": "Dam"})
-        if breeding.female_2_id in out:
-            out[breeding.female_2_id].append({**badge, "role": "Dam"})
+        add_badge(breeding.male_id, breeding, "Sire")
+        add_badge(breeding.female_1_id, breeding, "Dam")
+        add_badge(breeding.female_2_id, breeding, "Dam")
         for row in breeding.extra_female_links.all():
-            if row.mouse_id in out:
-                out[row.mouse_id].append({**badge, "role": "Dam"})
+            add_badge(row.mouse_id, breeding, "Dam")
+        for row in breeding.breeding_members.all():
+            role = "Sire" if row.role == Breeding.MemberRole.SIRE else "Dam"
+            add_badge(row.mouse_id, breeding, role)
     return out
 
 
@@ -1204,7 +1214,6 @@ def _bulk_mouse_action_errors(action: str, mice: list[Mouse]) -> list[str]:
     if action in {
         BULK_MOUSE_ACTION_MARK_EXPERIMENT,
         BULK_MOUSE_ACTION_CREATE_BREEDING,
-        BULK_MOUSE_ACTION_MOVE_CAGE,
         BULK_MOUSE_ACTION_END,
     }:
         errors.extend(_bulk_active_breeding_errors(mice))
@@ -1346,14 +1355,17 @@ def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMove
     notes = (form.cleaned_data.get("notes") or "").strip()
     moved = 0
     with transaction.atomic():
-        locked_mice = (
+        destination_cage = Cage.objects.select_for_update().get(pk=destination_cage.pk)
+        locked_mice = list(
             Mouse.objects.select_for_update()
             .filter(pk__in=[mouse.pk for mouse in mice])
-            .select_related("current_cage")
             .order_by("mouse_uid")
         )
+        origin_cages = Cage.objects.in_bulk(
+            [mouse.current_cage_id for mouse in locked_mice if mouse.current_cage_id]
+        )
         for mouse in locked_mice:
-            origin_cage = mouse.current_cage
+            origin_cage = origin_cages.get(mouse.current_cage_id)
             if mouse.current_cage_id == destination_cage.pk:
                 continue
             current_memberships = CageMembership.objects.select_for_update().filter(

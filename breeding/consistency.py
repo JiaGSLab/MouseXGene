@@ -11,12 +11,26 @@ from colony.models import Mouse
 from .models import Breeding
 
 
+def _related_rows(instance, related_name: str, *, select_related: tuple[str, ...] = ()):
+    prefetched = getattr(instance, "_prefetched_objects_cache", {})
+    if related_name in prefetched:
+        return list(prefetched[related_name])
+    qs = getattr(instance, related_name).all()
+    if select_related:
+        qs = qs.select_related(*select_related)
+    return list(qs)
+
+
 def breeding_member_role_rows(breeding: Breeding) -> list[dict]:
     """Return sire/dam member rows with roles, preferring the flexible member table."""
     rows: list[dict] = []
     seen: set[int] = set()
     try:
-        member_rows = list(breeding.breeding_members.select_related("mouse", "mouse__current_cage").all())
+        member_rows = _related_rows(
+            breeding,
+            "breeding_members",
+            select_related=("mouse", "mouse__current_cage"),
+        )
     except Exception:
         member_rows = []
     if member_rows:
@@ -40,7 +54,11 @@ def breeding_member_role_rows(breeding: Breeding) -> list[dict]:
     try:
         legacy_rows.extend(
             ("Dam", link.mouse)
-            for link in breeding.extra_female_links.select_related("mouse", "mouse__current_cage").all()
+            for link in _related_rows(
+                breeding,
+                "extra_female_links",
+                select_related=("mouse", "mouse__current_cage"),
+            )
         )
     except Exception:
         pass

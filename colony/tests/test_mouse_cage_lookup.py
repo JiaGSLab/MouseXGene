@@ -259,6 +259,110 @@ class MouseCageLookupTests(TestCase):
         sire.refresh_from_db()
         self.assertEqual(sire.current_cage_id, self.cage.pk)
 
+    def test_move_cage_allows_active_breeder_back_to_own_breeding_cage(self):
+        breeding_cage = Cage.objects.create(
+            cage_id="MC-BREEDING-CAGE",
+            status=Cage.Status.ACTIVE,
+            purpose=Cage.Purpose.BREEDING,
+            cage_type=Cage.CageType.BREEDING,
+        )
+        sire = Mouse.objects.create(
+            mouse_uid="M-MOVE-BACK-SIRE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        dam = Mouse.objects.create(
+            mouse_uid="M-MOVE-BACK-DAM",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        Breeding.objects.create(
+            breeding_code="MC-MOVE-BACK-BR",
+            cage=breeding_cage,
+            male=sire,
+            female_1=dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mice:mouse_move", args=[sire.pk]),
+            {
+                "destination_cage": breeding_cage.pk,
+                "move_date": "2026-01-02",
+                "reason": "repair",
+                "notes": "",
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_detail", args=[sire.pk]))
+        sire.refresh_from_db()
+        self.assertEqual(sire.current_cage_id, breeding_cage.pk)
+
+    def test_move_cage_blocks_nonmember_into_active_breeding_cage(self):
+        breeding_cage = Cage.objects.create(
+            cage_id="MC-BREEDING-BLOCK",
+            status=Cage.Status.ACTIVE,
+            purpose=Cage.Purpose.BREEDING,
+            cage_type=Cage.CageType.BREEDING,
+        )
+        sire = Mouse.objects.create(
+            mouse_uid="M-MOVE-BLOCK-SIRE",
+            sex=Mouse.Sex.MALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        dam = Mouse.objects.create(
+            mouse_uid="M-MOVE-BLOCK-DAM",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        outsider = Mouse.objects.create(
+            mouse_uid="M-MOVE-BLOCK-OUT",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.other_cage,
+        )
+        breeding = Breeding.objects.create(
+            breeding_code="MC-MOVE-BLOCK-BR",
+            cage=breeding_cage,
+            male=sire,
+            female_1=dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("mice:mouse_move", args=[outsider.pk]),
+            {
+                "destination_cage": breeding_cage.pk,
+                "move_date": "2026-01-02",
+                "reason": "test",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already has active breeding")
+        self.assertContains(response, breeding.breeding_code)
+        outsider.refresh_from_db()
+        self.assertEqual(outsider.current_cage_id, self.other_cage.pk)
+
     def test_move_cage_rejects_mixed_sex_holding_cage(self):
         male = Mouse.objects.create(
             mouse_uid="M-MOVE-MIX-MALE",

@@ -225,6 +225,42 @@ def validate_active_sex_compatible_with_cage(
         raise ValidationError(error)
 
 
+def active_breeding_cage_entry_error(cage: Cage | None, incoming_mice) -> str:
+    """Return an error if ordinary cage moves would add new mice to an active breeding."""
+    if cage is None:
+        return ""
+    active_breedings = list(
+        Breeding.objects.filter(cage=cage, active=True)
+        .exclude(status=Breeding.Status.CLOSED)
+        .prefetch_related("breeding_members__mouse", "extra_female_links__mouse")
+        .order_by("breeding_code")
+    )
+    if not active_breedings:
+        return ""
+    mice = [mouse for mouse in incoming_mice if mouse.status == Mouse.Status.ACTIVE]
+    if not mice:
+        return ""
+    member_ids: set[int] = set()
+    for breeding in active_breedings:
+        member_ids.update(mouse.pk for mouse in breeding.member_mice())
+    outsiders = [mouse.mouse_uid for mouse in mice if mouse.pk not in member_ids]
+    if not outsiders:
+        return ""
+    codes = ", ".join(breeding.breeding_code for breeding in active_breedings)
+    return (
+        f"Cage {cage.cage_id} already has active breeding(s) {codes}. "
+        "Move only mice already listed on those breeding records into this cage. "
+        "Add new breeders via Edit Breeding, or end the breeding first: "
+        f"{', '.join(outsiders)}."
+    )
+
+
+def validate_active_breeding_cage_entry(cage: Cage | None, incoming_mice) -> None:
+    error = active_breeding_cage_entry_error(cage, incoming_mice)
+    if error:
+        raise ValidationError(error)
+
+
 def remove_terminal_mouse_from_current_cage(
     mouse: Mouse,
     *,
@@ -421,6 +457,16 @@ def ensure_breeding_for_cage(cage: Cage | None) -> Breeding | None:
     if cage is None or cage.purpose != Cage.Purpose.BREEDING:
         return None
 
+    existing = (
+        Breeding.objects.filter(cage=cage, active=True)
+        .exclude(status=Breeding.Status.CLOSED)
+        .select_related("male", "female_1", "female_2")
+        .order_by("-start_date", "-pk")
+        .first()
+    )
+    if existing is not None:
+        return existing
+
     active_mice = list(
         cage.current_mice.filter(status=Mouse.Status.ACTIVE).order_by("mouse_uid")
     )
@@ -437,39 +483,13 @@ def ensure_breeding_for_cage(cage: Cage | None) -> Breeding | None:
     elif len(dams) >= 3:
         breeding_type = Breeding.BreedingType.CUSTOM
 
-    existing = (
-        Breeding.objects.filter(cage=cage, active=True)
-        .exclude(status=Breeding.Status.CLOSED)
-        .select_related("male", "female_1", "female_2")
-        .order_by("-start_date", "-pk")
-        .first()
-    )
-
     with transaction.atomic():
-        if existing is None:
-            breeding = _create_breeding_with_code_retry(
-                cage=cage,
-                breeding_type=breeding_type,
-                sire=sire,
-                dams=dams,
-            )
-        else:
-            breeding = existing
-            breeding.breeding_type = breeding_type
-            breeding.male = sire
-            breeding.female_1 = dams[0]
-            breeding.female_2 = dams[1] if len(dams) > 1 else None
-            breeding.full_clean()
-            breeding.save(
-                update_fields=[
-                    "breeding_type",
-                    "male",
-                    "female_1",
-                    "female_2",
-                    "updated_at",
-                ]
-            )
-
+        breeding = _create_breeding_with_code_retry(
+            cage=cage,
+            breeding_type=breeding_type,
+            sire=sire,
+            dams=dams,
+        )
         extra_dams = dams[2:]
         extra_ids = {mouse.pk for mouse in extra_dams}
         BreedingExtraFemale.objects.filter(breeding=breeding).exclude(mouse_id__in=extra_ids).delete()
