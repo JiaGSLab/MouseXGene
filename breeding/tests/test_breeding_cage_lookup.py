@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from breeding.forms import BreedingForm, resolve_cage_from_lookup
+from breeding.models import Breeding
 from colony.models import Cage, Mouse, StrainLine
 from core.models import Project
 
@@ -164,3 +165,85 @@ class BreedingCageLookupTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertTrue(any("multiple projects" in msg for msg in form.warning_messages))
         self.assertTrue(any("multiple users" in msg for msg in form.warning_messages))
+
+
+class BreedingTypeInferenceTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="breeding_type_user", password="x")
+        self.strain = StrainLine.objects.create(line_name="BreedingTypeStrain", name="BreedingTypeStrain")
+        self.project = Project.objects.create(name="BreedingTypeProject", owner=self.user)
+        self.sire = Mouse.objects.create(
+            mouse_uid="BT-SIRE",
+            sex=Mouse.Sex.MALE,
+            project=self.project,
+            strain_line=self.strain,
+        )
+        self.dam_1 = Mouse.objects.create(
+            mouse_uid="BT-DAM-1",
+            sex=Mouse.Sex.FEMALE,
+            project=self.project,
+            strain_line=self.strain,
+        )
+        self.dam_2 = Mouse.objects.create(
+            mouse_uid="BT-DAM-2",
+            sex=Mouse.Sex.FEMALE,
+            project=self.project,
+            strain_line=self.strain,
+        )
+        self.dam_3 = Mouse.objects.create(
+            mouse_uid="BT-DAM-3",
+            sex=Mouse.Sex.FEMALE,
+            project=self.project,
+            strain_line=self.strain,
+        )
+
+    def _form(self, dams, breeding_type=BreedingForm.AUTO_BREEDING_TYPE):
+        return BreedingForm(
+            data={
+                "sire": self.sire.pk,
+                "dams": [dam.pk for dam in dams],
+                "cage_assignment_mode": BreedingForm.CageAssignmentMode.AUTO,
+                "breeding_type": breeding_type,
+                "start_date": "2026-01-01",
+                "status": Breeding.Status.SETUP,
+                "active": "on",
+            }
+        )
+
+    def test_auto_breeding_type_uses_pair_for_one_dam(self):
+        form = self._form([self.dam_1])
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["breeding_type"], Breeding.BreedingType.PAIR)
+
+    def test_auto_breeding_type_uses_trio_for_two_dams(self):
+        form = self._form([self.dam_1, self.dam_2])
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["breeding_type"], Breeding.BreedingType.TRIO)
+        self.assertEqual(form.cleaned_data["female_2"], self.dam_2)
+
+    def test_auto_breeding_type_uses_custom_for_three_dams(self):
+        form = self._form([self.dam_1, self.dam_2, self.dam_3])
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["breeding_type"], Breeding.BreedingType.CUSTOM)
+        self.assertEqual(form.cleaned_data["extra_females"], [self.dam_3])
+
+    def test_omitted_breeding_type_defaults_to_auto(self):
+        form = self._form([self.dam_1, self.dam_2], breeding_type="")
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["breeding_type"], Breeding.BreedingType.TRIO)
+
+    def test_manual_custom_can_override_recommended_type(self):
+        form = self._form([self.dam_1], breeding_type=Breeding.BreedingType.CUSTOM)
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["breeding_type"], Breeding.BreedingType.CUSTOM)
+
+    def test_manual_pair_rejects_multiple_dams(self):
+        form = self._form([self.dam_1, self.dam_2], breeding_type=Breeding.BreedingType.PAIR)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Pair breeding requires exactly 1 dam", str(form.errors))

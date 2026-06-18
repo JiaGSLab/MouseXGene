@@ -1049,12 +1049,7 @@ def _breeding_initial_from_request(request: HttpRequest) -> dict:
         initial["sire"] = sire_id
     if dam_ids:
         initial["dams"] = dam_ids
-        if len(dam_ids) == 1:
-            initial["breeding_type"] = Breeding.BreedingType.PAIR
-        elif len(dam_ids) == 2:
-            initial["breeding_type"] = Breeding.BreedingType.TRIO
-        else:
-            initial["breeding_type"] = Breeding.BreedingType.CUSTOM
+        initial["breeding_type"] = BreedingForm.AUTO_BREEDING_TYPE
     return initial
 
 

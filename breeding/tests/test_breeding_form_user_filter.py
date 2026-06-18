@@ -73,6 +73,8 @@ class BreedingFormUserFilterTests(TestCase):
         self.assertIn('data-empty-label="All strain lines"', html)
         self.assertIn('id="id_mouse_uid_filter"', html)
         self.assertIn('id="breeder-filter-apply"', html)
+        self.assertIn("Auto from selected dams (recommended)", html)
+        self.assertIn('id="breeding-type-auto-hint"', html)
         self.assertIn("Select at least one filter, then click Apply filters.", html)
 
     def test_create_page_includes_project_owner_without_mice(self):

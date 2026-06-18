@@ -193,6 +193,22 @@
                         </div>
                     </div>
                 </div>
+            {% elif field.name == 'breeding_type' %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    <small class="muted" id="breeding-type-auto-hint" aria-live="polite"></small>
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
             {% else %}
                 <div class="form-row">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -259,6 +275,8 @@
     const filterStatus = document.getElementById("breeder-filter-status");
     const sireSelect = document.getElementById("id_sire");
     const damsSelect = document.getElementById("id_dams");
+    const breedingTypeSelect = document.getElementById("id_breeding_type");
+    const breedingTypeHint = document.getElementById("breeding-type-auto-hint");
     const tableBody = document.getElementById("breeder-picker-body");
     const breedingForm = document.getElementById("breeding-form");
     if (!projectFilter || !ownerFilter || !strainFilter || !uidFilter || !applyFilterBtn || !sireSelect || !damsSelect || !tableBody || !breedingForm || !window.MXGPicker) return;
@@ -281,6 +299,26 @@
     }
     function selectedMouseIds() {
         return [...new Set([selectedSireId, ...selectedDamIds].filter(Boolean))];
+    }
+    function recommendedBreedingType() {
+        const count = selectedDamIds.size;
+        if (count === 1) return { value: "pair", label: "Pair", detail: "1 dam" };
+        if (count === 2) return { value: "trio", label: "Trio", detail: "2 dams" };
+        if (count >= 3) return { value: "custom", label: "Custom", detail: `${count} dams` };
+        return { value: "pair", label: "Pair", detail: "no dams selected yet" };
+    }
+    function updateBreedingTypeHint() {
+        if (!breedingTypeHint) return;
+        const recommended = recommendedBreedingType();
+        if (!selectedDamIds.size) {
+            breedingTypeHint.textContent = "Select dams and MouseXGene will infer the breeding type.";
+            return;
+        }
+        if (breedingTypeSelect?.value === "auto") {
+            breedingTypeHint.textContent = `Auto will save this as ${recommended.label} (${recommended.detail}).`;
+        } else {
+            breedingTypeHint.textContent = `Recommended for current dams: ${recommended.label} (${recommended.detail}).`;
+        }
     }
     function summarizeOptions(labels, fallback) {
         if (!labels.length) return fallback;
@@ -450,6 +488,7 @@
             const opt = damsSelect.querySelector(`option[value="${CSS.escape(damId)}"]`);
             if (opt) opt.selected = true;
         });
+        updateBreedingTypeHint();
     }
     function renderBreederTable() {
         if (!mice.length) {
@@ -543,6 +582,7 @@
     bindMultiFilter(projectFilter, projectFilter.dataset.emptyLabel || "All projects");
     bindMultiFilter(strainFilter, strainFilter.dataset.emptyLabel || "All strain lines");
     tableBody.addEventListener("change", onTableChange);
+    breedingTypeSelect?.addEventListener("change", updateBreedingTypeHint);
     applyFilterBtn.addEventListener("click", reloadMice);
     uidFilter.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {

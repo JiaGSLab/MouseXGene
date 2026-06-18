@@ -52,6 +52,9 @@ def resolve_cage_from_lookup(lookup: str, *, queryset=None) -> tuple[Cage | None
 
 
 class BreedingForm(forms.ModelForm):
+    AUTO_BREEDING_TYPE = "auto"
+    AUTO_BREEDING_TYPE_LABEL = "Auto from selected dams (recommended)"
+
     class CageAssignmentMode:
         AUTO = "auto"
         EXISTING = "existing"
@@ -132,6 +135,17 @@ class BreedingForm(forms.ModelForm):
         self.fields["breeding_code"].widget.attrs.update(
             {"placeholder": "Optional; auto-generated if left blank."}
         )
+        self.fields["breeding_type"].choices = [
+            (self.AUTO_BREEDING_TYPE, self.AUTO_BREEDING_TYPE_LABEL),
+            *Breeding.BreedingType.choices,
+        ]
+        self.fields["breeding_type"].required = False
+        self.fields["breeding_type"].help_text = (
+            "Auto sets Pair for 1 dam, Trio for 2 dams, and Custom for 3 dams. "
+            "Choose a value manually only when the breeding should be labeled differently."
+        )
+        if not self.is_bound and not self.instance.pk and "breeding_type" not in self.initial:
+            self.fields["breeding_type"].initial = self.AUTO_BREEDING_TYPE
         if self.instance.pk:
             self.fields["cage_assignment_mode"].initial = self.CageAssignmentMode.EXISTING
         self.active_cage_queryset = (
@@ -217,6 +231,14 @@ class BreedingForm(forms.ModelForm):
                 return candidate
             n += 1
 
+    @classmethod
+    def breeding_type_for_dam_count(cls, dam_count: int) -> str:
+        if dam_count == 1:
+            return Breeding.BreedingType.PAIR
+        if dam_count == 2:
+            return Breeding.BreedingType.TRIO
+        return Breeding.BreedingType.CUSTOM
+
     def _selected_mice(self) -> list[Mouse]:
         mice: list[Mouse] = []
         male = self.cleaned_data.get("male")
@@ -246,11 +268,15 @@ class BreedingForm(forms.ModelForm):
             self.add_error("dams", "At least one dam is required.")
         if len(dams) > 3:
             self.add_error("dams", "Select at most 3 dams.")
-        breeding_type = cleaned_data.get("breeding_type")
-        if breeding_type == Breeding.BreedingType.PAIR and len(dams) != 1:
-            self.add_error("dams", "Pair breeding requires exactly 1 dam.")
-        if breeding_type == Breeding.BreedingType.TRIO and len(dams) != 2:
-            self.add_error("dams", "Trio breeding requires exactly 2 dams.")
+        breeding_type = cleaned_data.get("breeding_type") or self.AUTO_BREEDING_TYPE
+        if breeding_type == self.AUTO_BREEDING_TYPE:
+            cleaned_data["breeding_type"] = self.breeding_type_for_dam_count(len(dams)) if dams else Breeding.BreedingType.PAIR
+        else:
+            if breeding_type == Breeding.BreedingType.PAIR and len(dams) != 1:
+                self.add_error("dams", "Pair breeding requires exactly 1 dam. Use Auto or Custom for other breeder counts.")
+            if breeding_type == Breeding.BreedingType.TRIO and len(dams) != 2:
+                self.add_error("dams", "Trio breeding requires exactly 2 dams. Use Auto or Custom for other breeder counts.")
+            cleaned_data["breeding_type"] = breeding_type
         if sire and sire.sex != Mouse.Sex.MALE:
             self.add_error("sire", f"{sire.mouse_uid}: sire must be male.")
         for dam in dams:
