@@ -566,18 +566,6 @@ def _selected_cage_queryset(*values, active_only: bool = True):
     return cages.order_by("cage_id")
 
 
-def _editable_selected_cage_queryset(user, *values, active_only: bool = True):
-    ids = {_coerce_positive_int(value) for value in values}
-    ids.discard(None)
-    if not ids:
-        return Cage.objects.none()
-    if active_only:
-        cages = editable_active_cage_queryset(user) if user is not None else Cage.objects.filter(status=Cage.Status.ACTIVE)
-    else:
-        cages = Cage.objects.all() if is_admin(user) else Cage.objects.filter(pk__in=ids)
-    return cages.filter(pk__in=ids).order_by("cage_id")
-
-
 class MouseParentageMode:
     NONE = "none"
     BREEDING_CAGE = "breeding_cage"

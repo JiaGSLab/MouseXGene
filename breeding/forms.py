@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from colony.cage_form_helpers import editable_active_cage_queryset
 from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
-from colony.models import Cage, Mouse
+from colony.models import Cage, CageMembership, Mouse
 from core.models import format_project_owner_label
 from .cage_autocreate import (
     create_auto_cage,
@@ -532,6 +532,35 @@ class EndBreedingForm(forms.Form):
             raise forms.ValidationError("This breeding has no breeder members to move.")
 
         member_ids = [mouse.pk for mouse in self.members]
+        end_date = cleaned_data.get("end_date")
+        if end_date and self.breeding.start_date and end_date < self.breeding.start_date:
+            self.add_error(
+                "end_date",
+                f"End date cannot be earlier than the breeding start date ({self.breeding.start_date}).",
+            )
+        if end_date:
+            invalid_memberships = list(
+                CageMembership.objects.filter(
+                    mouse_id__in=member_ids,
+                    is_current=True,
+                    start_date__gt=end_date,
+                )
+                .select_related("mouse", "cage")
+                .order_by("-start_date", "mouse__mouse_uid")[:5]
+            )
+            if invalid_memberships:
+                details = "; ".join(
+                    (
+                        f"{membership.mouse.mouse_uid} current cage "
+                        f"{membership.cage.cage_id if membership.cage_id else 'assignment'} "
+                        f"starts on {membership.start_date}"
+                    )
+                    for membership in invalid_memberships
+                )
+                self.add_error(
+                    "end_date",
+                    f"End date cannot be earlier than a breeder's current cage assignment start date: {details}.",
+                )
         proposed_by_cage: dict[int, list[Mouse]] = {}
         for mouse in self.members:
             action_name = self.action_field_name(mouse)

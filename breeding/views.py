@@ -1300,10 +1300,34 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
                 if locked_breeding.status == Breeding.Status.CLOSED and not locked_breeding.active:
                     messages.info(request, f"Breeding {locked_breeding.breeding_code} is already closed.")
                     return redirect("breeding:breeding_detail", pk=locked_breeding.pk)
+                if locked_breeding.start_date and end_date < locked_breeding.start_date:
+                    messages.error(
+                        request,
+                        f"End date cannot be earlier than the breeding start date ({locked_breeding.start_date}).",
+                    )
+                    return redirect("breeding:breeding_end", pk=locked_breeding.pk)
                 locked_mice = {
                     mouse.pk: mouse
                     for mouse in Mouse.objects.select_for_update().filter(pk__in=[member.pk for member in members])
                 }
+                invalid_membership = (
+                    CageMembership.objects.select_for_update()
+                    .filter(mouse_id__in=locked_mice.keys(), is_current=True, start_date__gt=end_date)
+                    .select_related("mouse", "cage")
+                    .order_by("-start_date", "mouse__mouse_uid")
+                    .first()
+                )
+                if invalid_membership is not None:
+                    messages.error(
+                        request,
+                        (
+                            "End date cannot be earlier than a breeder's current cage assignment start date: "
+                            f"{invalid_membership.mouse.mouse_uid} current cage "
+                            f"{invalid_membership.cage.cage_id if invalid_membership.cage_id else 'assignment'} "
+                            f"starts on {invalid_membership.start_date}."
+                        ),
+                    )
+                    return redirect("breeding:breeding_end", pk=locked_breeding.pk)
                 destinations = {
                     mouse_pk: (
                         Cage.objects.select_for_update().filter(pk=destination.pk).first()
@@ -1364,10 +1388,7 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
                         CageMembership.objects.select_for_update().filter(mouse=mouse, is_current=True)
                     )
                     for membership in current_memberships:
-                        membership_end_date = end_date
-                        if membership.start_date and membership_end_date < membership.start_date:
-                            membership_end_date = membership.start_date
-                        membership.end_date = membership_end_date
+                        membership.end_date = end_date
                         membership.is_current = False
                         membership.reason = reason[:128]
                         membership.save(update_fields=["end_date", "is_current", "reason", "updated_at"])

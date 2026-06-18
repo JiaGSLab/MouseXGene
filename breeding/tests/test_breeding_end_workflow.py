@@ -104,6 +104,49 @@ class BreedingEndWorkflowTests(TestCase):
         self.assertEqual(self.breeding_cage.purpose, Cage.Purpose.HOLDING)
         self.assertEqual(self.breeding_cage.cage_type, Cage.CageType.STANDARD)
 
+    def test_end_breeding_rejects_end_date_before_breeding_start(self):
+        response = self.client.post(
+            reverse("breeding:breeding_end", args=[self.breeding.pk]),
+            {
+                "end_date": "2025-12-31",
+                f"member_action_{self.sire.pk}": "move",
+                f"destination_cage_{self.sire.pk}": self.male_cage.pk,
+                f"member_action_{self.dam.pk}": "move",
+                f"destination_cage_{self.dam.pk}": self.female_cage.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "End date cannot be earlier than the breeding start date")
+        self.breeding.refresh_from_db()
+        self.sire.refresh_from_db()
+        self.assertTrue(self.breeding.active)
+        self.assertEqual(self.sire.current_cage_id, self.breeding_cage.pk)
+
+    def test_end_breeding_rejects_end_date_before_current_cage_assignment_start(self):
+        CageMembership.objects.filter(mouse=self.sire, is_current=True).update(start_date="2026-02-10")
+
+        response = self.client.post(
+            reverse("breeding:breeding_end", args=[self.breeding.pk]),
+            {
+                "end_date": "2026-02-01",
+                f"member_action_{self.sire.pk}": "move",
+                f"destination_cage_{self.sire.pk}": self.male_cage.pk,
+                f"member_action_{self.dam.pk}": "move",
+                f"destination_cage_{self.dam.pk}": self.female_cage.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "current cage assignment start date")
+        self.assertContains(response, "END-SIRE")
+        self.breeding.refresh_from_db()
+        self.sire.refresh_from_db()
+        current_membership = CageMembership.objects.get(mouse=self.sire, is_current=True)
+        self.assertTrue(self.breeding.active)
+        self.assertEqual(self.sire.current_cage_id, self.breeding_cage.pk)
+        self.assertIsNone(current_membership.end_date)
+
     def test_end_breeding_rejects_mixed_sex_destination_cage(self):
         response = self.client.post(
             reverse("breeding:breeding_end", args=[self.breeding.pk]),
