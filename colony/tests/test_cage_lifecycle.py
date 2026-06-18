@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -208,6 +209,7 @@ class CageLifecycleTests(TestCase):
 
 class DashboardAlertTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.user = get_user_model().objects.create_user(username="dashuser", password="x")
         UserProfile.objects.filter(user=self.user).update(role=UserProfile.Role.MEMBER)
         self.project = Project.objects.create(name="DashP", owner=self.user)
@@ -219,11 +221,121 @@ class DashboardAlertTests(TestCase):
         self.client = Client()
         self.client.login(username="dashuser", password="x")
 
-    def test_empty_cage_alert_counts_without_mice_in_project(self):
-        Cage.objects.create(cage_id="EMPTY-DASH", created_at=timezone.now() - timedelta(days=20))
+    def test_empty_cage_alert_counts_only_long_empty_cages(self):
+        cage = Cage.objects.create(cage_id="EMPTY-DASH")
+        Cage.objects.filter(pk=cage.pk).update(created_at=timezone.now() - timedelta(days=20))
         response = self.client.get(reverse("home"))
-        self.assertContains(response, "Cages With No Current Mice")
+        self.assertContains(response, "Active Cages Empty &gt;14 Days")
         self.assertContains(response, "EMPTY-DASH")
+        self.assertNotContains(response, "Cages With No Current Mice")
+
+    def test_dashboard_genotype_alert_skips_plain_wt_mice(self):
+        wt_line = StrainLine.objects.create(
+            line_name="Dashboard WT",
+            name="Dashboard WT",
+            category=StrainLine.Category.WILD_TYPE,
+        )
+        legacy_wt_line = StrainLine.objects.create(
+            line_name="WT",
+            name="WT",
+            category=StrainLine.Category.COMPOUND_STRAIN,
+        )
+        required_line = StrainLine.objects.create(
+            line_name="Dashboard Required",
+            name="Dashboard Required",
+            category=StrainLine.Category.KNOCKOUT,
+            expected_loci_template="GeneX",
+        )
+        Mouse.objects.create(
+            mouse_uid="WT-CLEAR",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=wt_line,
+            project=self.project,
+        )
+        Mouse.objects.create(
+            mouse_uid="LEGACY-WT-CLEAR",
+            sex=Mouse.Sex.MALE,
+            strain_line=legacy_wt_line,
+            project=self.project,
+        )
+        Mouse.objects.create(
+            mouse_uid="MUT-MISSING",
+            sex=Mouse.Sex.MALE,
+            strain_line=required_line,
+            project=self.project,
+        )
+
+        response = self.client.get(reverse("home"))
+        alerts = {alert["kind"]: alert for alert in response.context["dashboard_alerts"]}
+
+        self.assertContains(response, "Mice Missing Required Genotype")
+        self.assertEqual(alerts["mice_no_genotype"]["count"], 1)
+        self.assertEqual([mouse.mouse_uid for mouse in alerts["mice_no_genotype"]["items"]], ["MUT-MISSING"])
+        self.assertContains(
+            response,
+            f'href="/mice/?status=active&amp;needs_genotype=yes&amp;owner={self.user.pk}"',
+        )
+        self.assertNotContains(response, "Mice Without Genotype Records")
+
+        list_response = self.client.get(
+            reverse("mice:mouse_list"),
+            {"status": Mouse.Status.ACTIVE, "needs_genotype": "yes", "owner": str(self.user.pk)},
+        )
+        self.assertContains(list_response, "MUT-MISSING")
+        self.assertNotContains(list_response, "WT-CLEAR")
+        self.assertNotContains(list_response, "LEGACY-WT-CLEAR")
+
+    def test_dashboard_uses_overdue_breeding_not_plain_no_litter_alert(self):
+        strain = StrainLine.objects.create(line_name="Dash Breeding Strain", name="Dash Breeding Strain")
+        cage = Cage.objects.create(cage_id="DASH-BR-CAGE", purpose=Cage.Purpose.BREEDING)
+        male = Mouse.objects.create(
+            mouse_uid="DASH-SIRE",
+            sex=Mouse.Sex.MALE,
+            strain_line=strain,
+            project=self.project,
+            current_cage=cage,
+        )
+        female = Mouse.objects.create(
+            mouse_uid="DASH-DAM",
+            sex=Mouse.Sex.FEMALE,
+            strain_line=strain,
+            project=self.project,
+            current_cage=cage,
+        )
+        Breeding.objects.create(
+            breeding_code="DASH-BR-OLD",
+            cage=cage,
+            male=male,
+            female_1=female,
+            start_date=timezone.localdate() - timedelta(days=30),
+            active=True,
+        )
+
+        response = self.client.get(reverse("home"))
+
+        self.assertContains(response, "Breeding Overdue / Review Pair")
+        self.assertContains(response, "DASH-BR-OLD")
+        self.assertContains(response, f'href="/breedings/?alert=overdue&amp;owner={self.user.pk}"')
+        self.assertNotContains(response, "Active/Plugged Breedings Without Litters")
+        self.assertNotContains(response, "Tail-tagged Pups Missing Genotype")
+
+    def test_dashboard_alert_links_use_actionable_filters(self):
+        cage = Cage.objects.create(cage_id="EMPTY-LINK")
+        Cage.objects.filter(pk=cage.pk).update(created_at=timezone.now() - timedelta(days=20))
+        strain = StrainLine.objects.create(line_name="Dash Link Strain", name="Dash Link Strain")
+        Mouse.objects.create(
+            mouse_uid="MISSING-CAGE-LINK",
+            sex=Mouse.Sex.MALE,
+            strain_line=strain,
+            project=self.project,
+        )
+
+        response = self.client.get(reverse("home"))
+
+        self.assertContains(response, f'href="/cages/?status=active&amp;empty_long=yes&amp;owner={self.user.pk}"')
+        self.assertContains(response, f'href="/mice/?status=active&amp;missing_cage=yes&amp;owner={self.user.pk}"')
+        self.assertContains(response, f'href="/litters/?weaning_due=soon&amp;owner={self.user.pk}"')
+        self.assertContains(response, f'href="/breedings/?alert=cage_mismatch&amp;owner={self.user.pk}"')
 
     def test_recent_lists_show_created_dates(self):
         Cage.objects.create(cage_id="REC-CAGE", created_at=timezone.now() - timedelta(days=1))

@@ -28,6 +28,12 @@
         {% if strain_line %}
             <input type="hidden" name="strain_line_id" value="{{ strain_line }}">
         {% endif %}
+        {% if missing_cage %}
+            <input type="hidden" name="missing_cage" value="{{ missing_cage }}">
+        {% endif %}
+        {% if needs_genotype %}
+            <input type="hidden" name="needs_genotype" value="{{ needs_genotype }}">
+        {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ query }}" placeholder="Search UID, tag, origin, coat, notes" class="search-input filter-control">
             <select name="sex" class="filter-control">
@@ -73,6 +79,13 @@
                 <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
             </select>
         </div>
+        {% if missing_cage == "yes" or needs_genotype == "yes" %}
+            <p class="muted small-print">
+                Dashboard alert filter:
+                {% if needs_genotype == "yes" %}mice missing required genotype{% elif missing_cage == "yes" %}mice without current cage{% endif %}.
+                Use Reset to clear it.
+            </p>
+        {% endif %}
         <div class="filter-row filter-row--secondary filter-row--per-page">
             <label class="filter-label" for="id_per_page_mice">Per page</label>
             <select name="per_page" id="id_per_page_mice" class="filter-control" onchange="this.form.requestSubmit()">

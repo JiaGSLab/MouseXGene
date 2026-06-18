@@ -20,6 +20,14 @@
             <div><strong>Rack:</strong> {{ cage.rack|default:"-" }}</div>
             <div><strong>Pos:</strong> {{ cage.position|default:"-" }}</div>
             <div><strong>Use:</strong> {{ cage.get_cage_use_display }}</div>
+            <div>
+                <strong>Owner:</strong>
+                {% for pr in project_rows %}
+                    {% if not forloop.first %}; {% endif %}{{ pr.owner_display }}
+                {% empty %}
+                    -
+                {% endfor %}
+            </div>
             <div><strong>Status:</strong> {{ cage.get_status_display }}</div>
         </div>
 

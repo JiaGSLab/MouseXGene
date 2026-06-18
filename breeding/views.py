@@ -40,7 +40,7 @@ from .forms import (
     WeanPupEntryForm,
     litter_has_weaned,
 )
-from .consistency import breeding_cage_mismatch_rows
+from .consistency import active_breeding_cage_mismatches, breeding_cage_mismatch_rows
 from .dates import expected_birth_date_for
 from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, LitterPup
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
@@ -859,6 +859,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     cage = (request.GET.get("cage") or "").strip()
     setup_by = (request.GET.get("setup_by") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    alert = (request.GET.get("alert") or "").strip()
     owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
@@ -912,8 +913,17 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         litter_count=Count("litters", distinct=True),
         latest_litter_date=Max("litters__birth_date"),
     )
-    breedings = apply_list_sort(breedings, request, BREEDING_LIST_SORT)
     today = timezone.localdate()
+    if alert == "overdue":
+        overdue_cutoff = today - timedelta(days=22)
+        breedings = breedings.filter(Q(active=True) & ~Q(status=Breeding.Status.CLOSED)).filter(
+            Q(litter_count=0, start_date__lte=overdue_cutoff)
+            | Q(litter_count__gt=0, latest_litter_date__lte=overdue_cutoff)
+        )
+    elif alert == "cage_mismatch":
+        mismatch_ids = [breeding.pk for breeding in active_breeding_cage_mismatches(breedings)]
+        breedings = breedings.filter(pk__in=mismatch_ids) if mismatch_ids else breedings.none()
+    breedings = apply_list_sort(breedings, request, BREEDING_LIST_SORT)
 
     if export in {"csv", "xlsx"}:
         breedings_export_list = list(breedings)
@@ -1000,6 +1010,7 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
         "breeding_type": breeding_type,
         "cage": cage,
         "setup_by": setup_by,
+        "alert": alert,
         "owner": "" if strain_line_id else owner,
         "owner_options": project_owner_filter_options(),
         "setup_by_options": [
@@ -1566,6 +1577,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
     birth_date_to = (request.GET.get("birth_date_to") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     litter_status = (request.GET.get("litter_status") or "").strip()
+    weaning_due = (request.GET.get("weaning_due") or "").strip()
     owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
 
@@ -1634,6 +1646,14 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.filter(birth_date__lte=birth_date_to)
     if litter_status:
         litters = litters.filter(litter_status=litter_status)
+    today = timezone.localdate()
+    if weaning_due == "soon":
+        wean_due_end = today + timedelta(days=3)
+        litters = litters.filter(
+            birth_date__isnull=False,
+            wean_date__isnull=True,
+            birth_date__range=(today - timedelta(days=21), wean_due_end - timedelta(days=21)),
+        )
 
     litters_for_wean_counts = litters
     not_weaned_count = (
@@ -1650,7 +1670,6 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         litters = litters.filter(wean_date__isnull=True).exclude(litter_status=Litter.LitterStatus.WEANED)
 
     litters_qs = apply_list_sort(litters, request, LITTER_LIST_SORT)
-    today = timezone.localdate()
 
     if export in {"csv", "xlsx"}:
         litters = list(litters_qs)
@@ -1723,6 +1742,7 @@ def litter_list(request: HttpRequest) -> HttpResponse:
         "birth_date_to": birth_date_to,
         "include_inactive": include_inactive,
         "litter_status": litter_status,
+        "weaning_due": weaning_due,
         "strain_line_id": strain_line_id,
         "strain_line_filter_label": strain_line_filter_label,
         "owner": "" if strain_line_id else owner,

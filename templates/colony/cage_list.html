@@ -27,6 +27,9 @@
         {% if strain_line %}
             <input type="hidden" name="strain_line" value="{{ strain_line }}">
         {% endif %}
+        {% if empty_long %}
+            <input type="hidden" name="empty_long" value="{{ empty_long }}">
+        {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search cage_id" class="search-input filter-control">
             <select name="cage_use" class="filter-control">
@@ -81,6 +84,9 @@
                 <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Archived</option>
             </select>
         </div>
+        {% if empty_long == "yes" %}
+            <p class="muted small-print">Dashboard alert filter: active cages empty more than 14 days. Use Reset to clear it.</p>
+        {% endif %}
         <div class="filter-row filter-row--secondary filter-row--per-page">
             <label class="filter-label" for="id_per_page_cage">Per page</label>
             <select name="per_page" id="id_per_page_cage" class="filter-control" onchange="this.form.requestSubmit()">
@@ -125,7 +131,7 @@
         </thead>
         <tbody>
             {% for cage in cages %}
-            <tr class="{% if cage.status != 'active' %}row-inactive{% endif %}">
+            <tr class="{% if cage.status != 'active' %}row-inactive{% elif cage.cage_use == 'breeding' %}row-breeding-active{% endif %}">
                 <td class="col-cage-id"><a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a></td>
                 <td>{{ cage.room|default:"-" }}</td>
                 <td>{{ cage.rack|default:"-" }}</td>

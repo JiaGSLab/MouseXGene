@@ -37,37 +37,6 @@
             <li class="dashboard-alert-empty">All clear</li>
         {% endfor %}
     </ul>
-{% elif alert.kind == "cages_no_mice" %}
-    <ul class="mini-list">
-        {% for cage in alert.items %}
-            <li>
-                <a href="{% url 'colony:cage_detail' cage.pk %}">{{ cage.cage_id }}</a>
-                {% if cage.room %} - {{ cage.room }}{% endif %}
-            </li>
-        {% empty %}
-            <li class="dashboard-alert-empty">All clear</li>
-        {% endfor %}
-    </ul>
-{% elif alert.kind == "breeding_no_litter" %}
-    <ul class="mini-list">
-        {% for breeding in alert.items %}
-            <li>
-                <a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a>
-                - {{ breeding.get_status_display }}
-                <div class="muted small-print">
-                    No litter has been recorded for this active setup.
-                    {% if can_manage_breeding %}
-                        <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
-                        {% if breeding.status != "closed" or breeding.active %}
-                            · <a href="{% url 'breeding:breeding_end' breeding.pk %}">End breeding</a>
-                        {% endif %}
-                    {% endif %}
-                </div>
-            </li>
-        {% empty %}
-            <li class="dashboard-alert-empty">All clear</li>
-        {% endfor %}
-    </ul>
 {% elif alert.kind == "breeding_overdue" %}
     <ul class="mini-list">
         {% for breeding in alert.items %}
@@ -116,19 +85,7 @@
             <li class="dashboard-alert-empty">All clear</li>
         {% endfor %}
     </ul>
-{% elif alert.kind == "pups_no_genotype" %}
-    <ul class="mini-list">
-        {% for pup in alert.items %}
-            <li>
-                <a href="{% url 'litters:litter_detail' pup.litter.pk %}">{{ pup.litter.litter_id_display }}</a>
-                - {% if pup.mouse %}<a href="{% url 'mice:mouse_detail' pup.mouse.pk %}">{{ pup.mouse.mouse_uid }}</a>{% else %}Unlinked pup{% endif %}
-                - tail-tag {{ pup.tail_tag_date|date:"Y-m-d" }}
-            </li>
-        {% empty %}
-            <li class="dashboard-alert-empty">All clear</li>
-        {% endfor %}
-    </ul>
-        {% elif alert.kind == "empty_cages_long" %}
+{% elif alert.kind == "empty_cages_long" %}
     <ul class="mini-list">
         {% for cage in alert.items %}
             <li>

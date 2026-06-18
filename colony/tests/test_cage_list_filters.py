@@ -78,6 +78,13 @@ class CageListOwnerFilterTests(TestCase):
         self.assertContains(response, breeding_cage.cage_id)
         self.assertNotContains(response, "OWN-CAGE-A")
         self.assertContains(response, "Cage Use")
+        self.assertContains(response, "row-breeding-active")
+
+    def test_cage_print_shows_owner_from_current_mice_project(self):
+        response = self.client.get(reverse("colony:cage_print", args=[self.cage_a.pk]))
+
+        self.assertContains(response, "Owner:")
+        self.assertContains(response, self.user_a.username)
 
 
 class CageFormRoomTests(TestCase):

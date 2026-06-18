@@ -38,6 +38,9 @@
 <section class="card card--filters">
     <form method="get" class="filter-form" id="breeding-list-filters" action="{% url 'breeding:breeding_list' %}">
         {% include "includes/_strain_line_filter_hidden.html" %}
+        {% if alert %}
+            <input type="hidden" name="alert" value="{{ alert }}">
+        {% endif %}
         <div class="filter-row filter-row--primary">
             <input type="text" name="q" value="{{ q }}" placeholder="Search code, sire/dam UID, or set-up by" class="search-input filter-control" aria-label="Search breedings">
             <select name="setup_by" class="filter-control" aria-label="Set up by">
@@ -76,6 +79,13 @@
                 <option value="">Active Only</option>
                 <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include Inactive/Closed</option>
             </select>
+            {% if alert == "overdue" or alert == "cage_mismatch" %}
+                <span class="muted small-print">
+                    Dashboard alert filter:
+                    {% if alert == "overdue" %}breeding overdue / review pair{% elif alert == "cage_mismatch" %}breeding cage mismatch{% endif %}.
+                    Use Reset to clear it.
+                </span>
+            {% endif %}
             <label class="filter-label" for="id_per_page_breedings">Per page</label>
             <select name="per_page" id="id_per_page_breedings" class="filter-control" onchange="this.form.requestSubmit()">
                 <option value="25" {% if per_page == "25" %}selected{% endif %}>25</option>

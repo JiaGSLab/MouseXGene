@@ -9,10 +9,11 @@ from django.db.models import Count, Max, Q
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from colony.models import Cage, Colony, Mouse, StrainLine
+from colony.genotype_requirements import mouse_requires_genotype_q
 from breeding.models import Breeding, Litter
-from breeding.models import LitterPup
 from breeding.analytics import breeding_litter_timing_alert
 from breeding.consistency import active_breeding_cage_mismatches
 from core.audit import log_audit_event
@@ -43,7 +44,15 @@ DASHBOARD_STATS_CACHE_TIMEOUT = 30
 def _dashboard_stats_cache_key(user, owner: str) -> str:
     user_key = getattr(user, "pk", None) or "anon"
     owner_key = owner or "all"
-    return f"dashboard-stats:v2:user:{user_key}:owner:{owner_key}"
+    return f"dashboard-stats:v4:user:{user_key}:owner:{owner_key}"
+
+
+def _dashboard_alert_href(viewname: str, params: dict | None = None) -> str:
+    base = reverse(viewname)
+    clean_params = {key: value for key, value in (params or {}).items() if value not in ("", None)}
+    if not clean_params:
+        return base
+    return f"{base}?{urlencode(clean_params)}"
 
 
 @authenticated_required
@@ -76,12 +85,8 @@ def home(request: HttpRequest) -> HttpResponse:
     )
     mice_without_genotype_qs = (
         mice_queryset.filter(genotype_components__isnull=True)
+        .filter(mouse_requires_genotype_q())
         .select_related("strain_line", "project", "current_cage")
-        .distinct()
-    )
-    cages_without_mice_qs = (
-        cages_queryset.filter(status=Cage.Status.ACTIVE, current_mice__isnull=True)
-        .order_by("cage_id")
         .distinct()
     )
     active_mice_qs = mice_queryset.filter(status=Mouse.Status.ACTIVE)
@@ -94,19 +99,6 @@ def home(request: HttpRequest) -> HttpResponse:
         birth_date__range=(today - timedelta(days=21), wean_due_end - timedelta(days=21)),
     ).select_related("breeding")
 
-    breeding_without_litter_qs = (
-        breedings_queryset.filter(Q(active=True) | Q(status=Breeding.Status.PLUGGED), litters__isnull=True)
-        .select_related("cage", "male", "female_1")
-        .distinct()
-    )
-    pups_lacking_genotype_qs = (
-        LitterPup.objects.select_related("litter", "mouse")
-        .filter(tail_tag_date__isnull=False, mouse__isnull=False)
-        .filter(mouse__genotypes__isnull=True)
-        .filter(litter__in=litters_queryset)
-        .order_by("-tail_tag_date")
-        .distinct()
-    )
     empty_cutoff = timezone.now() - timedelta(days=14)
     empty_active_cages_long_qs = (
         cages_queryset.filter(status=Cage.Status.ACTIVE, current_mice__isnull=True)
@@ -130,10 +122,7 @@ def home(request: HttpRequest) -> HttpResponse:
             "active_mice": active_mice_qs.count(),
             "mice_without_cage_count": mice_without_cage_qs.count(),
             "mice_without_genotype_count": mice_without_genotype_qs.count(),
-            "cages_without_mice_count": cages_without_mice_qs.count(),
             "weaning_due_soon_count": weaning_due_soon_qs.count(),
-            "breeding_without_litter_count": breeding_without_litter_qs.count(),
-            "pups_lacking_genotype_count": pups_lacking_genotype_qs.count(),
             "empty_active_cages_long_count": empty_active_cages_long_qs.count(),
         }
         cache.set(stats_cache_key, cached_stats, DASHBOARD_STATS_CACHE_TIMEOUT)
@@ -143,10 +132,7 @@ def home(request: HttpRequest) -> HttpResponse:
     active_mice = cached_stats["active_mice"]
     mice_without_cage_count = cached_stats["mice_without_cage_count"]
     mice_without_genotype_count = cached_stats["mice_without_genotype_count"]
-    cages_without_mice_count = cached_stats["cages_without_mice_count"]
     weaning_due_soon_count = cached_stats["weaning_due_soon_count"]
-    breeding_without_litter_count = cached_stats["breeding_without_litter_count"]
-    pups_lacking_genotype_count = cached_stats["pups_lacking_genotype_count"]
     empty_active_cages_long_count = cached_stats["empty_active_cages_long_count"]
     breeding_overdue_cutoff = today - timedelta(days=22)
     breeding_overdue_qs = (
@@ -176,14 +162,12 @@ def home(request: HttpRequest) -> HttpResponse:
     breeding_cage_mismatch_all = active_breeding_cage_mismatches(breedings_queryset)
     breeding_cage_mismatch_count = len(breeding_cage_mismatch_all)
 
+    owner_link_params = {"owner": home_owner} if home_owner else {}
     weaning_due_soon = list(weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit])
     mice_without_cage = list(mice_without_cage_qs.order_by("mouse_uid")[:dashboard_list_limit])
     mice_without_genotype = list(mice_without_genotype_qs.order_by("mouse_uid")[:dashboard_list_limit])
-    cages_without_mice = list(cages_without_mice_qs[:dashboard_list_limit])
-    breeding_without_litter = list(breeding_without_litter_qs.order_by("-start_date")[:dashboard_list_limit])
     breeding_overdue = breeding_overdue_all[:dashboard_list_limit]
     breeding_cage_mismatches = breeding_cage_mismatch_all[:dashboard_list_limit]
-    pups_lacking_genotype = list(pups_lacking_genotype_qs[:dashboard_list_limit])
     empty_active_cages_long = list(empty_active_cages_long_qs[:dashboard_list_limit])
 
     dashboard_alerts = [
@@ -191,6 +175,10 @@ def home(request: HttpRequest) -> HttpResponse:
             "kind": "weaning",
             "title": "Weaning Due Soon",
             "list_url": "litters:litter_list",
+            "href": _dashboard_alert_href(
+                "litters:litter_list",
+                {"weaning_due": "soon", **owner_link_params},
+            ),
             "count": weaning_due_soon_count,
             "items": weaning_due_soon,
         },
@@ -198,34 +186,32 @@ def home(request: HttpRequest) -> HttpResponse:
             "kind": "mice_no_cage",
             "title": "Mice Without Current Cage",
             "list_url": "mice:mouse_list",
+            "href": _dashboard_alert_href(
+                "mice:mouse_list",
+                {"status": Mouse.Status.ACTIVE, "missing_cage": "yes", **owner_link_params},
+            ),
             "count": mice_without_cage_count,
             "items": mice_without_cage,
         },
         {
             "kind": "mice_no_genotype",
-            "title": "Mice Without Genotype Records",
+            "title": "Mice Missing Required Genotype",
             "list_url": "mice:mouse_list",
+            "href": _dashboard_alert_href(
+                "mice:mouse_list",
+                {"status": Mouse.Status.ACTIVE, "needs_genotype": "yes", **owner_link_params},
+            ),
             "count": mice_without_genotype_count,
             "items": mice_without_genotype,
-        },
-        {
-            "kind": "cages_no_mice",
-            "title": "Cages With No Current Mice",
-            "list_url": "colony:cage_list",
-            "count": cages_without_mice_count,
-            "items": cages_without_mice,
-        },
-        {
-            "kind": "breeding_no_litter",
-            "title": "Active/Plugged Breedings Without Litters",
-            "list_url": "breeding:breeding_list",
-            "count": breeding_without_litter_count,
-            "items": breeding_without_litter,
         },
         {
             "kind": "breeding_overdue",
             "title": "Breeding Overdue / Review Pair",
             "list_url": "breeding:breeding_list",
+            "href": _dashboard_alert_href(
+                "breeding:breeding_list",
+                {"alert": "overdue", **owner_link_params},
+            ),
             "count": breeding_overdue_count,
             "items": breeding_overdue,
         },
@@ -233,34 +219,32 @@ def home(request: HttpRequest) -> HttpResponse:
             "kind": "breeding_cage_mismatch",
             "title": "Breeding Cage Mismatch",
             "list_url": "breeding:breeding_list",
+            "href": _dashboard_alert_href(
+                "breeding:breeding_list",
+                {"alert": "cage_mismatch", **owner_link_params},
+            ),
             "count": breeding_cage_mismatch_count,
             "items": breeding_cage_mismatches,
-        },
-        {
-            "kind": "pups_no_genotype",
-            "title": "Tail-tagged Pups Missing Genotype",
-            "list_url": "litters:litter_list",
-            "count": pups_lacking_genotype_count,
-            "items": pups_lacking_genotype,
         },
         {
             "kind": "empty_cages_long",
             "title": "Active Cages Empty >14 Days",
             "list_url": "colony:cage_list",
+            "href": _dashboard_alert_href(
+                "colony:cage_list",
+                {"status": Cage.Status.ACTIVE, "empty_long": "yes", **owner_link_params},
+            ),
             "count": empty_active_cages_long_count,
             "items": empty_active_cages_long,
         },
     ]
     # Keep a stable workflow-first layout: cage-related alerts first, then mouse, then breeding/litter.
     alert_order = {
-        "cages_no_mice": 10,
-        "empty_cages_long": 20,
+        "empty_cages_long": 10,
         "mice_no_cage": 30,
         "mice_no_genotype": 40,
         "weaning": 50,
-        "pups_no_genotype": 60,
         "breeding_cage_mismatch": 65,
-        "breeding_no_litter": 70,
         "breeding_overdue": 80,
     }
     dashboard_alerts.sort(key=lambda a: alert_order.get(a["kind"], 999))
@@ -278,19 +262,13 @@ def home(request: HttpRequest) -> HttpResponse:
         "inactive_mice": inactive_mice,
         "mice_without_cage_count": mice_without_cage_count,
         "mice_without_genotype_count": mice_without_genotype_count,
-        "cages_without_mice_count": cages_without_mice_count,
         "weaning_due_soon_count": weaning_due_soon_count,
-        "breeding_without_litter_count": breeding_without_litter_count,
-        "pups_lacking_genotype_count": pups_lacking_genotype_count,
         "empty_active_cages_long_count": empty_active_cages_long_count,
         "breeding_cage_mismatch_count": breeding_cage_mismatch_count,
         "mice_without_cage": mice_without_cage,
         "mice_without_genotype": mice_without_genotype,
-        "cages_without_mice": cages_without_mice,
         "weaning_due_soon": weaning_due_soon,
-        "breeding_without_litter": breeding_without_litter,
         "breeding_cage_mismatches": breeding_cage_mismatches,
-        "pups_lacking_genotype": pups_lacking_genotype,
         "empty_active_cages_long": empty_active_cages_long,
         "dashboard_alerts": dashboard_alerts,
         "recent_mice": mice_queryset.select_related("strain_line", "current_cage").order_by("-created_at")[

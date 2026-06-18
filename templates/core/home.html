@@ -116,7 +116,7 @@
     {% for alert in dashboard_alerts %}
         <article class="card dashboard-alert {% if alert.count > 0 %}dashboard-alert--hot{% else %}dashboard-alert--clear{% endif %}">
             <h2 class="dashboard-alert__title">
-                <a href="{% url alert.list_url %}">{{ alert.title }}</a>
+                <a href="{{ alert.href }}">{{ alert.title }}</a>
                 <span class="dashboard-alert-count {% if alert.count > 0 %}dashboard-alert-count--warn{% endif %}">({{ alert.count }})</span>
             </h2>
             {% include "core/dashboard_alert_items.html" with alert=alert %}

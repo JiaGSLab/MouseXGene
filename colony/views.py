@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
@@ -79,6 +80,7 @@ from core.owner_filters import (
 from users.forms import UserImportPrefixForm
 from users.import_prefix import get_effective_import_prefix
 from users.models import UserProfile
+from colony.genotype_requirements import mouse_requires_genotype_q
 from colony.mouse_age import mouse_list_age_band
 from colony.cage_lifecycle import (
     TERMINAL_MOUSE_STATUSES,
@@ -662,6 +664,7 @@ def _filtered_cages_queryset(request: HttpRequest):
     purpose = (request.GET.get("purpose") or "").strip()
     status = (request.GET.get("status") or "").strip()
     is_empty = (request.GET.get("is_empty") or "").strip()
+    empty_long = (request.GET.get("empty_long") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
@@ -725,6 +728,16 @@ def _filtered_cages_queryset(request: HttpRequest):
         cages = cages.filter(current_mice__isnull=True)
     elif is_empty == "no":
         cages = cages.filter(current_mice__isnull=False)
+    if empty_long == "yes":
+        empty_cutoff = timezone.now() - timedelta(days=14)
+        cages = (
+            cages.filter(status=Cage.Status.ACTIVE, current_mice__isnull=True)
+            .annotate(last_mouse_left=Max("memberships__end_date"))
+            .filter(
+                Q(last_mouse_left__lt=empty_cutoff.date())
+                | Q(last_mouse_left__isnull=True, created_at__lt=empty_cutoff)
+            )
+        )
 
     return (
         cages.distinct()
@@ -825,7 +838,9 @@ def _filtered_mice_queryset(request: HttpRequest):
     status = (request.GET.get("status") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
+    missing_cage = (request.GET.get("missing_cage") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
+    needs_genotype = (request.GET.get("needs_genotype") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     owner = resolve_project_owner_filter(request)
 
@@ -850,12 +865,16 @@ def _filtered_mice_queryset(request: HttpRequest):
         mice = mice.filter(status=status)
     if strain_line:
         mice = mice.filter(strain_line_id=strain_line)
-    if current_cage:
+    if missing_cage == "yes":
+        mice = mice.filter(current_cage__isnull=True)
+    elif current_cage:
         mice = mice.filter(current_cage_id=current_cage)
     if project:
         mice = mice.filter(project_id=project)
     if owner:
         mice = mice.filter(project__owner_id=owner)
+    if needs_genotype == "yes":
+        mice = mice.filter(genotype_components__isnull=True).filter(mouse_requires_genotype_q()).distinct()
 
     return mice
 
@@ -2751,6 +2770,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
     purpose = (request.GET.get("purpose") or "").strip()
     status = (request.GET.get("status") or "").strip()
     is_empty = (request.GET.get("is_empty") or "").strip()
+    empty_long = (request.GET.get("empty_long") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
@@ -2785,6 +2805,7 @@ def cage_list(request: HttpRequest) -> HttpResponse:
         "purpose": purpose,
         "status": status,
         "is_empty": is_empty,
+        "empty_long": empty_long,
         "include_inactive": include_inactive,
         "strain_line": strain_line,
         "strain_line_filter_label": strain_line_filter_label,
@@ -3819,13 +3840,17 @@ def cage_history(request: HttpRequest, pk: int) -> HttpResponse:
 
 @authenticated_required
 def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
-    cage = get_object_or_404(_scoped_cage_queryset(request.user), pk=pk)
-    current_mice = (
+    cage = get_object_or_404(
+        _scoped_cage_queryset(request.user).select_related("project", "project__owner", "project__owner__profile"),
+        pk=pk,
+    )
+    current_mice = list(
         _scoped_mouse_queryset(request.user).filter(current_cage=cage)
-        .select_related("strain_line")
+        .select_related("strain_line", "project", "project__owner", "project__owner__profile")
         .prefetch_related("genotypes__gene")
         .order_by("mouse_uid")
     )
+    project_rows = cage_projects_from_mice(current_mice, cage=cage)
     mice_rows = [
         {
             "mouse": mouse,
@@ -3835,6 +3860,7 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
     ]
     context = {
         "cage": cage,
+        "project_rows": project_rows,
         "mice_rows": mice_rows,
     }
     return render(request, "colony/cage_print.html", context)
@@ -3948,8 +3974,10 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     status = (request.GET.get("status") or "").strip()
     strain_line = (request.GET.get("strain_line") or request.GET.get("strain_line_id") or "").strip()
     current_cage = (request.GET.get("current_cage") or request.GET.get("cage_id") or "").strip()
+    missing_cage = (request.GET.get("missing_cage") or "").strip()
     project = (request.GET.get("project") or request.GET.get("project_id") or "").strip()
     include_inactive = (request.GET.get("include_inactive") or "").strip()
+    needs_genotype = (request.GET.get("needs_genotype") or "").strip()
     owner = resolve_project_owner_filter(request)
     export = (request.GET.get("export") or "").strip().lower()
     age_sort = (request.GET.get("age_sort") or "").strip()
@@ -3992,8 +4020,10 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "status": status,
         "strain_line": strain_line,
         "current_cage": current_cage,
+        "missing_cage": missing_cage,
         "project": project,
         "include_inactive": include_inactive,
+        "needs_genotype": needs_genotype,
         "owner": owner,
         "owner_options": project_owner_filter_options(),
         "sex_options": Mouse.Sex.choices,
