@@ -14,10 +14,10 @@
 {% endblock %}
 
 {% block content %}
-<section class="page-header page-header-row">
+    <section class="page-header page-header-row">
     <div>
         <h1>Family Tree</h1>
-        <p class="muted">Pedigree hub: search mice and filter by strain, project, owner, or parent links (up to 80 rows).</p>
+        <p class="muted">Pedigree hub: search mice and filter by strain, project, owner, or parent links.</p>
     </div>
 </section>
 
@@ -60,6 +60,24 @@
                 <option value="" {% if include_inactive != "yes" %}selected{% endif %}>Active mice only</option>
                 <option value="yes" {% if include_inactive == "yes" %}selected{% endif %}>Include inactive / archived</option>
             </select>
+            <label class="filter-label" for="id_per_page_family_tree">Per page</label>
+            <select name="per_page" id="id_per_page_family_tree" class="filter-control" onchange="this.form.requestSubmit()">
+                <option value="25" {% if per_page == "25" %}selected{% endif %}>25</option>
+                <option value="50" {% if per_page == "50" %}selected{% endif %}>50</option>
+                <option value="100" {% if per_page == "100" %}selected{% endif %}>100</option>
+                <option value="all" {% if per_page == "all" %}selected{% endif %} {% if not all_allowed %}disabled{% endif %} title="{% if not all_allowed %}Only when total results are {{ list_all_max }} or fewer{% else %}Show all matching rows (max {{ list_all_max }}){% endif %}">All (≤{{ list_all_max }})</option>
+            </select>
+            {% if total_count %}
+                <p class="list-range-meta muted">
+                    {% if page_obj and per_page != "all" %}
+                        Rows {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ total_count }}
+                    {% elif per_page == "all" %}
+                        Showing all {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% else %}
+                        {{ total_count }} row{% if total_count != 1 %}s{% endif %}
+                    {% endif %}
+                </p>
+            {% endif %}
         </div>
     </form>
 </section>
@@ -69,15 +87,14 @@
         <thead>
             <tr>
                 {% sort_th "mouse_uid" "Mouse" %}
-                {% sort_th "sire" "Sire (Father)" %}
-                {% sort_th "breeding_cage" "Breeding cage" %}
-                {% sort_th "dam" "Mothers" %}
-                {% sort_th "cage" "Cage" %}
+                {% sort_th "sire" "Sire" %}
+                {% sort_th "dam" "Dam(s)" %}
+                {% sort_th "breeding_cage" "Breeding Cage" %}
+                {% sort_th "cage" "Current Cage" %}
                 {% sort_th "strain_line" "Strain" %}
                 {% sort_th "genotype" "Genotype" %}
                 {% sort_th "project" "Project" %}
                 {% sort_th "owner" "Owner" %}
-                <th scope="col">Pedigree</th>
             </tr>
         </thead>
         <tbody>
@@ -86,17 +103,17 @@
                     <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">{{ m.mouse_uid }}</a></td>
                     <td>{% if m.sire %}<a class="link-primary" href="{% url 'mice:mouse_pedigree' m.sire.pk %}">{{ m.sire.mouse_uid }}</a>{% else %}-{% endif %}</td>
                     <td>
-                        {% if m.family_breeding_cage %}
-                            {{ m.family_breeding_cage }}
+                        {% if m.family_mothers %}
+                            {% for dam in m.family_mothers %}
+                                <a class="link-primary" href="{% url 'mice:mouse_pedigree' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
+                            {% endfor %}
                         {% else %}
                             -
                         {% endif %}
                     </td>
                     <td>
-                        {% if m.family_mothers %}
-                            {% for dam in m.family_mothers %}
-                                <a class="link-primary" href="{% url 'mice:mouse_pedigree' dam.pk %}">{{ dam.mouse_uid }}</a>{% if not forloop.last %}, {% endif %}
-                            {% endfor %}
+                        {% if m.family_breeding_cage %}
+                            {{ m.family_breeding_cage }}
                         {% else %}
                             -
                         {% endif %}
@@ -136,12 +153,12 @@
                             -
                         {% endif %}
                     </td>
-                    <td><a class="link-primary" href="{% url 'mice:mouse_pedigree' m.pk %}">Open tree</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="10" class="empty-row">No mice matched your filters.</td></tr>
+                <tr><td colspan="9" class="empty-row">No mice matched your filters.</td></tr>
             {% endfor %}
         </tbody>
     </table>
+    {% include "includes/pagination_nav.html" %}
 </section>
 {% endblock %}

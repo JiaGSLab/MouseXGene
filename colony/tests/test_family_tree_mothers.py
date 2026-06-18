@@ -71,3 +71,44 @@ class FamilyTreeMothersTests(TestCase):
         self.assertIn('href="/mice/', html)
         self.assertIn("FT-DAM-1", html)
         self.assertIn("FT-DAM-2", html)
+
+    def test_family_tree_uses_pagination_and_consistent_parent_headers(self):
+        for idx in range(30):
+            Mouse.objects.create(
+                mouse_uid=f"FT-PAGE-{idx:02d}",
+                sex=Mouse.Sex.MALE,
+                status=Mouse.Status.ACTIVE,
+                strain_line=self.strain,
+                project=self.project,
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mice:family_tree"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rows 1–25 of 34")
+        self.assertContains(response, "Page 1 of 2")
+        self.assertContains(response, "Sire")
+        self.assertContains(response, "Dam(s)")
+        self.assertNotContains(response, "<th scope=\"col\">Pedigree</th>", html=True)
+        self.assertNotContains(response, "Open tree")
+        html = response.content.decode()
+        self.assertLess(html.index("Sire"), html.index("Dam(s)"))
+        self.assertLess(html.index("Dam(s)"), html.index("Breeding Cage"))
+
+    def test_family_tree_per_page_controls_result_count(self):
+        for idx in range(30):
+            Mouse.objects.create(
+                mouse_uid=f"FT-PER-{idx:02d}",
+                sex=Mouse.Sex.FEMALE,
+                status=Mouse.Status.ACTIVE,
+                strain_line=self.strain,
+                project=self.project,
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("mice:family_tree"), {"per_page": "50"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rows 1–34 of 34")
+        self.assertNotContains(response, "Page 1 of 2")

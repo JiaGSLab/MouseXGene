@@ -4467,8 +4467,10 @@ def family_tree(request: HttpRequest) -> HttpResponse:
             source_breeding__isnull=True,
         )
 
-    mice = list(apply_list_sort(mice, request, FAMILY_TREE_SORT)[:80])
-    for m in mice:
+    mice = apply_list_sort(mice, request, FAMILY_TREE_SORT)
+    page_ctx = paginate_queryset_for_list(request, mice, viewname="mice:family_tree")
+    mice_page = list(page_ctx.pop("items"))
+    for m in mice_page:
         m.family_genotype_summary = display_genotype_summary(m)
         pedigree = mouse_family_pedigree_from_prefetch(m)
         m.family_breeding_cage = pedigree.breeding_cage.cage_id if pedigree.breeding_cage else ""
@@ -4478,7 +4480,7 @@ def family_tree(request: HttpRequest) -> HttpResponse:
         request,
         "colony/family_tree.html",
         {
-            "mice": mice,
+            "mice": mice_page,
             "q": q,
             "sex": sex,
             "strain_line": strain_line,
@@ -4499,7 +4501,9 @@ def family_tree(request: HttpRequest) -> HttpResponse:
                 ("dam", "Has dam only"),
                 ("none", "No parents on record"),
             ],
+            "list_all_max": LIST_ALL_RESULTS_MAX,
             **build_list_sort_context(request, "mice:family_tree", FAMILY_TREE_SORT),
+            **page_ctx,
         },
     )
 
