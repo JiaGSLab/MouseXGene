@@ -64,10 +64,18 @@ After HTTPS is live, set (adjust if needed):
 ```env
 DJANGO_ALLOWED_HOSTS=jialabmouse.top,www.jialabmouse.top
 DJANGO_CSRF_TRUSTED_ORIGINS=https://jialabmouse.top,https://www.jialabmouse.top
+DJANGO_SECURE_SSL_REDIRECT=true
 DJANGO_SECURE_PROXY_SSL_HEADER=true
 DJANGO_SESSION_COOKIE_SECURE=true
 DJANGO_CSRF_COOKIE_SECURE=true
+DJANGO_SECURE_HSTS_SECONDS=604800
+DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS=false
+DJANGO_SECURE_HSTS_PRELOAD=false
 ```
+
+Start HSTS with a short value such as `604800` seconds (7 days). Only enable
+`DJANGO_SECURE_HSTS_PRELOAD=true` after you are certain every subdomain is
+permanently HTTPS-ready.
 
 Restart `web` after editing `.env.prod`:
 
