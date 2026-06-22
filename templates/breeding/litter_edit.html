@@ -17,6 +17,8 @@
     <form method="post" class="form-layout">
         {% csrf_token %}
 
+        {% include "includes/form_error_summary.html" %}
+
         {% if form.non_field_errors %}
             <div class="form-errors">
                 {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}

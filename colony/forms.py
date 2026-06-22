@@ -960,17 +960,21 @@ class MouseBatchSharedForm(forms.Form):
     )
     birth_date = forms.DateField(
         required=False,
-        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control", "placeholder": "YYYY-MM-DD"}),
     )
     death_date = forms.DateField(
         required=False,
-        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control", "placeholder": "YYYY-MM-DD"}),
     )
     euthanasia_date = forms.DateField(
         required=False,
-        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control"}),
+        widget=forms.DateInput(attrs={"type": "date", "class": "filter-control", "placeholder": "YYYY-MM-DD"}),
     )
-    death_reason = forms.CharField(required=False, max_length=255)
+    death_reason = forms.CharField(
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Optional: found dead / scheduled endpoint"}),
+    )
     status = forms.ChoiceField(choices=Mouse.Status.choices, initial=Mouse.Status.ACTIVE)
     strain_line = forms.ModelChoiceField(queryset=StrainLine.objects.none(), required=True)
     current_cage = forms.ModelChoiceField(queryset=Cage.objects.none(), required=False, label="Current cage")
@@ -979,6 +983,7 @@ class MouseBatchSharedForm(forms.Form):
         required=False,
         label="Or enter cage ID",
         help_text="Partial cage ID is supported. Must match an existing cage.",
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "e.g. HGS_C110"}),
     )
     sire = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Sire (Father)")
     dam = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False, label="Dam (Mother)")
@@ -995,9 +1000,20 @@ class MouseBatchSharedForm(forms.Form):
         widget=forms.SelectMultiple(attrs={"size": 6}),
     )
     project = forms.ModelChoiceField(queryset=Project.objects.none(), required=True)
-    origin = forms.CharField(required=False, max_length=128)
-    coat_color = forms.CharField(required=False, max_length=64)
-    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    origin = forms.CharField(
+        required=False,
+        max_length=128,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Optional: weaned from BR-20260618-001"}),
+    )
+    coat_color = forms.CharField(
+        required=False,
+        max_length=64,
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Optional: black / albino / agouti"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Optional: health, source, or handling notes."}),
+    )
 
     def __init__(self, *args, user=None, **kwargs):
         self.user = user
@@ -1041,18 +1057,18 @@ class MouseBatchSharedForm(forms.Form):
 class MouseBatchEntryForm(forms.Form):
     mouse_uid = forms.CharField(
         max_length=64,
-        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Mouse UID"}),
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "e.g. H_M425"}),
     )
     sex = forms.ChoiceField(choices=Mouse.Sex.choices, widget=forms.Select(attrs={"class": "filter-control"}))
     ear_tag = forms.CharField(
         required=False,
         max_length=64,
-        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Ear tag"}),
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "e.g. 25"}),
     )
     toe_tag = forms.CharField(
         required=False,
         max_length=64,
-        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "Toe tag"}),
+        widget=forms.TextInput(attrs={"class": "filter-control", "placeholder": "e.g. L3"}),
     )
 
     def clean_mouse_uid(self):

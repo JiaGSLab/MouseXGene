@@ -15,7 +15,7 @@ AUTO_CAGE_RETRY_LIMIT = 20
 
 
 def generate_auto_cage_id(prefix: str, when: date | None = None) -> str:
-    day = (when or timezone.localdate()).strftime("%Y%m%d")
+    day = (when or timezone.localdate()).strftime("%y%m%d")
     base = f"{prefix}-{day}"
     for n in range(1, 10000):
         candidate = f"{base}-{n:03d}"

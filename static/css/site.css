@@ -1197,6 +1197,34 @@ body.col-resize-active * {
     font-size: 0.92rem;
 }
 
+.form-error-summary {
+    color: #7f1d1d;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+}
+
+.form-error-summary h2 {
+    margin: 0 0 6px;
+    font-size: 1rem;
+}
+
+.form-error-summary p {
+    margin: 0 0 8px;
+}
+
+.form-error-summary ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.form-error-summary a {
+    color: #991b1b;
+    font-weight: 600;
+}
+
 .import-overwrite-warning {
     border-color: #e8b4b0;
     background: #fff8f7;
@@ -1546,6 +1574,16 @@ body.col-resize-active * {
 .card-nested {
     margin-bottom: 12px;
     padding: 12px;
+}
+
+.genotype-result-control {
+    display: grid;
+    gap: 6px;
+    min-width: 180px;
+}
+
+.genotype-result-control .filter-control {
+    width: 100%;
 }
 
 .workflow-note {

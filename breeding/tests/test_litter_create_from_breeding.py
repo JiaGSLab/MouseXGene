@@ -89,6 +89,12 @@ class LitterCreateFromBreedingTests(TestCase):
         url = reverse("breeding:litter_create", args=[self.active_breeding.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Record birth only.")
+        self.assertContains(response, "Litter code (optional)")
+        self.assertContains(response, "Optional: L2026-06-001")
+        self.assertContains(response, "Total born (number of pups)")
+        self.assertContains(response, "e.g. 8")
+        self.assertContains(response, "Do not enter the pup count here.")
         self.assertNotContains(response, "Wean date")
         self.assertNotContains(response, "Litter status")
 

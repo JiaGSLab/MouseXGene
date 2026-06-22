@@ -76,12 +76,14 @@ class BreedingForm(forms.ModelForm):
         required=False,
         label="Or enter cage ID",
         help_text="Partial cage ID is supported. Must match an existing active cage.",
+        widget=forms.TextInput(attrs={"placeholder": "e.g. HGS_C110"}),
     )
     auto_cage_id = forms.CharField(
         max_length=64,
         required=False,
         label="Optional new breeding cage ID",
-        help_text="Leave blank and MouseXGene will generate the cage ID automatically.",
+        help_text="Leave blank and MouseXGene will generate an ID such as CAGE-BR-260622-001.",
+        widget=forms.TextInput(attrs={"placeholder": "Optional: HGS_C110"}),
     )
     male = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
     female_1 = forms.ModelChoiceField(queryset=Mouse.objects.none(), required=False)
@@ -119,10 +121,10 @@ class BreedingForm(forms.ModelForm):
             "active",
         ]
         widgets = {
-            "start_date": forms.DateInput(attrs={"type": "date"}),
-            "plug_date": forms.DateInput(attrs={"type": "date"}),
-            "expected_birth_date": forms.DateInput(attrs={"type": "date"}),
-            "notes": forms.Textarea(attrs={"rows": 4}),
+            "start_date": forms.DateInput(attrs={"type": "date", "placeholder": "YYYY-MM-DD"}),
+            "plug_date": forms.DateInput(attrs={"type": "date", "placeholder": "YYYY-MM-DD"}),
+            "expected_birth_date": forms.DateInput(attrs={"type": "date", "placeholder": "YYYY-MM-DD"}),
+            "notes": forms.Textarea(attrs={"rows": 4, "placeholder": "Optional: paired for Lyz2-iCre line, check plug daily."}),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -133,7 +135,7 @@ class BreedingForm(forms.ModelForm):
         self.fields["breeding_code"].help_text = "Example: BR-2026-001 or Lyz2xTet2-01."
         self.fields["breeding_code"].required = False
         self.fields["breeding_code"].widget.attrs.update(
-            {"placeholder": "Optional; auto-generated if left blank."}
+            {"placeholder": "Optional: BR-20260622-001"}
         )
         self.fields["breeding_type"].choices = [
             (self.AUTO_BREEDING_TYPE, self.AUTO_BREEDING_TYPE_LABEL),
@@ -703,10 +705,54 @@ class LitterRecordForm(forms.ModelForm):
             "tail_tag_date",
             "notes",
         ]
+        labels = {
+            "litter_code": "Litter code (optional)",
+            "birth_date": "Birth date",
+            "total_born": "Total born (number of pups)",
+            "alive_count": "Alive pups",
+            "dead_count": "Dead pups",
+            "male_count": "Male pups",
+            "female_count": "Female pups",
+            "tail_tag_date": "Tail tag date (optional)",
+        }
+        help_texts = {
+            "litter_code": "Optional text ID for this litter. Leave blank if you do not use litter IDs. Do not enter the pup count here.",
+            "birth_date": "Date this litter was born or first found.",
+            "total_born": "Total number of pups born in this litter. Enter a number only.",
+            "alive_count": "Optional count alive at birth/check.",
+            "dead_count": "Optional count found dead at birth/check.",
+            "male_count": "Optional. Fill only if sex is already known.",
+            "female_count": "Optional. Fill only if sex is already known.",
+            "tail_tag_date": "Optional. Leave blank until tail tagging is actually done.",
+            "notes": "Optional short notes about this litter.",
+        }
         widgets = {
-            "birth_date": forms.DateInput(attrs={"type": "date"}),
+            "litter_code": forms.TextInput(
+                attrs={
+                    "placeholder": "Optional: L2026-06-001",
+                    "autocomplete": "off",
+                }
+            ),
+            "birth_date": forms.DateInput(
+                attrs={
+                    "type": "date",
+                    "aria-describedby": "id_birth_date_helptext",
+                }
+            ),
+            "total_born": forms.NumberInput(
+                attrs={
+                    "min": "0",
+                    "inputmode": "numeric",
+                    "placeholder": "e.g. 8",
+                    "aria-describedby": "id_total_born_helptext",
+                }
+            ),
+            "alive_count": forms.NumberInput(attrs={"min": "0", "inputmode": "numeric", "placeholder": "e.g. 8"}),
+            "dead_count": forms.NumberInput(attrs={"min": "0", "inputmode": "numeric", "placeholder": "e.g. 0"}),
+            "male_count": forms.NumberInput(attrs={"min": "0", "inputmode": "numeric", "placeholder": "optional"}),
+            "female_count": forms.NumberInput(attrs={"min": "0", "inputmode": "numeric", "placeholder": "optional"}),
             "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
-            "notes": forms.Textarea(attrs={"rows": 4}),
+            "notes": forms.Textarea(attrs={"rows": 4, "placeholder": "Optional: small litter, found late, etc."}),
         }
 
 
@@ -821,7 +867,7 @@ class WeanLitterForm(forms.Form):
         max_length=64,
         required=False,
         label="Optional new male cage ID",
-        help_text="Leave blank and MouseXGene will generate the male cage ID automatically.",
+        help_text="Leave blank and MouseXGene will generate an ID such as CAGE-WM-260622-001.",
     )
     male_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
@@ -845,7 +891,7 @@ class WeanLitterForm(forms.Form):
         max_length=64,
         required=False,
         label="Optional new female cage ID",
-        help_text="Leave blank and MouseXGene will generate the female cage ID automatically.",
+        help_text="Leave blank and MouseXGene will generate an ID such as CAGE-WF-260622-001.",
     )
     female_cage = forms.ModelChoiceField(
         queryset=Cage.objects.none(),
@@ -1359,11 +1405,30 @@ def _breeding_parent_mice(breeding: Breeding) -> tuple[Mouse | None, list[Mouse]
 
 
 class PupEntryForm(forms.Form):
-    mouse_uid = forms.CharField(max_length=64, label="Mouse UID")
+    mouse_uid = forms.CharField(
+        max_length=64,
+        label="Mouse UID",
+        error_messages={"required": "Enter a Mouse UID for this pup."},
+        widget=forms.TextInput(attrs={"placeholder": "e.g. H_M425"}),
+    )
     sex = forms.ChoiceField(choices=Mouse.Sex.choices, label="Sex")
-    ear_tag = forms.CharField(max_length=64, required=False, label="Ear Tag")
-    coat_color = forms.CharField(max_length=64, required=False, label="Coat Color")
-    notes = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 2}), label="Notes")
+    ear_tag = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Ear Tag",
+        widget=forms.TextInput(attrs={"placeholder": "Optional: 25"}),
+    )
+    coat_color = forms.CharField(
+        max_length=64,
+        required=False,
+        label="Coat Color",
+        widget=forms.TextInput(attrs={"placeholder": "Optional: black"}),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "Optional: small pup, recheck, etc."}),
+        label="Notes",
+    )
 
 
 class WeanPupEntryForm(PupEntryForm):

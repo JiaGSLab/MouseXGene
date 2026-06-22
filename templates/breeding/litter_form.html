@@ -12,6 +12,13 @@
     <form method="post" class="form-layout" onsubmit="return confirm('Save this litter record? The breeding will be marked as littered.');">
         {% csrf_token %}
 
+        {% include "includes/form_error_summary.html" %}
+
+        <div class="workflow-note">
+            <strong>Record birth only.</strong>
+            <span>Use this page for the litter birth record. Litter code is an optional text ID; Total born is the number of pups. Weaning and individual pup IDs are handled later from the litter detail page.</span>
+        </div>
+
         {% if form.non_field_errors %}
             <div class="form-errors">
                 {% for error in form.non_field_errors %}
@@ -24,6 +31,9 @@
             <div class="form-row">
                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                 {{ field }}
+                {% if field.help_text %}
+                    <p class="muted small-print" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>
+                {% endif %}
                 {% if field.errors %}
                     <div class="field-error">
                         {% for error in field.errors %}

@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Cage Genotyping | MouseXGene{% endblock %}
+
+{% block content %}
+<section class="page-header page-header-row">
+    <div>
+        <h1>Edit Genotyping Results: Cage {{ cage.cage_id }}</h1>
+        <p class="muted">
+            Enter actual genotyping calls for the current mice in this cage. One mouse keeps one ID;
+            this page only updates genotype results.
+        </p>
+    </div>
+    <div class="action-links">
+        <a class="button button-light" href="{% url 'colony:cage_detail' cage.pk %}">Back to Cage</a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="workflow-note">
+        <strong>Current cage mice only.</strong>
+        <span>Rows come from each mouse's strain-line or parent template. Leave a genotype blank if the real result is not available yet.</span>
+    </div>
+
+    <form method="post" class="form-layout">
+        {% csrf_token %}
+
+        {% for row in mouse_rows %}
+            <section class="card card-nested">
+                <div class="page-header-row">
+                    <div>
+                        <h2>
+                            <a class="link-primary" href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a>
+                        </h2>
+                        <p class="muted small-print">
+                            {{ row.mouse.get_sex_display }}
+                            · {% if row.mouse.strain_line %}{{ row.mouse.strain_line.label }}{% else %}No strain line{% endif %}
+                            · Template: {{ row.template_source_label }}
+                        </p>
+                        <p class="muted small-print">Current summary: {{ row.current_summary|default:"-" }}</p>
+                    </div>
+                </div>
+
+                {% if row.genotype_rows %}
+                    <div class="table-wrap">
+                        <table class="data-table data-table--compact">
+                            <thead>
+                                <tr>
+                                    <th>Locus</th>
+                                    <th>Chromosome</th>
+                                    <th>Genotype Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for gt in row.genotype_rows %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ gt.locus }}</strong>
+                                            {% if gt.locus_type %}
+                                                <div class="muted small-print">{{ gt.locus_type }}</div>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ gt.chromosome_type|default:"-" }}</td>
+                                        <td>
+                                            <div class="genotype-result-control">
+                                                <select
+                                                    class="filter-control"
+                                                    data-genotype-select
+                                                    data-mouse-sex="{{ row.mouse.sex }}"
+                                                    data-locus-type="{{ gt.locus_type|default:'other_custom' }}"
+                                                    data-chromosome-type="{{ gt.chromosome_type|default:'autosomal' }}"
+                                                ></select>
+                                                <input
+                                                    type="text"
+                                                    class="filter-control"
+                                                    data-genotype-custom
+                                                    placeholder="Custom genotype (e.g. Cre/+ or fl/fl)"
+                                                    autocomplete="off"
+                                                    hidden
+                                                >
+                                            </div>
+                                            <input
+                                                type="hidden"
+                                                name="mouse_{{ row.mouse.pk }}_genotype_display_{{ gt.index }}"
+                                                value="{{ gt.current_value }}"
+                                                data-genotype-hidden
+                                            >
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="muted">No expected genotype template rows for this mouse.</p>
+                {% endif %}
+            </section>
+        {% empty %}
+            <p class="muted">No current active mice in this cage.</p>
+        {% endfor %}
+
+        <div class="form-actions">
+            <button type="submit" class="button" {% if not mouse_rows %}disabled{% endif %}>Save Cage Genotyping</button>
+            <a class="button button-light" href="{% url 'colony:cage_detail' cage.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+<script>
+(() => {
+    const LEGACY_LOCUS_TYPE_MAP = {
+        standard_autosomal: "other_custom",
+        flox: "floxed_allele",
+        cre_transgene: "cre_ki",
+        reporter_ki: "reporter_knock_in",
+        tg_pos_neg: "transgene",
+        custom: "other_custom",
+        x_linked: "other_custom",
+    };
+    const option = (value, label) => ({ value, label });
+    const withEmpty = (values) => [option("", "(empty)"), ...values];
+    const CUSTOM_OPTION = option("Custom", "Custom");
+    function normalizeLocusType(value) {
+        const raw = String(value || "other_custom").trim() || "other_custom";
+        return LEGACY_LOCUS_TYPE_MAP[raw] || raw;
+    }
+    const AUTOSOMAL_OPTIONS = {
+        ko_null: withEmpty([option("+/+", "WT (+/+)"), option("+/-", "Het (+/-)"), option("-/-", "Homo null (-/-)"), CUSTOM_OPTION]),
+        floxed_allele: withEmpty([option("+/+", "WT (+/+)"), option("fl/+", "Het flox (fl/+)"), option("fl/fl", "Homo flox (fl/fl)"), CUSTOM_OPTION]),
+        knock_in: withEmpty([option("+/+", "WT (+/+)"), option("KI/+", "Het KI (KI/+)"), option("KI/KI", "Homo KI (KI/KI)"), CUSTOM_OPTION]),
+        cre_ki: withEmpty([option("+/+", "WT (+/+)"), option("Cre/+", "Cre KI het (Cre/+)"), option("Cre/Cre", "Cre KI homo (Cre/Cre)"), CUSTOM_OPTION]),
+        cre_ert2_ki: withEmpty([option("+/+", "WT (+/+)"), option("CreERT2/+", "CreERT2 het (CreERT2/+)"), option("CreERT2/CreERT2", "CreERT2 homo (CreERT2/CreERT2)"), CUSTOM_OPTION]),
+        transgene: withEmpty([option("neg", "Negative (neg)"), option("pos", "Positive (pos)"), CUSTOM_OPTION]),
+        reporter_knock_in: withEmpty([option("+/+", "WT (+/+)"), option("KI/+", "Reporter KI het (KI/+)"), option("KI/KI", "Reporter KI homo (KI/KI)"), CUSTOM_OPTION]),
+        reporter_transgene: withEmpty([option("neg", "Negative (neg)"), option("pos", "Positive (pos)"), CUSTOM_OPTION]),
+        point_variant: withEmpty([option("+/+", "WT (+/+)"), option("mut/+", "Het variant (mut/+)"), option("mut/mut", "Homo variant (mut/mut)"), CUSTOM_OPTION]),
+        other_custom: withEmpty([CUSTOM_OPTION]),
+    };
+    const X_LINKED_FEMALE_OPTIONS = AUTOSOMAL_OPTIONS;
+    const X_LINKED_MALE_OPTIONS = {
+        ko_null: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Null (-/Y)"), CUSTOM_OPTION]),
+        floxed_allele: withEmpty([option("+/Y", "WT (+/Y)"), option("fl/Y", "Floxed (fl/Y)"), CUSTOM_OPTION]),
+        knock_in: withEmpty([option("+/Y", "WT (+/Y)"), option("KI/Y", "KI (KI/Y)"), CUSTOM_OPTION]),
+        cre_ki: withEmpty([option("+/Y", "WT (+/Y)"), option("Cre/Y", "Cre KI (Cre/Y)"), CUSTOM_OPTION]),
+        cre_ert2_ki: withEmpty([option("+/Y", "WT (+/Y)"), option("CreERT2/Y", "CreERT2 (CreERT2/Y)"), CUSTOM_OPTION]),
+        transgene: AUTOSOMAL_OPTIONS.transgene,
+        reporter_knock_in: withEmpty([option("+/Y", "WT (+/Y)"), option("KI/Y", "Reporter KI (KI/Y)"), CUSTOM_OPTION]),
+        reporter_transgene: AUTOSOMAL_OPTIONS.reporter_transgene,
+        point_variant: withEmpty([option("+/Y", "WT (+/Y)"), option("mut/Y", "Variant (mut/Y)"), CUSTOM_OPTION]),
+        other_custom: withEmpty([CUSTOM_OPTION]),
+    };
+    const Y_LINKED_MALE_OPTIONS = {
+        ko_null: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Null (-/Y)"), CUSTOM_OPTION]),
+        transgene: AUTOSOMAL_OPTIONS.transgene,
+        reporter_transgene: AUTOSOMAL_OPTIONS.reporter_transgene,
+        other_custom: withEmpty([option("+/Y", "WT (+/Y)"), option("-/Y", "Variant (-/Y)"), CUSTOM_OPTION]),
+    };
+
+    function optionsFor(select) {
+        const locusType = normalizeLocusType(select.dataset.locusType);
+        const chromosomeType = select.dataset.chromosomeType || "autosomal";
+        const sex = select.dataset.mouseSex || "";
+        if (chromosomeType === "autosomal") {
+            return { options: AUTOSOMAL_OPTIONS[locusType] || AUTOSOMAL_OPTIONS.other_custom, disabled: false };
+        }
+        if (chromosomeType === "x_linked") {
+            if (sex === "M") {
+                return { options: X_LINKED_MALE_OPTIONS[locusType] || X_LINKED_MALE_OPTIONS.other_custom, disabled: false };
+            }
+            return { options: X_LINKED_FEMALE_OPTIONS[locusType] || X_LINKED_FEMALE_OPTIONS.other_custom, disabled: false };
+        }
+        if (sex === "F") {
+            return { options: [option("", "N/A")], disabled: true };
+        }
+        return { options: Y_LINKED_MALE_OPTIONS[locusType] || Y_LINKED_MALE_OPTIONS.other_custom, disabled: false };
+    }
+
+    document.querySelectorAll("[data-genotype-hidden]").forEach((hidden) => {
+        const cell = hidden.closest("td");
+        const select = cell?.querySelector("[data-genotype-select]");
+        const custom = cell?.querySelector("[data-genotype-custom]");
+        if (!select || !custom) return;
+        const optionPack = optionsFor(select);
+        select.innerHTML = "";
+        optionPack.options.forEach((optDef) => {
+            const opt = document.createElement("option");
+            opt.value = optDef.value;
+            opt.textContent = optDef.label || (optDef.value === "" ? "(empty)" : optDef.value);
+            select.appendChild(opt);
+        });
+        select.disabled = optionPack.disabled;
+
+        function optionExists(value) {
+            return Array.from(select.options).some((option) => option.value === value);
+        }
+
+        function setInitialValue() {
+            const current = String(hidden.value || "").trim();
+            if (optionPack.disabled) {
+                select.value = "";
+                custom.hidden = true;
+                custom.value = "";
+                hidden.value = "";
+                return;
+            }
+            if (!current || optionExists(current)) {
+                select.value = current;
+                custom.hidden = true;
+                custom.value = "";
+                return;
+            }
+            select.value = "Custom";
+            custom.hidden = false;
+            custom.value = current;
+        }
+
+        function syncHiddenValue() {
+            if (optionPack.disabled) {
+                custom.hidden = true;
+                custom.value = "";
+                hidden.value = "";
+                return;
+            }
+            if (select.value === "Custom") {
+                custom.hidden = false;
+                hidden.value = String(custom.value || "").trim();
+            } else {
+                custom.hidden = true;
+                custom.value = "";
+                hidden.value = select.value;
+            }
+        }
+
+        setInitialValue();
+        select.addEventListener("change", syncHiddenValue);
+        custom.addEventListener("input", syncHiddenValue);
+    });
+})();
+</script>
+{% endblock %}

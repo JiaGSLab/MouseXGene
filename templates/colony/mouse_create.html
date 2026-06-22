@@ -30,6 +30,8 @@
         {% csrf_token %}
         <input type="hidden" name="batch_row_count" id="id_batch_row_count" value="{{ batch_row_count }}">
 
+        {% include "includes/form_error_summary.html" %}
+
         {% if shared_form.non_field_errors %}
             <div class="form-errors">
                 {% for error in shared_form.non_field_errors %}
@@ -155,7 +157,7 @@
                         {% for form in entry_forms %}
                             <tr class="batch-mouse-row" data-row-index="{{ forloop.counter0 }}">
                                 <td>
-                                    <input type="text" name="batch_mouse_uid_{{ forloop.counter0 }}" id="id_batch_mouse_uid_{{ forloop.counter0 }}" value="{{ form.mouse_uid.value|default:'' }}" class="filter-control" maxlength="64" placeholder="Mouse UID">
+                                    <input type="text" name="batch_mouse_uid_{{ forloop.counter0 }}" id="id_batch_mouse_uid_{{ forloop.counter0 }}" value="{{ form.mouse_uid.value|default:'' }}" class="filter-control" maxlength="64" placeholder="e.g. H_M425">
                                     {% if form.mouse_uid.errors %}
                                         <div class="field-error">{% for error in form.mouse_uid.errors %}<div>{{ error }}</div>{% endfor %}</div>
                                     {% endif %}
@@ -168,10 +170,10 @@
                                     </select>
                                 </td>
                                 <td>
-                                    <input type="text" name="batch_ear_tag_{{ forloop.counter0 }}" id="id_batch_ear_tag_{{ forloop.counter0 }}" value="{{ form.ear_tag.value|default:'' }}" class="filter-control" maxlength="64">
+                                    <input type="text" name="batch_ear_tag_{{ forloop.counter0 }}" id="id_batch_ear_tag_{{ forloop.counter0 }}" value="{{ form.ear_tag.value|default:'' }}" class="filter-control" maxlength="64" placeholder="e.g. 25">
                                 </td>
                                 <td>
-                                    <input type="text" name="batch_toe_tag_{{ forloop.counter0 }}" id="id_batch_toe_tag_{{ forloop.counter0 }}" value="{{ form.toe_tag.value|default:'' }}" class="filter-control" maxlength="64">
+                                    <input type="text" name="batch_toe_tag_{{ forloop.counter0 }}" id="id_batch_toe_tag_{{ forloop.counter0 }}" value="{{ form.toe_tag.value|default:'' }}" class="filter-control" maxlength="64" placeholder="e.g. L3">
                                 </td>
                             </tr>
                         {% endfor %}
@@ -344,10 +346,10 @@
         tr.dataset.rowIndex = String(index);
         const sexOptions = sexChoices.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
         tr.innerHTML = `
-            <td><input type="text" name="batch_mouse_uid_${index}" id="id_batch_mouse_uid_${index}" class="filter-control" maxlength="64" placeholder="Mouse UID"></td>
+            <td><input type="text" name="batch_mouse_uid_${index}" id="id_batch_mouse_uid_${index}" class="filter-control" maxlength="64" placeholder="e.g. H_M425"></td>
             <td><select name="batch_sex_${index}" id="id_batch_sex_${index}" class="filter-control batch-sex-select">${sexOptions}</select></td>
-            <td><input type="text" name="batch_ear_tag_${index}" id="id_batch_ear_tag_${index}" class="filter-control" maxlength="64"></td>
-            <td><input type="text" name="batch_toe_tag_${index}" id="id_batch_toe_tag_${index}" class="filter-control" maxlength="64"></td>
+            <td><input type="text" name="batch_ear_tag_${index}" id="id_batch_ear_tag_${index}" class="filter-control" maxlength="64" placeholder="e.g. 25"></td>
+            <td><input type="text" name="batch_toe_tag_${index}" id="id_batch_toe_tag_${index}" class="filter-control" maxlength="64" placeholder="e.g. L3"></td>
         `;
         attachRowListeners(tr);
         return tr;

@@ -1,5 +1,6 @@
 from urllib.parse import parse_qs, urlsplit
 
+from django.contrib.messages import get_messages
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -58,6 +59,8 @@ class CageCreateReturnTests(TestCase):
         self.assertEqual(params["foo"], ["bar"])
         self.assertEqual(params["created_cage"], [str(created.pk)])
         self.assertEqual(params["select_field"], ["destination_cage_123"])
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertIn("Cage RETURN-CAGE-1 created.", messages)
 
     def test_unsafe_next_url_is_ignored(self):
         response = self.client.get(

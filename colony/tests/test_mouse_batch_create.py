@@ -63,6 +63,9 @@ class MouseBatchCreateTests(TestCase):
         response = self.client.post(reverse("mice:mouse_create"), payload)
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please fix the highlighted fields")
+        self.assertContains(response, "Nothing was saved yet.")
+        self.assertContains(response, "Or enter cage ID: Active mice must be assigned to a current cage.")
         self.assertContains(response, "Active mice must be assigned to a current cage.")
         self.assertFalse(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).exists())
 
@@ -142,3 +145,10 @@ class MouseBatchCreateTests(TestCase):
         self.assertIn('name="form_action" value="draft"', html)
         self.assertIn("window.confirm", html)
         self.assertIn("batch_mouse_uid_0", html)
+        self.assertIn('placeholder="e.g. H_M425"', html)
+        self.assertIn('placeholder="e.g. 25"', html)
+        self.assertIn('placeholder="e.g. L3"', html)
+        self.assertIn('placeholder="e.g. HGS_C110"', html)
+        self.assertIn('placeholder="Optional: weaned from BR-20260618-001"', html)
+        self.assertIn('placeholder="Optional: black / albino / agouti"', html)
+        self.assertIn('placeholder="e.g. H_M425 / ear tag 25"', html)

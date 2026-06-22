@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.contrib.messages import get_messages
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -347,6 +348,12 @@ class LitterWeanPageTests(TestCase):
         self.assertEqual(female_cage.cage_type, Cage.CageType.WEANING)
         self.assertEqual(male_cage.project_id, self.project.pk)
         self.assertEqual(female_cage.project_id, self.project.pk)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertIn(
+            "Weaned 2 pups into cage(s) AUTO-WEAN-F, AUTO-WEAN-M: M-WEAN-AUTO-M, M-WEAN-AUTO-F.",
+            messages,
+        )
+        self.assertIn("Created weaning cage(s): AUTO-WEAN-M, AUTO-WEAN-F.", messages)
 
     def test_wean_can_split_each_sex_across_multiple_auto_cages(self):
         response = self._wean_post(
@@ -538,6 +545,27 @@ class LitterWeanPageTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Mouse.objects.filter(mouse_uid="M-WEAN-BAD-SEX").exists())
+
+    def test_missing_pup_uid_is_shown_in_top_error_summary(self):
+        response = self._wean_post(
+            male_pup_count="1",
+            female_pup_count="0",
+            male_cage_lookup=self.male_cage.cage_id,
+            **{
+                "pups-0-mouse_uid": "",
+                "pups-0-sex": "M",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please fix the highlighted fields")
+        self.assertContains(response, "Nothing was saved yet.")
+        self.assertContains(response, "Pup 1 - Mouse UID: Enter a Mouse UID for this pup.")
+        self.assertContains(response, 'href="#id_pups-0-mouse_uid"')
+        self.assertFalse(Mouse.objects.filter(birth_date=self.litter.birth_date, mouse_uid="").exists())
 
     def test_genotype_loci_are_sire_dam_union_not_pup_strain_only(self):
         sire_strain = StrainLine.objects.create(

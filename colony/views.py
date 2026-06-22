@@ -18,6 +18,8 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from core.form_error_summary import form_error_summary, forms_error_summary
+
 from .forms import (
     ADMIN_CORRECTION_REASON_CHOICES,
     CageForm,
@@ -2221,6 +2223,50 @@ def _apply_mouse_genotype_rows_to_template(mouse: Mouse, rows: list[dict[str, st
     return updated
 
 
+def _genotyping_template_rows_for_mouse(mouse: Mouse) -> tuple[list[dict[str, str]], str]:
+    template_rows = _resolved_template_loci_entries_for_context(
+        strain_line=mouse.strain_line if mouse.strain_line_id else None,
+        sire=mouse.sire if mouse.sire_id else None,
+        dam=mouse.dam if mouse.dam_id else None,
+        source_breeding=mouse.source_breeding if mouse.source_breeding_id else None,
+        possible_dams=list(mouse.possible_dams.all()),
+    )
+    if mouse.source_breeding_id or mouse.possible_dams.exists() or (mouse.sire_id and mouse.dam_id):
+        source_label = "Parent union template"
+    elif mouse.strain_line_id:
+        source_label = "Strain-line template"
+    else:
+        source_label = "No template loci available"
+    return template_rows, source_label
+
+
+def _genotype_map_for_mouse(mouse: Mouse) -> dict[str, str]:
+    existing_genotype_map = {}
+    for component in mouse.genotype_components.all():
+        locus = StrainLine.normalize_locus_name((component.locus_name or "").strip())
+        if not locus:
+            continue
+        value = (component.zygosity or "").strip()
+        if value:
+            existing_genotype_map[locus] = value
+    return existing_genotype_map
+
+
+def _extract_cage_genotype_rows_from_post(request: HttpRequest, mouse: Mouse, template_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for idx, template in enumerate(template_rows):
+        locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
+        if not locus:
+            continue
+        rows.append(
+            {
+                "locus": locus,
+                "genotype": (request.POST.get(f"mouse_{mouse.pk}_genotype_display_{idx}") or "").strip(),
+            }
+        )
+    return rows
+
+
 def _genotype_components_signature(mouse: Mouse) -> list[tuple]:
     """Stable snapshot for change detection before/after edits."""
     components = (
@@ -2741,22 +2787,20 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
             "sire__strain_line",
             "dam",
             "dam__strain_line",
+            "source_breeding",
         ),
         pk=pk,
     )
     ensure_can_edit_project_data(request.user, mouse.project)
-    template_rows = _template_loci_union_for_mouse_relations(
-        sire=mouse.sire if mouse.sire_id else None,
-        dam=mouse.dam if mouse.dam_id else None,
-    )
-    used_parent_union = bool(template_rows)
-    if not template_rows and mouse.strain_line_id:
-        template_rows = mouse.strain_line.expected_loci_entries()
+    mouse = Mouse.objects.prefetch_related("possible_dams__strain_line", "genotype_components").get(pk=mouse.pk)
+    template_rows, template_source_label = _genotyping_template_rows_for_mouse(mouse)
     template_loci = [row.get("locus_name", "") for row in template_rows if (row.get("locus_name") or "").strip()]
     mouse.ensure_template_genotype_components(
         extra_loci=template_loci,
         include_strain_template=False,
     )
+    if hasattr(mouse, "_prefetched_objects_cache"):
+        mouse._prefetched_objects_cache.pop("genotype_components", None)
     before_signature = _genotype_components_signature(mouse)
     posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
@@ -2775,19 +2819,7 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
         messages.success(request, "Genotype components updated.")
         return redirect("mice:mouse_detail", pk=mouse.pk)
 
-    template_source_label = (
-        "Parent union template (sire + dam)"
-        if used_parent_union
-        else ("Strain-line template" if mouse.strain_line_id else "No template loci available")
-    )
-    existing_genotype_map = {}
-    for component in mouse.genotype_components.all():
-        locus = StrainLine.normalize_locus_name((component.locus_name or "").strip())
-        if not locus:
-            continue
-        value = (component.zygosity or "").strip()
-        if value:
-            existing_genotype_map[locus] = value
+    existing_genotype_map = _genotype_map_for_mouse(mouse)
     return render(
         request,
         "colony/mouse_genotype_components_form.html",
@@ -3391,9 +3423,10 @@ def cage_create(request: HttpRequest) -> HttpResponse:
             cage = form.save()
             breeding = sync_cage_breeding_workflow(cage)
             sync_cage_status_from_mice(cage)
+            messages.success(request, f"Cage {cage.cage_id} created.")
             if cage.purpose == Cage.Purpose.BREEDING:
                 if breeding:
-                    messages.success(
+                    messages.info(
                         request,
                         f"Breeding {breeding.breeding_code} created for cage {cage.cage_id}.",
                     )
@@ -3420,6 +3453,7 @@ def cage_create(request: HttpRequest) -> HttpResponse:
         "cancel_url": "colony:cage_list",
         "next_url": next_url,
         "select_field": select_field,
+        "error_summary": form_error_summary(form),
     }
     return render(request, "colony/cage_form.html", context)
 
@@ -3484,6 +3518,7 @@ def cage_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "submit_label": "Save Changes",
         "cancel_url": "colony:cage_detail",
         "cancel_kwargs": {"pk": cage.pk},
+        "error_summary": form_error_summary(form),
         **_admin_correction_template_context(request, form),
     }
     return render(request, "colony/cage_form.html", context)
@@ -3827,6 +3862,115 @@ def cage_import_template_xlsx(request: HttpRequest) -> HttpResponse:
 
 
 @authenticated_required
+def cage_genotyping_edit(request: HttpRequest, pk: int) -> HttpResponse:
+    cage = get_object_or_404(
+        _scoped_cage_queryset(request.user).select_related("project"),
+        pk=pk,
+    )
+    current_mice = list(
+        _scoped_mouse_queryset(request.user)
+        .filter(current_cage=cage, status=Mouse.Status.ACTIVE)
+        .select_related(
+            "project",
+            "project__owner",
+            "project__owner__profile",
+            "strain_line",
+            "sire",
+            "sire__strain_line",
+            "dam",
+            "dam__strain_line",
+            "source_breeding",
+        )
+        .prefetch_related("possible_dams__strain_line")
+        .order_by("mouse_uid")
+    )
+    for mouse in current_mice:
+        ensure_can_edit_project_data(request.user, mouse.project)
+
+    mouse_rows: list[dict] = []
+    for mouse in current_mice:
+        template_rows, template_source_label = _genotyping_template_rows_for_mouse(mouse)
+        template_loci = [
+            row.get("locus_name", "")
+            for row in template_rows
+            if (row.get("locus_name") or "").strip()
+        ]
+        if template_loci:
+            mouse.ensure_template_genotype_components(
+                extra_loci=template_loci,
+                include_strain_template=False,
+            )
+            if hasattr(mouse, "_prefetched_objects_cache"):
+                mouse._prefetched_objects_cache.pop("genotype_components", None)
+        existing_genotype_map = _genotype_map_for_mouse(mouse)
+        genotype_rows = []
+        for idx, template in enumerate(template_rows):
+            locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
+            if not locus:
+                continue
+            genotype_rows.append(
+                {
+                    "index": idx,
+                    "locus": locus,
+                    "locus_type": template.get("locus_type") or "",
+                    "chromosome_type": template.get("chromosome_type") or "",
+                    "current_value": existing_genotype_map.get(locus, ""),
+                }
+            )
+        mouse_rows.append(
+            {
+                "mouse": mouse,
+                "template_rows": template_rows,
+                "genotype_rows": genotype_rows,
+                "template_source_label": template_source_label,
+                "current_summary": display_genotype_summary(mouse),
+            }
+        )
+
+    if request.method == "POST":
+        changed_uids: list[str] = []
+        with transaction.atomic():
+            for row in mouse_rows:
+                mouse = row["mouse"]
+                template_rows = row["template_rows"]
+                if not template_rows:
+                    continue
+                before_signature = _genotype_components_signature(mouse)
+                posted_rows = _extract_cage_genotype_rows_from_post(request, mouse, template_rows)
+                _apply_mouse_genotype_rows_to_template(mouse, posted_rows, template_rows)
+                mouse.refresh_from_db()
+                after_signature = _genotype_components_signature(mouse)
+                if after_signature != before_signature:
+                    changed_uids.append(mouse.mouse_uid)
+                    _log_specific_genotype_changes(
+                        user=request.user,
+                        mouse=mouse,
+                        before_signature=before_signature,
+                        after_signature=after_signature,
+                        source_label=f"Cage Genotyping {cage.cage_id}",
+                    )
+        if changed_uids:
+            preview = ", ".join(changed_uids[:8])
+            suffix = f" ... (+{len(changed_uids) - 8} more)" if len(changed_uids) > 8 else ""
+            messages.success(
+                request,
+                f"Updated genotyping for {len(changed_uids)} mouse(s) in cage {cage.cage_id}: {preview}{suffix}.",
+            )
+        else:
+            messages.info(request, f"No genotype changes to save for cage {cage.cage_id}.")
+        return redirect("colony:cage_detail", pk=cage.pk)
+
+    return render(
+        request,
+        "colony/cage_genotyping_form.html",
+        {
+            "cage": cage,
+            "mouse_rows": mouse_rows,
+        },
+    )
+
+
+@authenticated_required
 def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
     cage = get_object_or_404(
         _scoped_cage_queryset(request.user).select_related(
@@ -3896,6 +4040,10 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         _can_restore_cage(request.user, cage)
         and cage.status not in {Cage.Status.ACTIVE, Cage.Status.ARCHIVED}
     )
+    can_edit_cage_genotyping = bool(current_mice) and all(
+        can_edit_project_data(request.user, mouse.project)
+        for mouse in current_mice
+    )
     audit_entries = audit_entries_for_object("Cage", cage.pk)
     actors = merge_actor_labels(cage, audit_entries)
     context = {
@@ -3911,6 +4059,7 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "can_retire_cage": can_retire_cage,
         "cage_retire_block_reason": cage_retire_block_reason,
         "can_restore_cage": can_restore_cage,
+        "can_edit_cage_genotyping": can_edit_cage_genotyping,
         "audit_entries": audit_entries,
         **actors,
     }
@@ -4666,7 +4815,9 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                     _clear_mouse_create_draft(request)
                     uids = ", ".join(mouse.mouse_uid for mouse in created[:5])
                     suffix = "…" if len(created) > 5 else ""
-                    messages.success(request, f"Created {len(created)} mouse(s): {uids}{suffix}.")
+                    cage = shared_form.cleaned_data.get("current_cage")
+                    cage_suffix = f" Cage: {cage.cage_id}." if cage is not None else ""
+                    messages.success(request, f"Created {len(created)} mouse(s): {uids}{suffix}.{cage_suffix}")
                     if len(created) == 1:
                         return redirect("mice:mouse_detail", pk=created[0].pk)
                     return redirect("mice:mouse_list")
@@ -4707,6 +4858,7 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
         "posted_genotype_rows": posted_genotype_rows,
         "has_saved_draft": bool(draft),
         "max_batch_rows": MOUSE_BATCH_MAX_ROWS,
+        "error_summary": form_error_summary(shared_form) + forms_error_summary(entry_forms, prefix="Mouse row"),
         **cage_filter_form_context(),
     }
     return render(request, "colony/mouse_create.html", context)

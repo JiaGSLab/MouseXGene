@@ -17,6 +17,8 @@
     <form method="post" class="form-layout" id="breeding-form">
         {% csrf_token %}
 
+        {% include "includes/form_error_summary.html" %}
+
         {% if form.non_field_errors %}
             <div class="form-errors">
                 {% for error in form.non_field_errors %}
@@ -55,7 +57,7 @@
                 </div>
                 <div class="form-row">
                     <label for="id_mouse_uid_filter">Search mouse UID</label>
-                    <input type="search" id="id_mouse_uid_filter" class="filter-control" placeholder="Partial UID / ear tag / toe tag" autocomplete="off">
+                    <input type="search" id="id_mouse_uid_filter" class="filter-control" placeholder="e.g. H_M425 / ear tag 25" autocomplete="off">
                 </div>
             </div>
             <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">

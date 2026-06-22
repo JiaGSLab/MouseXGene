@@ -93,6 +93,8 @@
     <form method="post" class="form-layout" id="wean-litter-form">
         {% csrf_token %}
 
+        {% include "includes/form_error_summary.html" %}
+
         {% if wean_form.non_field_errors %}
             <div class="form-errors">
                 {% for error in wean_form.non_field_errors %}
@@ -732,6 +734,15 @@
         if (field === "mouse_uid" || field === "ear_tag" || field === "coat_color") {
             input.maxLength = 64;
         }
+        const placeholders = {
+            mouse_uid: "e.g. H_M425",
+            ear_tag: "Optional: 25",
+            coat_color: "Optional: black",
+            notes: "Optional: small pup, recheck, etc.",
+        };
+        if (placeholders[field]) {
+            input.placeholder = placeholders[field];
+        }
         row.appendChild(fieldLabel);
         row.appendChild(input);
         card.appendChild(row);
@@ -828,6 +839,7 @@
         textarea.name = `pups-${index}-notes`;
         textarea.id = `id_pups-${index}-notes`;
         textarea.rows = 2;
+        textarea.placeholder = "Optional: small pup, recheck, etc.";
         textarea.value = value || "";
         row.appendChild(fieldLabel);
         row.appendChild(textarea);

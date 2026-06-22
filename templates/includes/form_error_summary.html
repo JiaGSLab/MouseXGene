@@ -1,0 +1,17 @@
+{% if error_summary %}
+    <section class="form-error-summary" role="alert" aria-labelledby="form-error-summary-title">
+        <h2 id="form-error-summary-title">Please fix the highlighted fields</h2>
+        <p>Nothing was saved yet. Review these items, then submit again.</p>
+        <ul>
+            {% for item in error_summary %}
+                <li>
+                    {% if item.target %}
+                        <a href="#{{ item.target }}">{{ item.label }}: {{ item.message }}</a>
+                    {% else %}
+                        {{ item.label }}: {{ item.message }}
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </section>
+{% endif %}

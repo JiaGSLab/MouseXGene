@@ -1,6 +1,9 @@
+from datetime import date
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from breeding.cage_autocreate import generate_auto_cage_id
 from breeding.forms import BreedingForm, resolve_cage_from_lookup
 from breeding.models import Breeding
 from colony.models import Cage, Mouse, StrainLine
@@ -32,6 +35,12 @@ class BreedingCageLookupTests(TestCase):
         cage, err = resolve_cage_from_lookup("DOES-NOT-EXIST")
         self.assertIsNone(cage)
         self.assertIn("Create the cage first", err or "")
+
+    def test_auto_cage_id_uses_short_date_and_sequence(self):
+        self.assertEqual(generate_auto_cage_id("CAGE-BR", when=date(2026, 6, 22)), "CAGE-BR-260622-001")
+        Cage.objects.create(cage_id="CAGE-BR-260622-001")
+
+        self.assertEqual(generate_auto_cage_id("CAGE-BR", when=date(2026, 6, 22)), "CAGE-BR-260622-002")
 
     def test_form_rejects_unknown_lookup(self):
         user = get_user_model().objects.create_user(username="cage_lookup_user", password="x")

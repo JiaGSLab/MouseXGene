@@ -47,6 +47,7 @@ from .models import Breeding, BreedingExtraFemale, BreedingMember, Litter, Litte
 from .analytics import breeding_litter_timing_alert, mendelian_single_locus_review_for_breeding
 from core.audit import log_audit_event
 from core.exporting import csv_response, xlsx_response
+from core.form_error_summary import form_error_summary, forms_error_summary, formset_error_summary
 from core.list_sort import BREEDING_LIST_SORT, LITTER_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels
 from core.models import AuditLog, Project, ProjectMembership, format_project_owner_label
@@ -680,6 +681,7 @@ def _litter_wean_page_context(
         "litter": litter,
         "wean_form": wean_form,
         "pup_forms": pup_forms,
+        "error_summary": form_error_summary(wean_form) + forms_error_summary(pup_forms, prefix="Pup"),
         "pup_max_count": _litter_wean_max_pup_count(litter),
         "offspring_template_loci": offspring_template_loci,
         "breeding_sire": breeding_sire,
@@ -1089,6 +1091,8 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                     obj=breeding,
                     message=f"Created breeding {breeding.breeding_code}.",
                 )
+                cage_label = breeding.cage.cage_id if breeding.cage_id else "No cage"
+                messages.success(request, f"Breeding {breeding.breeding_code} created. Cage: {cage_label}.")
                 return redirect("breeding:breeding_detail", pk=breeding.pk)
         except PermissionDenied:
             raise
@@ -1108,6 +1112,7 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
         "submit_label": "Save Breeding",
         "cancel_url": "breeding:breeding_list",
         "breeder_mouse_choices": [],
+        "error_summary": form_error_summary(form),
         **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
@@ -1172,6 +1177,7 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "cancel_url": "breeding:breeding_detail",
         "cancel_kwargs": {"pk": breeding.pk},
         "breeder_mouse_choices": [],
+        "error_summary": form_error_summary(form),
         **_breeding_form_cage_context(),
     }
     return render(request, "breeding/breeding_form.html", context)
@@ -1911,7 +1917,7 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
                 obj=litter,
                 message=f"Recorded litter {litter.litter_code or litter.pk} for breeding {breeding.breeding_code}.",
             )
-            messages.success(request, f"Litter {litter.litter_code or litter.pk} created.")
+            messages.success(request, f"Litter {litter.litter_code or litter.pk} created for {breeding.breeding_code}.")
             return redirect("litters:litter_detail", pk=litter.pk)
     else:
         form = LitterRecordForm()
@@ -1920,6 +1926,7 @@ def litter_create(request: HttpRequest, breeding_pk: int) -> HttpResponse:
         "form": form,
         "breeding": breeding,
         "page_title": f"Record Litter for {breeding.breeding_code}",
+        "error_summary": form_error_summary(form),
     }
     return render(request, "breeding/litter_form.html", context)
 
@@ -2037,6 +2044,7 @@ def litter_edit(request: HttpRequest, pk: int) -> HttpResponse:
         "form": form,
         "formset": formset,
         "page_title": f"Manage litter {litter.litter_id_display}",
+        "error_summary": form_error_summary(form) + formset_error_summary(formset, prefix="Pup row"),
     }
     return render(request, "breeding/litter_edit.html", context)
 
@@ -2447,10 +2455,11 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         litter.litter_status = Litter.LitterStatus.WEANED
                         litter.save(update_fields=["breeding", "wean_date", "litter_status"])
 
+                    weaned_cage_codes = ", ".join(sorted({cage.cage_id for _mouse, cage in weaned_entries}))
                     messages.success(
                         request,
-                        f"Weaned {len(created_uids)} pups: {', '.join(created_uids)}.",
-                        )
+                        f"Weaned {len(created_uids)} pups into cage(s) {weaned_cage_codes}: {', '.join(created_uids)}.",
+                    )
                     if created_auto_cages:
                         cage_codes = ", ".join(cage.cage_id for cage in created_auto_cages)
                         messages.info(request, f"Created weaning cage(s): {cage_codes}.")
