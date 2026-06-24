@@ -2315,10 +2315,15 @@ body.col-resize-active * {
 }
 
 .pedigree-flow__parents,
-.pedigree-flow__related-grid {
+.pedigree-flow__related-grid,
+.pedigree-flow__focal-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+}
+
+.pedigree-flow__focal-grid {
+    align-items: stretch;
 }
 
 .pedigree-flow__panel {
@@ -2440,6 +2445,18 @@ body.col-resize-active * {
     grid-column: 1 / -1;
 }
 
+.pedigree-flow__panel--same-litter {
+    background: #f8fbfe;
+}
+
+.pedigree-flow__stage--offspring {
+    background: #fff;
+}
+
+.pedigree-flow__panel--offspring {
+    background: #fbfdff;
+}
+
 .pedigree-flow__connector {
     display: flex;
     justify-content: center;
@@ -2467,12 +2484,29 @@ body.col-resize-active * {
     background: transparent;
 }
 
+.pedigree-flow__connector--offspring {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    justify-content: normal;
+}
+
+.pedigree-flow__connector--offspring span {
+    justify-self: center;
+}
+
 @media (max-width: 800px) {
     .pedigree-flow__facts,
     .pedigree-flow__parents,
     .pedigree-flow__related-grid,
+    .pedigree-flow__focal-grid,
     .pedigree-flow__focal {
         grid-template-columns: 1fr;
+    }
+
+    .pedigree-flow__connector--offspring {
+        display: flex;
+        justify-content: center;
     }
 
     .pedigree-flow__stage {
