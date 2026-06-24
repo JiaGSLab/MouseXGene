@@ -804,6 +804,7 @@ def resolve_wean_strain_line(
     *,
     mode: str,
     new_line_name: str,
+    existing_strain_line: StrainLine | None = None,
     sire: Mouse | None,
     dam: Mouse | None,
     possible_dams: list[Mouse] | None = None,
@@ -823,11 +824,19 @@ def resolve_wean_strain_line(
         if not dam or not dam.strain_line_id:
             return None, "Dam has no strain line assigned."
         return dam.strain_line, None
+    if mode == WeanLitterForm.StrainAssignmentMode.EXISTING:
+        if existing_strain_line is None:
+            return None, "Select an existing strain line."
+        if not existing_strain_line.is_active:
+            return None, f'Strain line "{existing_strain_line.line_name}" is archived. Choose an active strain line.'
+        if project is not None:
+            existing_strain_line.projects.add(project)
+        return existing_strain_line, None
     name = (new_line_name or "").strip()
     if not name:
         return None, "Please enter a strain line name."
     if StrainLine.objects.filter(line_name__iexact=name).exists():
-        return None, f'Strain line "{name}" already exists. Choose another name or follow sire/dam.'
+        return None, f'Strain line "{name}" already exists. Use existing strain line, choose another name, or follow sire/dam.'
     loci = [locus for locus in (template_loci or []) if (locus or "").strip()]
     line = StrainLine.objects.create(
         line_name=name,
@@ -2290,6 +2299,7 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     ensure_can_edit_project_data(request.user, inherited_project)
                     pup_strain_line, strain_err = resolve_wean_strain_line(
                         mode=wean_form.cleaned_data["strain_assignment_mode"],
+                        existing_strain_line=wean_form.cleaned_data.get("existing_strain_line"),
                         new_line_name=wean_form.cleaned_data.get("new_strain_line_name", ""),
                         sire=selected_wean_sire,
                         dam=dam_for_mouse,
@@ -2301,7 +2311,16 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                         project=inherited_project,
                     )
                     if strain_err:
-                        wean_form.add_error("strain_assignment_mode", strain_err)
+                        strain_error_field = (
+                            "existing_strain_line"
+                            if wean_form.cleaned_data["strain_assignment_mode"]
+                            == WeanLitterForm.StrainAssignmentMode.EXISTING
+                            else "new_strain_line_name"
+                            if wean_form.cleaned_data["strain_assignment_mode"]
+                            == WeanLitterForm.StrainAssignmentMode.NEW
+                            else "strain_assignment_mode"
+                        )
+                        wean_form.add_error(strain_error_field, strain_err)
                 if not wean_form.errors:
                     created_uids: list[str] = []
                     created_auto_cages: list[Cage] = []

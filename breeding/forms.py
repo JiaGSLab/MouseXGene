@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from colony.cage_form_helpers import editable_active_cage_queryset
 from colony.cage_lifecycle import validate_active_sex_compatible_with_cage
-from colony.models import Cage, CageMembership, Mouse
+from colony.models import Cage, CageMembership, Mouse, StrainLine
 from core.models import format_project_owner_label
 from .cage_autocreate import (
     create_auto_cage,
@@ -827,6 +827,7 @@ class WeanLitterForm(forms.Form):
     class StrainAssignmentMode:
         SIRE = "sire"
         DAM = "dam"
+        EXISTING = "existing"
         NEW = "new"
 
     parentage_mode = forms.ChoiceField(
@@ -927,15 +928,22 @@ class WeanLitterForm(forms.Form):
         choices=(
             (StrainAssignmentMode.SIRE, "Follow sire strain line"),
             (StrainAssignmentMode.DAM, "Follow dam strain line"),
+            (StrainAssignmentMode.EXISTING, "Use existing strain line"),
             (StrainAssignmentMode.NEW, "Create a new strain line"),
         ),
         initial=StrainAssignmentMode.DAM,
+    )
+    existing_strain_line = forms.ModelChoiceField(
+        queryset=StrainLine.objects.none(),
+        required=False,
+        label="Existing Strain Line",
+        help_text="Use this when pups should belong to an existing hybrid or compound strain line.",
     )
     new_strain_line_name = forms.CharField(
         max_length=128,
         required=False,
         label="New Strain Line Name",
-        help_text="Required when 'Create a new strain line' is selected. Must be unique.",
+        help_text="Only use this for a truly new strain line. Must be unique.",
     )
 
     def __init__(
@@ -1006,8 +1014,10 @@ class WeanLitterForm(forms.Form):
         self.fields["strain_assignment_mode"].choices = (
             (self.StrainAssignmentMode.SIRE, f"Follow sire strain line ({sire_strain_label})"),
             (self.StrainAssignmentMode.DAM, f"Follow dam strain line ({dam_strain_label})"),
+            (self.StrainAssignmentMode.EXISTING, "Use existing strain line"),
             (self.StrainAssignmentMode.NEW, "Create a new strain line"),
         )
+        self.fields["existing_strain_line"].queryset = StrainLine.objects.filter(is_active=True).order_by("line_name")
 
     @staticmethod
     def _parent_breeding_label(breeding: Breeding) -> str:
@@ -1269,7 +1279,10 @@ class WeanLitterForm(forms.Form):
             self.add_error("new_project_name", "Please enter a project name.")
 
         strain_mode = cleaned_data.get("strain_assignment_mode")
+        existing_strain_line = cleaned_data.get("existing_strain_line")
         new_strain_line_name = (cleaned_data.get("new_strain_line_name") or "").strip()
+        if strain_mode == self.StrainAssignmentMode.EXISTING and existing_strain_line is None:
+            self.add_error("existing_strain_line", "Select an existing strain line.")
         if strain_mode == self.StrainAssignmentMode.NEW and not new_strain_line_name:
             self.add_error("new_strain_line_name", "Please enter a strain line name.")
 

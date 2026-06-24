@@ -7,8 +7,7 @@
     <div>
         <h1>Pedigree: {{ mouse.mouse_uid }}</h1>
         <p class="muted">
-            Focal mouse: {{ mouse.get_sex_display }} · {{ mouse.birth_date|default:"-" }} ·
-            Cage: {{ mouse.current_cage|default:"-" }} · Genotype: {{ focal_summary }}
+            {{ mouse.get_sex_display }} · Born {{ mouse.birth_date|default:"-" }} · Genotype: {{ focal_summary }}
         </p>
     </div>
     <div class="action-links">
@@ -16,112 +15,229 @@
     </div>
 </section>
 
-<section class="pedigree-tree" aria-label="Pedigree tree">
-    {% if family_breeding_cage %}
-        <p class="muted">Breeding cage origin: <strong>{{ family_breeding_cage.cage_id }}</strong></p>
-    {% endif %}
-    {% if family_pedigree.source_breeding %}
-        <p class="muted">
-            Source breeding:
-            <a class="table-link" href="{% url 'breeding:breeding_detail' family_pedigree.source_breeding.pk %}">
-                {{ family_pedigree.source_breeding.breeding_code }}
-            </a>
-        </p>
-    {% endif %}
-    <div class="pedigree-tree__parents">
-        <article class="pedigree-tree__node card">
-            <h2 class="pedigree-tree__node-title">Father (Sire)</h2>
+<section class="pedigree-flow" aria-label="Pedigree flow">
+    <div class="pedigree-flow__facts" aria-label="Pedigree summary">
+        <div class="pedigree-flow__fact">
+            <span class="pedigree-flow__fact-label">Current cage</span>
+            <strong>
+                {% if mouse.current_cage %}
+                    <a class="table-link" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+        <div class="pedigree-flow__fact">
+            <span class="pedigree-flow__fact-label">Source breeding</span>
+            <strong>
+                {% if family_pedigree.source_breeding %}
+                    <a class="table-link" href="{% url 'breeding:breeding_detail' family_pedigree.source_breeding.pk %}">
+                        {{ family_pedigree.source_breeding.breeding_code }}
+                    </a>
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+        <div class="pedigree-flow__fact">
+            <span class="pedigree-flow__fact-label">Breeding cage origin</span>
+            <strong>
+                {% if family_breeding_cage %}
+                    <a class="table-link" href="{% url 'colony:cage_detail' family_breeding_cage.pk %}">{{ family_breeding_cage.cage_id }}</a>
+                {% else %}
+                    -
+                {% endif %}
+            </strong>
+        </div>
+    </div>
+
+    <div class="pedigree-flow__stage">
+        <div class="pedigree-flow__stage-heading">
+            <span class="pedigree-flow__step">1</span>
+            <div>
+                <h2>Parents / Breeding Origin</h2>
+                <p class="muted">Start here: sire and known or possible dam(s) that produced this mouse.</p>
+            </div>
+        </div>
+        <div class="pedigree-flow__parents">
+            <article class="pedigree-flow__parent pedigree-flow__panel">
+                <div class="pedigree-flow__panel-header">
+                    <span class="badge badge-blue">Sire</span>
+                    <h3>Father</h3>
+                </div>
             {% if sire %}
-                <p class="pedigree-tree__line">
+                <p class="pedigree-flow__mouse-name">
                     <a class="table-link" href="{% url 'mice:mouse_detail' sire.mouse.pk %}">{{ sire.mouse.mouse_uid }}</a>
-                    · {{ sire.mouse.get_sex_display }} · {{ sire.mouse.birth_date|default:"-" }}
-                    · Cage: {{ sire.mouse.current_cage|default:"-" }}
                 </p>
-                <p class="muted pedigree-tree__meta">Genotype: {{ sire.genotype_summary }}</p>
+                <p class="pedigree-flow__mouse-meta">
+                    {{ sire.mouse.get_sex_display }} · Born {{ sire.mouse.birth_date|default:"-" }}
+                </p>
+                <p class="pedigree-flow__mouse-meta">
+                    Cage:
+                    {% if sire.mouse.current_cage %}
+                        <a class="table-link" href="{% url 'colony:cage_detail' sire.mouse.current_cage.pk %}">{{ sire.mouse.current_cage.cage_id }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </p>
+                <p class="muted pedigree-flow__genotype">Genotype: {{ sire.genotype_summary }}</p>
             {% else %}
                 <p class="muted">No sire recorded.</p>
             {% endif %}
-        </article>
-        <article class="pedigree-tree__node card">
-            <h2 class="pedigree-tree__node-title">
-                {% if family_pedigree.source_breeding %}Mothers (breeding cage){% else %}Mother (Dam){% endif %}
-            </h2>
+            </article>
+
+            <article class="pedigree-flow__parent pedigree-flow__panel">
+                <div class="pedigree-flow__panel-header">
+                    <span class="badge badge-green">{% if family_pedigree.source_breeding %}Possible dam{% else %}Dam{% endif %}</span>
+                    <h3>{% if family_pedigree.source_breeding %}Mother(s) from breeding cage{% else %}Mother{% endif %}</h3>
+                </div>
             {% if dams %}
-                <ul class="pedigree-tree__list">
+                <ul class="pedigree-flow__relation-list">
                     {% for rel in dams %}
-                        <li class="pedigree-tree__list-item">
-                            <span>
+                        <li>
+                            <p class="pedigree-flow__mouse-name">
                                 <a class="table-link" href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
-                                · {{ rel.mouse.get_sex_display }} · {{ rel.mouse.birth_date|default:"-" }}
-                                · Cage: {{ rel.mouse.current_cage|default:"-" }}
-                                · Genotype: {{ rel.genotype_summary }}
-                            </span>
+                            </p>
+                            <p class="pedigree-flow__mouse-meta">
+                                {{ rel.mouse.get_sex_display }} · Born {{ rel.mouse.birth_date|default:"-" }}
+                            </p>
+                            <p class="pedigree-flow__mouse-meta">
+                                Cage:
+                                {% if rel.mouse.current_cage %}
+                                    <a class="table-link" href="{% url 'colony:cage_detail' rel.mouse.current_cage.pk %}">{{ rel.mouse.current_cage.cage_id }}</a>
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </p>
+                            <p class="muted pedigree-flow__genotype">Genotype: {{ rel.genotype_summary }}</p>
                         </li>
                     {% endfor %}
                 </ul>
             {% elif dam %}
-                <p class="pedigree-tree__line">
+                <p class="pedigree-flow__mouse-name">
                     <a class="table-link" href="{% url 'mice:mouse_detail' dam.mouse.pk %}">{{ dam.mouse.mouse_uid }}</a>
-                    · {{ dam.mouse.get_sex_display }} · {{ dam.mouse.birth_date|default:"-" }}
-                    · Cage: {{ dam.mouse.current_cage|default:"-" }}
                 </p>
-                <p class="muted pedigree-tree__meta">Genotype: {{ dam.genotype_summary }}</p>
+                <p class="pedigree-flow__mouse-meta">
+                    {{ dam.mouse.get_sex_display }} · Born {{ dam.mouse.birth_date|default:"-" }}
+                </p>
+                <p class="pedigree-flow__mouse-meta">
+                    Cage:
+                    {% if dam.mouse.current_cage %}
+                        <a class="table-link" href="{% url 'colony:cage_detail' dam.mouse.current_cage.pk %}">{{ dam.mouse.current_cage.cage_id }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </p>
+                <p class="muted pedigree-flow__genotype">Genotype: {{ dam.genotype_summary }}</p>
             {% else %}
                 <p class="muted">No dam recorded.</p>
             {% endif %}
+            </article>
+        </div>
+    </div>
+
+    <div class="pedigree-flow__connector" aria-hidden="true">
+        <span></span>
+    </div>
+
+    <div class="pedigree-flow__stage pedigree-flow__stage--focal">
+        <div class="pedigree-flow__stage-heading">
+            <span class="pedigree-flow__step">2</span>
+            <div>
+                <h2>Focal Mouse</h2>
+                <p class="muted">This is the mouse whose pedigree you opened.</p>
+            </div>
+        </div>
+        <article class="pedigree-flow__focal">
+            <div>
+                <span class="badge badge-yellow">Current mouse</span>
+                <h3>{{ mouse.mouse_uid }}</h3>
+            </div>
+            <div class="pedigree-flow__focal-meta">
+                <span>{{ mouse.get_sex_display }}</span>
+                <span>Born {{ mouse.birth_date|default:"-" }}</span>
+                <span>
+                    Cage:
+                    {% if mouse.current_cage %}
+                        <a class="table-link" href="{% url 'colony:cage_detail' mouse.current_cage.pk %}">{{ mouse.current_cage.cage_id }}</a>
+                    {% else %}
+                        -
+                    {% endif %}
+                </span>
+            </div>
+            <p class="muted pedigree-flow__genotype">Genotype: {{ focal_summary }}</p>
         </article>
     </div>
 
-    <div class="pedigree-tree__stem" aria-hidden="true"></div>
+    <div class="pedigree-flow__connector" aria-hidden="true">
+        <span></span>
+    </div>
 
-    <article class="pedigree-tree__focal card">
-        <h2 class="pedigree-tree__focal-title">Focal animal</h2>
-        <p class="pedigree-tree__line">
-            <strong>{{ mouse.mouse_uid }}</strong>
-            · {{ mouse.get_sex_display }} · {{ mouse.birth_date|default:"-" }}
-            · Cage: {{ mouse.current_cage|default:"-" }}
-        </p>
-        <p class="muted pedigree-tree__meta">Genotype: {{ focal_summary }}</p>
-    </article>
-
-    <div class="pedigree-tree__branches">
-        <section class="pedigree-tree__branch card">
-            <h2 class="pedigree-tree__branch-title">Littermates</h2>
-            <ul class="pedigree-tree__list">
-                {% for rel in littermates %}
-                    <li class="pedigree-tree__list-item">
-                        <span class="pedigree-tree__twig" aria-hidden="true"></span>
-                        <span>
+    <div class="pedigree-flow__stage">
+        <div class="pedigree-flow__stage-heading">
+            <span class="pedigree-flow__step">3</span>
+            <div>
+                <h2>Related Mice</h2>
+                <p class="muted">Same litter and offspring are separated so the direction is easier to read.</p>
+            </div>
+        </div>
+        <div class="pedigree-flow__related-grid">
+            <section class="pedigree-flow__panel">
+                <div class="pedigree-flow__panel-header">
+                    <span class="badge badge-gray">{{ littermates|length }}</span>
+                    <h3>Littermates</h3>
+                </div>
+                <ul class="pedigree-flow__relation-list pedigree-flow__relation-list--compact">
+                    {% for rel in littermates %}
+                    <li>
+                        <div>
                             <a class="table-link" href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
-                            · {{ rel.mouse.get_sex_display }} · {{ rel.mouse.birth_date|default:"-" }}
-                            · Cage: {{ rel.mouse.current_cage|default:"-" }}
-                            · Genotype: {{ rel.genotype_summary }}
-                        </span>
+                            <span class="muted"> · {{ rel.mouse.get_sex_display }} · Born {{ rel.mouse.birth_date|default:"-" }}</span>
+                        </div>
+                        <div class="pedigree-flow__mouse-meta">
+                            Cage:
+                            {% if rel.mouse.current_cage %}
+                                <a class="table-link" href="{% url 'colony:cage_detail' rel.mouse.current_cage.pk %}">{{ rel.mouse.current_cage.cage_id }}</a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </div>
+                        <p class="muted pedigree-flow__genotype">Genotype: {{ rel.genotype_summary }}</p>
                     </li>
-                {% empty %}
+                    {% empty %}
                     <li class="muted">No littermates found.</li>
-                {% endfor %}
-            </ul>
-        </section>
+                    {% endfor %}
+                </ul>
+            </section>
 
-        <section class="pedigree-tree__branch card">
-            <h2 class="pedigree-tree__branch-title">Offspring</h2>
-            <ul class="pedigree-tree__list">
-                {% for rel in offspring %}
-                    <li class="pedigree-tree__list-item">
-                        <span class="pedigree-tree__twig" aria-hidden="true"></span>
-                        <span>
+            <section class="pedigree-flow__panel">
+                <div class="pedigree-flow__panel-header">
+                    <span class="badge badge-gray">{{ offspring|length }}</span>
+                    <h3>Offspring</h3>
+                </div>
+                <ul class="pedigree-flow__relation-list pedigree-flow__relation-list--compact">
+                    {% for rel in offspring %}
+                    <li>
+                        <div>
                             <a class="table-link" href="{% url 'mice:mouse_detail' rel.mouse.pk %}">{{ rel.mouse.mouse_uid }}</a>
-                            · {{ rel.mouse.get_sex_display }} · {{ rel.mouse.birth_date|default:"-" }}
-                            · Cage: {{ rel.mouse.current_cage|default:"-" }}
-                            · Genotype: {{ rel.genotype_summary }}
-                        </span>
+                            <span class="muted"> · {{ rel.mouse.get_sex_display }} · Born {{ rel.mouse.birth_date|default:"-" }}</span>
+                        </div>
+                        <div class="pedigree-flow__mouse-meta">
+                            Cage:
+                            {% if rel.mouse.current_cage %}
+                                <a class="table-link" href="{% url 'colony:cage_detail' rel.mouse.current_cage.pk %}">{{ rel.mouse.current_cage.cage_id }}</a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </div>
+                        <p class="muted pedigree-flow__genotype">Genotype: {{ rel.genotype_summary }}</p>
                     </li>
-                {% empty %}
+                    {% empty %}
                     <li class="muted">No offspring found.</li>
-                {% endfor %}
-            </ul>
-        </section>
+                    {% endfor %}
+                </ul>
+            </section>
+        </div>
     </div>
 </section>
 {% endblock %}

@@ -119,6 +119,8 @@ class LitterWeanPageTests(TestCase):
         self.assertIn("Parentage", html)
         self.assertIn("Use breeding cage parents", html)
         self.assertIn("Select sire and possible dam(s)", html)
+        self.assertIn("Use existing strain line", html)
+        self.assertIn('id="id_existing_strain_line"', html)
         self.assertIn('id="id_male_cage"', html)
         self.assertIn('id="id_female_cage"', html)
         self.assertIn('id="wean-sex-summary"', html)
@@ -268,6 +270,31 @@ class LitterWeanPageTests(TestCase):
             [entry["locus_name"] for entry in new_line.expected_loci_entries()],
             ["GeneA", "GeneB"],
         )
+
+    def test_wean_can_use_existing_non_parent_strain_line(self):
+        hybrid_line = StrainLine.objects.create(
+            line_name="Cas9-TdT-gRNAs-M2; DARLIN-barcode",
+            name="Cas9-TdT-gRNAs-M2; DARLIN-barcode",
+            expected_loci_template="Cas9\nDARLIN",
+        )
+        response = self._wean_post(
+            male_pup_count="0",
+            female_pup_count="1",
+            strain_assignment_mode="existing",
+            existing_strain_line=hybrid_line.pk,
+            female_cage_lookup=self.female_cage.cage_id,
+            **{
+                "pups-0-mouse_uid": "M-WEAN-PUP-EXISTING-STRAIN",
+                "pups-0-sex": "F",
+                "pups-0-ear_tag": "",
+                "pups-0-coat_color": "",
+                "pups-0-notes": "",
+            },
+        )
+        self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))
+        pup = Mouse.objects.get(mouse_uid="M-WEAN-PUP-EXISTING-STRAIN")
+        self.assertEqual(pup.strain_line_id, hybrid_line.pk)
+        self.assertIn(self.project.pk, hybrid_line.projects.values_list("pk", flat=True))
 
     def test_wean_rejects_duplicate_new_strain_line_name(self):
         StrainLine.objects.create(line_name="ExistingStrain", name="ExistingStrain")

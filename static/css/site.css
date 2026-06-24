@@ -2241,132 +2241,243 @@ body.col-resize-active * {
     font-variant-numeric: tabular-nums;
 }
 
-/* Pedigree tree layout */
-.pedigree-tree {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    max-width: 960px;
+/* Pedigree flow layout */
+.pedigree-flow {
+    max-width: 1040px;
     margin: 0 auto;
 }
 
-.pedigree-tree__parents {
+.pedigree-flow__facts {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px 24px;
-    position: relative;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
 }
 
-@media (max-width: 720px) {
-    .pedigree-tree__parents {
-        grid-template-columns: 1fr;
-    }
-}
-
-.pedigree-tree__node {
-    position: relative;
-    padding: 16px 18px;
+.pedigree-flow__fact {
+    min-width: 0;
+    padding: 12px 14px;
+    background: #fff;
     border: 1px solid var(--line);
+    border-radius: var(--radius);
 }
 
-.pedigree-tree__node-title {
-    margin: 0 0 8px;
-    font-size: var(--font-section);
+.pedigree-flow__fact-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: var(--font-small);
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
-.pedigree-tree__line {
+.pedigree-flow__stage {
+    padding: 16px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.pedigree-flow__stage--focal {
+    border-color: #f1c979;
+    background: #fffdf7;
+}
+
+.pedigree-flow__stage-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.pedigree-flow__stage-heading h2,
+.pedigree-flow__panel-header h3,
+.pedigree-flow__focal h3 {
     margin: 0;
+}
+
+.pedigree-flow__stage-heading p {
+    margin: 4px 0 0;
+}
+
+.pedigree-flow__step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    border-radius: 50%;
+    background: #eaf1f8;
+    border: 1px solid var(--line);
+    color: var(--primary);
+    font-weight: 700;
+}
+
+.pedigree-flow__parents,
+.pedigree-flow__related-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.pedigree-flow__panel {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid #dbe6f2;
+    border-radius: var(--radius);
+    background: #fbfdff;
+}
+
+.pedigree-flow__panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.pedigree-flow .badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 3px 8px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: var(--font-small);
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.pedigree-flow .badge-blue {
+    color: #2f6690;
+    background: #eaf4fb;
+    border-color: #c9e1f1;
+}
+
+.pedigree-flow .badge-green {
+    color: #34735b;
+    background: #eaf6ef;
+    border-color: #c8e7d5;
+}
+
+.pedigree-flow .badge-yellow {
+    color: #8a641e;
+    background: #fff4d8;
+    border-color: #f3d58d;
+}
+
+.pedigree-flow .badge-gray {
+    color: #526071;
+    background: #f1f5f9;
+    border-color: #d6e1ec;
+}
+
+.pedigree-flow__mouse-name {
+    margin: 0 0 4px;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.pedigree-flow__mouse-meta,
+.pedigree-flow__genotype {
+    margin: 4px 0 0;
     line-height: 1.45;
 }
 
-.pedigree-tree__meta {
-    margin: 8px 0 0;
-    font-size: 0.8125rem;
+.pedigree-flow__genotype {
+    overflow-wrap: anywhere;
 }
 
-.pedigree-tree__stem {
-    height: 28px;
-    margin: 0 auto;
-    width: 2px;
-    background: linear-gradient(to bottom, var(--line), var(--primary));
-    position: relative;
-}
-
-.pedigree-tree__stem::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 0;
-    transform: translateX(-50%);
-    width: min(70%, 420px);
-    height: 2px;
-    background: var(--line);
-}
-
-.pedigree-tree__focal {
-    padding: 18px 20px;
-    border: 2px solid #c7d2fe;
-    background: linear-gradient(180deg, #eef2ff 0%, #fff 48%);
-    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
-}
-
-.pedigree-tree__focal-title {
-    margin: 0 0 8px;
-    font-size: var(--font-section);
-    color: var(--primary);
-}
-
-.pedigree-tree__branches {
-    margin-top: 20px;
-    display: grid;
-    gap: 16px;
-}
-
-.pedigree-tree__branch {
-    padding: 16px 18px;
-    border: 1px solid var(--line);
-}
-
-.pedigree-tree__branch-title {
-    margin: 0 0 12px;
-    font-size: var(--font-section);
-}
-
-.pedigree-tree__list {
+.pedigree-flow__relation-list {
     margin: 0;
     padding: 0;
     list-style: none;
 }
 
-.pedigree-tree__list-item {
-    position: relative;
-    padding-left: 18px;
-    margin-bottom: 10px;
+.pedigree-flow__relation-list > li {
+    padding: 10px 0;
+    border-top: 1px solid #e6eef7;
+}
+
+.pedigree-flow__relation-list > li:first-child {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.pedigree-flow__relation-list > li:last-child {
+    padding-bottom: 0;
+}
+
+.pedigree-flow__relation-list--compact > li {
+    padding: 9px 0;
+}
+
+.pedigree-flow__focal {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1fr);
+    gap: 12px 18px;
+    align-items: center;
+    padding: 16px;
+    border: 1px solid #f0d48d;
+    border-radius: var(--radius);
+    background: #fff9e8;
+}
+
+.pedigree-flow__focal h3 {
+    margin-top: 6px;
+    font-size: 1.18rem;
+}
+
+.pedigree-flow__focal-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
     line-height: 1.45;
 }
 
-.pedigree-tree__list-item:last-child {
-    margin-bottom: 0;
+.pedigree-flow__focal .pedigree-flow__genotype {
+    grid-column: 1 / -1;
 }
 
-.pedigree-tree__twig {
-    position: absolute;
-    left: 0;
-    top: 0.55em;
-    width: 10px;
-    height: 2px;
-    background: var(--line);
-    border-radius: 1px;
+.pedigree-flow__connector {
+    display: flex;
+    justify-content: center;
+    height: 30px;
 }
 
-.pedigree-tree__twig::before {
+.pedigree-flow__connector span {
+    position: relative;
+    display: block;
+    width: 2px;
+    height: 100%;
+    background: #b9cbe0;
+}
+
+.pedigree-flow__connector span::after {
     content: "";
     position: absolute;
-    left: 0;
-    bottom: 100%;
-    width: 2px;
-    height: 0.55em;
-    background: var(--line);
+    left: 50%;
+    bottom: -1px;
+    width: 9px;
+    height: 9px;
+    border-right: 2px solid #b9cbe0;
+    border-bottom: 2px solid #b9cbe0;
+    transform: translateX(-50%) rotate(45deg);
+    background: transparent;
+}
+
+@media (max-width: 800px) {
+    .pedigree-flow__facts,
+    .pedigree-flow__parents,
+    .pedigree-flow__related-grid,
+    .pedigree-flow__focal {
+        grid-template-columns: 1fr;
+    }
+
+    .pedigree-flow__stage {
+        padding: 14px;
+    }
 }
 
 .filter-grid .form-actions {

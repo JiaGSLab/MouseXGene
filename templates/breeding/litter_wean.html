@@ -147,6 +147,21 @@
         {% for field in wean_form %}
             {% if field.name == "parentage_mode" or field.name == "parent_breeding" or field.name == "wean_sire" or field.name == "wean_possible_dams" or field.name == "male_cage_assignment_mode" or field.name == "male_auto_cage_id" or field.name == "male_cage" or field.name == "male_cage_lookup" or field.name == "female_cage_assignment_mode" or field.name == "female_auto_cage_id" or field.name == "female_cage" or field.name == "female_cage_lookup" or field.name == "male_pup_count" or field.name == "female_pup_count" %}
                 {# Rendered in dedicated blocks below #}
+            {% elif field.name == "existing_strain_line" %}
+                <div class="form-row" id="wean-existing-strain-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="field-error">
+                            {% for error in field.errors %}
+                                <div>{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
             {% elif field.name == "new_strain_line_name" %}
                 <div class="form-row" id="wean-new-strain-row">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -1641,10 +1656,12 @@
     extraCageConfig.female.addButton?.addEventListener("click", () => addExtraCageRow("female"));
 
     const strainMode = document.getElementById("id_strain_assignment_mode");
+    const existingStrainRow = document.getElementById("wean-existing-strain-row");
     const newStrainRow = document.getElementById("wean-new-strain-row");
     function syncStrainFields() {
-        if (!strainMode || !newStrainRow) return;
-        newStrainRow.hidden = strainMode.value !== "new";
+        if (!strainMode) return;
+        if (existingStrainRow) existingStrainRow.hidden = strainMode.value !== "existing";
+        if (newStrainRow) newStrainRow.hidden = strainMode.value !== "new";
         syncCageSummaries();
     }
     strainMode?.addEventListener("change", syncStrainFields);
