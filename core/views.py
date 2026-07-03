@@ -508,16 +508,17 @@ def permission_denied(request: HttpRequest, exception: PermissionDenied) -> Http
     """Show a friendly flash message instead of a bare 403 page."""
     message = str(exception) or "You do not have permission to perform this action."
     if request.user.is_authenticated:
-        messages.error(request, message)
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            messages.error(request, f"Nothing was saved. {message}")
             referer = request.META.get("HTTP_REFERER", "").strip()
-            if referer and referer != request.build_absolute_uri():
+            if referer:
                 if url_has_allowed_host_and_scheme(
                     referer,
                     allowed_hosts={request.get_host()},
                     require_https=request.is_secure(),
                 ):
                     return redirect(referer)
-            return redirect(reverse("home"))
+            return redirect(request.get_full_path() or reverse("home"))
+        messages.error(request, message)
         return render(request, "403.html", {"message": message}, status=403)
     return redirect(reverse("login") + f"?next={request.path}")

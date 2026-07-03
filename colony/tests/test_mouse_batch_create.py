@@ -50,7 +50,7 @@ class MouseBatchCreateTests(TestCase):
 
     def test_batch_create_two_mice(self):
         response = self.client.post(reverse("mice:mouse_create"), self._shared_payload())
-        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertRedirects(response, reverse("colony:cage_detail", args=[self.cage.pk]))
         self.assertTrue(Mouse.objects.filter(mouse_uid="BATCH-M1", ear_tag="E1").exists())
         self.assertTrue(Mouse.objects.filter(mouse_uid="BATCH-M2", ear_tag="E2").exists())
         self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
@@ -67,7 +67,7 @@ class MouseBatchCreateTests(TestCase):
 
         response = self.client.post(reverse("mice:mouse_create"), payload)
 
-        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertRedirects(response, reverse("colony:cage_detail", args=[self.cage.pk]))
         self.assertEqual(Mouse.objects.filter(mouse_uid__in=["BATCH-OWNER-M1", "BATCH-OWNER-M2"]).count(), 2)
         self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
 
@@ -129,7 +129,7 @@ class MouseBatchCreateTests(TestCase):
 
         response = self.client.post(reverse("mice:mouse_create"), payload)
 
-        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertRedirects(response, reverse("colony:cage_detail", args=[self.cage.pk]))
         self.assertEqual(Mouse.objects.filter(mouse_uid__in=["BATCH-M1", "BATCH-M2"]).count(), 2)
 
     def test_mixed_sex_batch_rejects_non_breeding_cage(self):

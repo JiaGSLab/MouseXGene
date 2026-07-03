@@ -4820,6 +4820,8 @@ def mouse_create(request: HttpRequest) -> HttpResponse:
                     messages.success(request, f"Created {len(created)} mouse(s): {uids}{suffix}.{cage_suffix}")
                     if len(created) == 1:
                         return redirect("mice:mouse_detail", pk=created[0].pk)
+                    if cage is not None:
+                        return redirect("colony:cage_detail", pk=cage.pk)
                     return redirect("mice:mouse_list")
     else:
         if draft:
