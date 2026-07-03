@@ -5,6 +5,7 @@ from django.urls import reverse
 from colony.models import Cage, Mouse, StrainLine
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
+from users.permissions import can_edit_project_data
 
 
 class MouseEditPermissionTests(TestCase):
@@ -23,6 +24,9 @@ class MouseEditPermissionTests(TestCase):
         self.manager_project_mgr = User.objects.create_user(username="mgr_pm", password="pass")
         UserProfile.objects.filter(user=self.manager_project_mgr).update(role=UserProfile.Role.MANAGER)
 
+        self.project_owner_only = User.objects.create_user(username="owner_only", password="pass")
+        UserProfile.objects.filter(user=self.project_owner_only).update(role=UserProfile.Role.MEMBER)
+
         self.strain = StrainLine.objects.create(
             line_name="PermTestLine",
             name="PermTestLine",
@@ -33,6 +37,7 @@ class MouseEditPermissionTests(TestCase):
 
         self.project_a = Project.objects.create(name="Project A", owner=self.admin)
         self.project_b = Project.objects.create(name="Project B", owner=self.admin)
+        self.project_owner_owned = Project.objects.create(name="Owner Owned Project", owner=self.project_owner_only)
 
         ProjectMembership.objects.create(
             project=self.project_a, user=self.member, role=ProjectMembership.Role.MEMBER
@@ -64,6 +69,14 @@ class MouseEditPermissionTests(TestCase):
             current_cage=self.cage,
             project=self.project_b,
         )
+        self.owner_mouse = Mouse.objects.create(
+            mouse_uid="M-OWNER-1",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            current_cage=self.cage,
+            project=self.project_owner_owned,
+        )
 
     def test_member_can_open_edit_for_own_project_mouse(self) -> None:
         self.client.login(username="member", password="pass")
@@ -89,6 +102,13 @@ class MouseEditPermissionTests(TestCase):
         """Lab-level Manager + project Membership as Member should edit mice in that project."""
         self.client.login(username="mgr_mem", password="pass")
         r = self.client.get(reverse("mice:mouse_edit", args=[self.mouse_b.pk]))
+        self.assertEqual(r.status_code, 200)
+
+    def test_project_owner_without_membership_can_edit_owned_project_mouse(self) -> None:
+        self.assertTrue(can_edit_project_data(self.project_owner_only, self.project_owner_owned))
+
+        self.client.login(username="owner_only", password="pass")
+        r = self.client.get(reverse("mice:mouse_edit", args=[self.owner_mouse.pk]))
         self.assertEqual(r.status_code, 200)
 
     def test_admin_can_edit_any_mouse(self) -> None:

@@ -55,6 +55,22 @@ class MouseBatchCreateTests(TestCase):
         self.assertTrue(Mouse.objects.filter(mouse_uid="BATCH-M2", ear_tag="E2").exists())
         self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
 
+    def test_project_owner_without_membership_can_batch_create_mice(self):
+        ProjectMembership.objects.filter(project=self.project, user=self.user).delete()
+        payload = self._shared_payload()
+        payload.update(
+            {
+                "batch_mouse_uid_0": "BATCH-OWNER-M1",
+                "batch_mouse_uid_1": "BATCH-OWNER-M2",
+            }
+        )
+
+        response = self.client.post(reverse("mice:mouse_create"), payload)
+
+        self.assertRedirects(response, reverse("mice:mouse_list"))
+        self.assertEqual(Mouse.objects.filter(mouse_uid__in=["BATCH-OWNER-M1", "BATCH-OWNER-M2"]).count(), 2)
+        self.assertEqual(CageMembership.objects.filter(cage=self.cage, is_current=True).count(), 2)
+
     def test_active_batch_requires_current_cage(self):
         payload = self._shared_payload()
         payload["current_cage"] = ""

@@ -58,6 +58,7 @@ def can_edit_project_data(user, project: Project | None) -> bool:
     Edit permission for project-scoped business objects (mice, breeding, etc.).
 
     - Lab Admin: always.
+    - Project owner: always.
     - Project membership with role Manager: always (project-level manager rights).
     - Project membership with role Member: yes if the user's lab role is Member or Manager
       (both are expected to work on projects they belong to; import/bulk actions still use
@@ -66,6 +67,8 @@ def can_edit_project_data(user, project: Project | None) -> bool:
     if project is None or not getattr(user, "is_authenticated", False):
         return False
     if is_admin(user):
+        return True
+    if getattr(project, "owner_id", None) == user.id:
         return True
     membership = get_project_membership(user, project)
     if membership is None:
