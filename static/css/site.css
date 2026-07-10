@@ -117,7 +117,6 @@ a.link-primary:hover {
 
 .nav {
     display: flex;
-    align-items: center;
     gap: 16px;
 }
 
@@ -129,53 +128,6 @@ a.link-primary:hover {
 .nav a:hover {
     color: #fff;
     text-decoration: underline;
-}
-
-.nav a.is-active {
-    color: #fff;
-    text-decoration: underline;
-    text-decoration-thickness: 2px;
-    text-underline-offset: 5px;
-}
-
-.nav-more {
-    position: relative;
-    color: #f3f4f6;
-}
-
-.nav-more summary {
-    cursor: pointer;
-    font-weight: 500;
-    list-style: none;
-}
-
-.nav-more summary::-webkit-details-marker {
-    display: none;
-}
-
-.nav-more__menu {
-    position: absolute;
-    z-index: 30;
-    top: calc(100% + 10px);
-    right: 0;
-    display: grid;
-    min-width: 180px;
-    padding: 6px;
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 10px 24px rgba(30, 41, 59, 0.16);
-}
-
-.nav-more__menu a {
-    color: var(--text);
-    padding: 8px 10px;
-}
-
-.nav-more__menu a:hover {
-    color: var(--primary);
-    background: #edf3f9;
-    text-decoration: none;
 }
 
 .nav-logout {
@@ -2902,11 +2854,6 @@ body.col-resize-active * {
     .nav {
         width: 100%;
         justify-content: flex-start;
-    }
-
-    .nav-more__menu {
-        left: 0;
-        right: auto;
     }
 
     .action-links .button {

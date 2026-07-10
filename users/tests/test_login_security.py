@@ -18,3 +18,14 @@ class LoginSecurityTests(TestCase):
         response = self.client.post(url, {"username": self.user.username, "password": "wrong"})
 
         self.assertContains(response, "Too many failed sign-in attempts")
+
+    def test_authenticated_navigation_keeps_secondary_pages_visible(self):
+        self.client.login(username=self.user.username, password="correct-password")
+
+        response = self.client.get(reverse("home"))
+
+        self.assertContains(response, ">Projects<", html=False)
+        self.assertContains(response, ">Strain Lines<", html=False)
+        self.assertContains(response, ">Family Tree<", html=False)
+        self.assertContains(response, ">Guide<", html=False)
+        self.assertNotContains(response, 'class="nav-more"')

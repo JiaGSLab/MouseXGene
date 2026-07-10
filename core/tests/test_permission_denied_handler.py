@@ -17,7 +17,7 @@ class PermissionDeniedHandlerTests(TestCase):
         request._messages = FallbackStorage(request)
         return request
 
-    def test_post_permission_denied_redirects_back_to_same_form_with_not_saved_message(self):
+    def test_post_permission_denied_shows_explicit_not_saved_page_with_return_link(self):
         request = self._request_with_messages(
             self.factory.post(
                 "/mice/new/",
@@ -30,18 +30,18 @@ class PermissionDeniedHandlerTests(TestCase):
             PermissionDenied("You do not have permission to modify data in this project."),
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "http://testserver/mice/new/")
-        stored_messages = [str(message) for message in request._messages]
-        self.assertEqual(
-            stored_messages,
-            ["Nothing was saved. You do not have permission to modify data in this project."],
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(
+            b"Nothing was saved. You do not have permission to modify data in this project.",
+            response.content,
         )
+        self.assertIn(b'href="http://testserver/mice/new/"', response.content)
 
-    def test_post_permission_denied_without_referer_redirects_to_current_path(self):
+    def test_post_permission_denied_without_referer_has_no_return_link(self):
         request = self._request_with_messages(self.factory.post("/mice/new/?project=20"))
 
         response = permission_denied(request, PermissionDenied("Project is required for this action."))
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], "/mice/new/?project=20")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(b"Nothing was saved. Project is required for this action.", response.content)
+        self.assertNotIn(b"Return to previous page", response.content)
