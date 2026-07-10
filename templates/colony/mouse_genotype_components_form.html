@@ -14,6 +14,12 @@
 </section>
 
 <section class="card">
+    {% if save_error %}
+        <div class="form-error-summary" role="alert">
+            <h2>Genotype results were not saved</h2>
+            <p>{{ save_error }}</p>
+        </div>
+    {% endif %}
     <p class="muted">
         Edit genotype values for template loci only. Loci come from strain-line template (or sire+dam union for offspring).
         This page is for correcting genotyping values, not editing template structure.

@@ -849,6 +849,8 @@ class Mouse(ActorStampedModel):
         if not to_create:
             return 0
         MouseGenotypeComponent.objects.bulk_create(to_create)
+        if hasattr(self, "_prefetched_objects_cache"):
+            self._prefetched_objects_cache.pop("genotype_components", None)
         self.rebuild_genotype_summary(save=True)
         return len(to_create)
 

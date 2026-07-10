@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
 from colony.models import Mouse, MouseGenotypeComponent, StrainLine
 from colony.views import _apply_mouse_genotype_rows
@@ -39,3 +40,28 @@ class MouseGenotypeApplyTests(TestCase):
         self.assertEqual(comp.zygosity, "pos")
         self.assertEqual(comp.allele_display_1, "")
         self.assertEqual(comp.allele_display_2, "")
+
+    def test_edit_view_replaces_prefetched_component_without_duplicate_locus(self):
+        MouseGenotypeComponent.objects.create(
+            mouse=self.mouse,
+            strain_line=self.strain,
+            locus_name="MyTg",
+            locus_key="mytg",
+            chromosome_type=MouseGenotypeComponent.ChromosomeType.AUTOSOMAL,
+        )
+        self.client.login(username=self.user.username, password="x")
+
+        response = self.client.post(
+            reverse("mice:mouse_genotype_components_edit", args=[self.mouse.pk]),
+            {
+                "genotype_row_count": "1",
+                "genotype_locus_0": "MyTg",
+                "genotype_display_0": "pos",
+            },
+        )
+
+        self.assertRedirects(response, reverse("mice:mouse_detail", args=[self.mouse.pk]))
+        self.assertEqual(self.mouse.genotype_components.count(), 1)
+        component = self.mouse.genotype_components.get()
+        self.assertEqual(component.locus_key, "mytg")
+        self.assertEqual(component.zygosity, "pos")

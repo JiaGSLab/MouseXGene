@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, Max, OuterRef, Q, Subquery, IntegerField, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -2208,6 +2208,8 @@ def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: l
     }
     if mode == "replace":
         mouse.genotype_components.all().delete()
+        if hasattr(mouse, "_prefetched_objects_cache"):
+            mouse._prefetched_objects_cache.pop("genotype_components", None)
         mouse.ensure_template_genotype_components(extra_loci=list(target_loci), include_strain_template=False)
         mouse.rebuild_genotype_summary(save=True)
         return
@@ -2983,23 +2985,38 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
     mouse = Mouse.objects.prefetch_related("possible_dams__strain_line", "genotype_components").get(pk=mouse.pk)
     template_rows, template_source_label = _genotyping_template_rows_for_mouse(mouse)
     template_loci = [row.get("locus_name", "") for row in template_rows if (row.get("locus_name") or "").strip()]
-    before_signature = _genotype_components_signature(mouse)
     posted_genotype_rows: list[dict[str, str]] = []
+    save_error = ""
     if request.method == "POST":
         posted_genotype_rows = _extract_mouse_genotype_rows_from_post(request)
-        _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
-        _apply_mouse_genotype_rows_to_template(mouse, posted_genotype_rows, template_rows)
-        mouse.refresh_from_db()
-        after_signature = _genotype_components_signature(mouse)
-        _log_specific_genotype_changes(
-            user=request.user,
-            mouse=mouse,
-            before_signature=before_signature,
-            after_signature=after_signature,
-            source_label="Edit Genotype",
-        )
-        messages.success(request, "Genotype components updated.")
-        return redirect("mice:mouse_detail", pk=mouse.pk)
+        try:
+            with transaction.atomic():
+                mouse = (
+                    Mouse.objects.select_for_update()
+                    .select_related("strain_line")
+                    .prefetch_related("genotype_components")
+                    .get(pk=mouse.pk)
+                )
+                before_signature = _genotype_components_signature(mouse)
+                _apply_strain_template_resolution(mouse, mode="replace", target_loci=template_loci)
+                _apply_mouse_genotype_rows_to_template(mouse, posted_genotype_rows, template_rows)
+                mouse.refresh_from_db()
+                after_signature = _genotype_components_signature(mouse)
+                _log_specific_genotype_changes(
+                    user=request.user,
+                    mouse=mouse,
+                    before_signature=before_signature,
+                    after_signature=after_signature,
+                    source_label="Edit Genotype",
+                )
+        except ValidationError as exc:
+            save_error = " ".join(exc.messages)
+        except IntegrityError:
+            logger.exception("Genotype component save conflict for mouse %s", mouse.pk)
+            save_error = "Genotype results were not saved because the locus rows changed. Reload the page and try again."
+        else:
+            messages.success(request, "Genotype components updated.")
+            return redirect("mice:mouse_detail", pk=mouse.pk)
 
     existing_genotype_map = _genotype_map_for_mouse(mouse)
     return render(
@@ -3011,6 +3028,7 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
             "template_rows": template_rows,
             "existing_genotype_map": existing_genotype_map,
             "posted_genotype_rows": posted_genotype_rows,
+            "save_error": save_error,
         },
     )
 
