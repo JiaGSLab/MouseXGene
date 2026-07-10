@@ -7,8 +7,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.contrib import messages
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
-from django.core.exceptions import PermissionDenied
-from django.db import OperationalError, ProgrammingError, transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, OperationalError, ProgrammingError, transaction
 from django.db.models import Count, Max, Prefetch, Q
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +24,7 @@ from colony.cage_lifecycle import (
     sync_cage_after_occupancy_change,
     sync_cage_status_from_mice,
 )
+from colony.mouse_status import apply_terminal_status
 from colony.strain_line_usage import strain_line_member_breeding_filter, strain_line_member_litter_filter
 from colony.id_uniqueness import find_conflicting_mouse
 from colony.models import Cage, CageMembership, Mouse, StrainLine
@@ -59,6 +60,7 @@ from core.owner_filters import (
 )
 from users.permissions import (
     authenticated_required,
+    can_edit_mice_projects,
     ensure_can_archive_or_change_terminal_status,
     ensure_can_edit_mice_projects,
     ensure_can_edit_project_data,
@@ -981,6 +983,8 @@ def breeding_list(request: HttpRequest) -> HttpResponse:
     pagination = _paginate_queryset_for_list(request, breedings, viewname="breeding:breeding_list")
     breedings_page_items = list(pagination["items"])
     _enrich_breedings_for_list(breedings_page_items, today=today)
+    for breeding_row in breedings_page_items:
+        breeding_row.can_edit = can_edit_mice_projects(request.user, _breeding_member_mice(breeding_row))
 
     strain_line_filter_label = ""
     if strain_line_id:
@@ -1061,15 +1065,62 @@ def _breeding_initial_from_request(request: HttpRequest) -> dict:
     if dam_ids:
         initial["dams"] = dam_ids
         initial["breeding_type"] = BreedingForm.AUTO_BREEDING_TYPE
+    cage_id = _parse_positive_int(request.GET.get("cage") or "")
+    if cage_id:
+        initial["cage"] = cage_id
+        initial["cage_assignment_mode"] = BreedingForm.CageAssignmentMode.EXISTING
     return initial
+
+
+def _lock_and_validate_active_breeders(breeding: Breeding | None, mice: list[Mouse | None]) -> None:
+    """Serialize active breeding assignment and recheck it inside the save transaction."""
+    mouse_ids = sorted({mouse.pk for mouse in mice if mouse is not None})
+    if not mouse_ids:
+        return
+    list(Mouse.objects.select_for_update().filter(pk__in=mouse_ids).order_by("pk"))
+    conflict_ids = list(
+        Breeding.objects.filter(active=True)
+        .exclude(status=Breeding.Status.CLOSED)
+        .filter(
+            Q(male_id__in=mouse_ids)
+            | Q(female_1_id__in=mouse_ids)
+            | Q(female_2_id__in=mouse_ids)
+            | Q(extra_female_links__mouse_id__in=mouse_ids)
+            | Q(breeding_members__mouse_id__in=mouse_ids)
+        )
+        .exclude(pk=breeding.pk if breeding and breeding.pk else None)
+        .values_list("pk", flat=True)
+        .distinct()
+    )
+    conflicts = (
+        Breeding.objects.select_for_update()
+        .filter(pk__in=conflict_ids)
+        .order_by("breeding_code")
+    )
+    conflict_rows: list[str] = []
+    for existing in conflicts:
+        member_ids = {
+            existing.male_id,
+            existing.female_1_id,
+            existing.female_2_id,
+            *existing.extra_female_links.values_list("mouse_id", flat=True),
+            *existing.breeding_members.values_list("mouse_id", flat=True),
+        }
+        uids = Mouse.objects.filter(pk__in=member_ids & set(mouse_ids)).values_list("mouse_uid", flat=True)
+        conflict_rows.append(f"{', '.join(sorted(uids))} in {existing.breeding_code}")
+    if conflict_rows:
+        raise ValidationError(
+            "Selected breeder assignment changed while this form was open. Resolve the active breeding(s): "
+            + "; ".join(conflict_rows)
+        )
 
 
 @authenticated_required
 def breeding_create(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         form = BreedingForm(request.POST, user=request.user)
-        try:
-            if form.is_valid():
+        if form.is_valid():
+            try:
                 ensure_can_edit_mice_projects(
                     request.user,
                     [
@@ -1079,39 +1130,44 @@ def breeding_create(request: HttpRequest) -> HttpResponse:
                         *list(form.cleaned_data.get("extra_females") or []),
                     ],
                 )
-                breeding = form.save()
-                if form.created_auto_cage is not None:
-                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
+                selected_mice = [
+                    form.cleaned_data["male"],
+                    form.cleaned_data["female_1"],
+                    form.cleaned_data.get("female_2"),
+                    *list(form.cleaned_data.get("extra_females") or []),
+                ]
+                with transaction.atomic():
+                    _lock_and_validate_active_breeders(None, selected_mice)
+                    breeding = form.save()
+                    if form.created_auto_cage is not None:
+                        log_audit_event(
+                            user=request.user,
+                            action=AuditLog.Action.CREATE,
+                            obj=form.created_auto_cage,
+                            message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                        )
+                    mark_cage_as_breeding(breeding.cage)
+                    moved = sync_breeding_member_cages(breeding)
                     log_audit_event(
                         user=request.user,
                         action=AuditLog.Action.CREATE,
-                        obj=form.created_auto_cage,
-                        message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                        obj=breeding,
+                        message=f"Created breeding {breeding.breeding_code}.",
                     )
-                mark_cage_as_breeding(breeding.cage)
-                moved = sync_breeding_member_cages(breeding)
+                if form.created_auto_cage is not None:
+                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
                 if moved:
                     messages.info(request, f"Moved {moved} breeder(s) into cage {breeding.cage.cage_id}.")
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.CREATE,
-                    obj=breeding,
-                    message=f"Created breeding {breeding.breeding_code}.",
-                )
                 cage_label = breeding.cage.cage_id if breeding.cage_id else "No cage"
                 messages.success(request, f"Breeding {breeding.breeding_code} created. Cage: {cage_label}.")
                 return redirect("breeding:breeding_detail", pk=breeding.pk)
-        except PermissionDenied:
-            raise
-        except Exception:
-            logger.exception("Unexpected error during breeding create POST.")
-            messages.error(
-                request,
-                "Failed to save breeding due to an unexpected server error. "
-                "Please review member selection and try again.",
-            )
+            except PermissionDenied:
+                raise
+            except (IntegrityError, ValidationError) as exc:
+                logger.warning("Breeding create rejected during transactional recheck: %s", exc)
+                form.add_error(None, str(exc))
     else:
         form = BreedingForm(initial=_breeding_initial_from_request(request), user=request.user)
 
@@ -1133,8 +1189,8 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
     ensure_can_edit_mice_projects(request.user, _breeding_member_mice(breeding))
     if request.method == "POST":
         form = BreedingForm(request.POST, instance=breeding, user=request.user)
-        try:
-            if form.is_valid():
+        if form.is_valid():
+            try:
                 ensure_can_edit_mice_projects(
                     request.user,
                     [
@@ -1144,38 +1200,44 @@ def breeding_edit(request: HttpRequest, pk: int) -> HttpResponse:
                         *list(form.cleaned_data.get("extra_females") or []),
                     ],
                 )
-                breeding = form.save()
-                if form.created_auto_cage is not None:
-                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
+                selected_mice = [
+                    form.cleaned_data["male"],
+                    form.cleaned_data["female_1"],
+                    form.cleaned_data.get("female_2"),
+                    *list(form.cleaned_data.get("extra_females") or []),
+                ]
+                with transaction.atomic():
+                    locked_breeding = Breeding.objects.select_for_update().get(pk=breeding.pk)
+                    _lock_and_validate_active_breeders(locked_breeding, selected_mice)
+                    breeding = form.save()
+                    if form.created_auto_cage is not None:
+                        log_audit_event(
+                            user=request.user,
+                            action=AuditLog.Action.CREATE,
+                            obj=form.created_auto_cage,
+                            message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                        )
+                    mark_cage_as_breeding(breeding.cage)
+                    moved = sync_breeding_member_cages(breeding)
                     log_audit_event(
                         user=request.user,
-                        action=AuditLog.Action.CREATE,
-                        obj=form.created_auto_cage,
-                        message=f"Auto-created cage {form.created_auto_cage.cage_id} for breeding {breeding.breeding_code}.",
+                        action=AuditLog.Action.UPDATE,
+                        obj=breeding,
+                        message=f"Updated breeding {breeding.breeding_code} members/configuration.",
                     )
-                mark_cage_as_breeding(breeding.cage)
-                moved = sync_breeding_member_cages(breeding)
+                if form.created_auto_cage is not None:
+                    messages.info(request, f"Created cage {form.created_auto_cage.cage_id} for this breeding.")
                 if moved:
                     messages.info(request, f"Moved {moved} breeder(s) into cage {breeding.cage.cage_id}.")
                 for warning in getattr(form, "warning_messages", []):
                     messages.warning(request, warning)
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.UPDATE,
-                    obj=breeding,
-                    message=f"Updated breeding {breeding.breeding_code} members/configuration.",
-                )
                 messages.success(request, f"Breeding {breeding.breeding_code} updated.")
                 return redirect("breeding:breeding_detail", pk=breeding.pk)
-        except PermissionDenied:
-            raise
-        except Exception:
-            logger.exception("Unexpected error during breeding edit POST. pk=%s", breeding.pk)
-            messages.error(
-                request,
-                "Failed to update breeding due to an unexpected server error. "
-                "Please review member selection and try again.",
-            )
+            except PermissionDenied:
+                raise
+            except (IntegrityError, ValidationError) as exc:
+                logger.warning("Breeding edit rejected during transactional recheck. pk=%s error=%s", breeding.pk, exc)
+                form.add_error(None, str(exc))
     else:
         form = BreedingForm(instance=breeding, user=request.user)
 
@@ -1265,6 +1327,7 @@ def breeding_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "breeding/breeding_detail.html",
         {
             "breeding": breeding,
+            "can_edit_breeding": can_edit_mice_projects(request.user, _breeding_member_mice(breeding)),
             "setup_by_display": _breeding_setup_by_label(breeding, breeding_audit_entries),
             "litters": litters,
             "expected_offspring_loci": expected_offspring_loci,
@@ -1358,15 +1421,12 @@ def breeding_end(request: HttpRequest, pk: int) -> HttpResponse:
                         affected_cage_ids.add(destination.pk)
 
                     if action in EndBreedingForm.TERMINAL_ACTIONS:
-                        mouse.status = action
-                        if action in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
-                            mouse.euthanasia_date = end_date
-                            mouse.death_date = None
-                        elif action == Mouse.Status.DEAD:
-                            mouse.death_date = end_date
-                            mouse.euthanasia_date = None
-                        mouse.death_reason = notes or reason
-                        mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+                        apply_terminal_status(
+                            mouse,
+                            status=action,
+                            end_date=end_date,
+                            reason=notes or reason,
+                        )
                         terminal_cage_ids = remove_terminal_mouse_from_current_cage(
                             mouse,
                             exit_date=end_date,
@@ -2096,14 +2156,27 @@ def litter_end(request: HttpRequest, pk: int) -> HttpResponse:
                 return redirect("litters:litter_detail", pk=litter.pk)
             litter.litter_status = Litter.LitterStatus.ENDED
             litter.is_archived = True
+            litter.end_outcome = form.cleaned_data["end_outcome"]
+            litter.end_notes = form.cleaned_data.get("end_notes", "")
             if not litter.archived_at:
                 litter.archived_at = timezone.now()
-            litter.save(update_fields=["litter_status", "is_archived", "archived_at"])
+            litter.save(
+                update_fields=[
+                    "litter_status",
+                    "is_archived",
+                    "end_outcome",
+                    "end_notes",
+                    "archived_at",
+                ]
+            )
         log_audit_event(
             user=request.user,
             action=AuditLog.Action.UPDATE,
             obj=litter,
-            message=f"Ended litter workflow for {litter.litter_id_display}.",
+            message=(
+                f"Ended litter workflow for {litter.litter_id_display}. "
+                f"Outcome: {litter.get_end_outcome_display()}. Notes: {litter.end_notes or '—'}."
+            ),
         )
         messages.success(request, f"Litter {litter.litter_id_display} marked as ended.")
         return redirect("litters:litter_detail", pk=litter.pk)
@@ -2163,6 +2236,9 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
     wean_counts_source = "manual"
     if litter.litter_status in (Litter.LitterStatus.ENDED, Litter.LitterStatus.ARCHIVED):
         messages.error(request, "This litter is closed; you cannot wean additional pups.")
+        return redirect("litters:litter_detail", pk=litter.pk)
+    if litter_has_weaned(litter):
+        messages.info(request, "This litter has already been weaned. Review the registered offspring on its detail page.")
         return redirect("litters:litter_detail", pk=litter.pk)
     if request.method == "POST":
         male_pup_count, female_pup_count = _parse_wean_pup_counts(request.POST)
@@ -2325,6 +2401,18 @@ def litter_wean(request: HttpRequest, pk: int) -> HttpResponse:
                     created_uids: list[str] = []
                     created_auto_cages: list[Cage] = []
                     with transaction.atomic():
+                        litter = (
+                            Litter.objects.select_for_update()
+                            .select_related("breeding")
+                            .get(pk=litter.pk)
+                        )
+                        if litter_has_weaned(litter) or litter.pups.filter(mouse__isnull=False).exists():
+                            messages.error(
+                                request,
+                                "This litter was weaned by another request while the form was open. "
+                                "No additional mice were created.",
+                            )
+                            return redirect("litters:litter_detail", pk=litter.pk)
                         source_cage = parent_source_breeding.cage if parent_source_breeding.cage_id else None
                         pup_colony = colony_for_project_and_strain(inherited_project, pup_strain_line)
                         cage_by_slot: dict[str, Cage] = {}

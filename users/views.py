@@ -1,5 +1,9 @@
+import hashlib
+
+from django.contrib import messages
 from django.contrib.auth.views import LoginView, PasswordChangeView
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.contrib.messages.views import SuccessMessageMixin
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,6 +12,8 @@ from django.urls import reverse_lazy
 from .forms import SelfProfileForm, UserRoleForm
 from .models import UserProfile
 from .permissions import authenticated_required, is_admin
+from core.audit import log_audit_event
+from core.models import AuditLog
 
 
 class AppLoginView(LoginView):
@@ -15,6 +21,30 @@ class AppLoginView(LoginView):
 
     template_name = "users/login.html"
     redirect_authenticated_user = True
+
+    rate_limit_attempts = 8
+    rate_limit_window_seconds = 15 * 60
+
+    def _rate_limit_key(self) -> str:
+        forwarded_ip = (self.request.META.get("HTTP_X_REAL_IP") or "").strip()
+        remote_ip = forwarded_ip or self.request.META.get("REMOTE_ADDR", "unknown")
+        username = (self.request.POST.get("username") or "").strip().casefold()
+        digest = hashlib.sha256(f"{remote_ip}|{username}".encode("utf-8")).hexdigest()
+        return f"login-failures:{digest}"
+
+    def post(self, request, *args, **kwargs):
+        key = self._rate_limit_key()
+        failures = int(cache.get(key, 0) or 0)
+        if failures >= self.rate_limit_attempts:
+            form = self.get_form()
+            form.add_error(None, "Too many failed sign-in attempts. Wait 15 minutes and try again.")
+            return self.form_invalid(form)
+        response = super().post(request, *args, **kwargs)
+        if 300 <= response.status_code < 400:
+            cache.delete(key)
+        else:
+            cache.set(key, failures + 1, self.rate_limit_window_seconds)
+        return response
 
 
 class AppPasswordChangeView(SuccessMessageMixin, PasswordChangeView):
@@ -42,6 +72,7 @@ def account_profile_edit(request):
         form = SelfProfileForm(request.POST, instance=profile)
         if form.is_valid():
             form.save()
+            messages.success(request, "Profile updated.")
             return redirect("accounts:profile")
     else:
         form = SelfProfileForm(instance=profile)
@@ -65,7 +96,15 @@ def user_role_edit(request, pk: int):
     if request.method == "POST":
         form = UserRoleForm(request.POST, instance=profile)
         if form.is_valid():
-            form.save()
+            previous_role = profile.role
+            profile = form.save()
+            log_audit_event(
+                user=request.user,
+                action=AuditLog.Action.UPDATE,
+                obj=profile,
+                message=f"Changed role for {user_obj.get_username()} from {previous_role} to {profile.role}.",
+            )
+            messages.success(request, f"Role updated for {user_obj.get_username()}.")
             return redirect("accounts:user_role_list")
     else:
         form = UserRoleForm(instance=profile)

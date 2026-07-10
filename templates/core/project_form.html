@@ -8,6 +8,7 @@
 </section>
 
 <section class="card">
+    {% include "includes/form_error_summary.html" with errors=error_summary %}
     <form method="post" class="form-layout">
         {% csrf_token %}
         {% for field in form %}

@@ -63,6 +63,7 @@ class CageGenotypingTests(TestCase):
         self.assertContains(response, "CreERT2 het (CreERT2/+)")
         self.assertContains(response, f'name="mouse_{self.mouse_a.pk}_genotype_display_0"')
         self.assertContains(response, f'name="mouse_{self.mouse_b.pk}_genotype_display_1"')
+        self.assertEqual(MouseGenotypeComponent.objects.count(), 0)
 
     def test_cage_genotyping_post_updates_each_mouse(self):
         response = self.client.post(

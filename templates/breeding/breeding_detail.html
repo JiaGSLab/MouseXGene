@@ -9,7 +9,7 @@
     </div>
     <div class="action-links">
         <a class="button" href="{% url 'breeding:breeding_list' %}">Back to Breedings</a>
-        {% if can_manage_breeding %}
+        {% if can_edit_breeding %}
             <a class="button" href="{% url 'breeding:breeding_edit' breeding.pk %}">Edit Breeding</a>
             <a class="button" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
             {% if breeding.status != "closed" or breeding.active %}
@@ -86,7 +86,7 @@
                 {% endif %}
                 Record a litter if pups were born, or end breeding if this setup should stop.
             </span>
-            {% if can_manage_breeding %}
+            {% if can_edit_breeding %}
                 <span class="inline-actions">
                     <a class="button button-light button-small" href="{% url 'breeding:litter_create' breeding.pk %}">Record Litter</a>
                     {% if breeding.status != "closed" or breeding.active %}

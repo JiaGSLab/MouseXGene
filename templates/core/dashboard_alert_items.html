@@ -50,7 +50,7 @@
                     {% else %}
                         No litter has been recorded since setup.
                     {% endif %}
-                    {% if can_manage_breeding %}
+                    {% if breeding.can_edit %}
                         <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
                         {% if breeding.status != "closed" or breeding.active %}
                             · <a href="{% url 'breeding:breeding_end' breeding.pk %}">End breeding</a>

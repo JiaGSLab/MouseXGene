@@ -35,6 +35,15 @@ class AuditLogAdmin(admin.ModelAdmin):
     list_filter = ("action", "object_type", "user")
     ordering = ("-created_at",)
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(ImportLog)
 class ImportLogAdmin(admin.ModelAdmin):

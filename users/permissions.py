@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.views import redirect_to_login
+from django.db.models import Q
 
 from core.models import Project, ProjectMembership
 from .models import UserProfile
@@ -163,6 +164,14 @@ def can_manage_breeding(user) -> bool:
     return is_admin(user) or is_manager(user)
 
 
+def can_create_breeding(user) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if is_admin(user):
+        return True
+    return Project.objects.filter(Q(owner=user) | Q(memberships__user=user)).exists()
+
+
 def can_view_audit(user) -> bool:
     return is_admin(user)
 
@@ -183,8 +192,8 @@ def ensure_can_manage_project_membership(user, project: Project | None, *, denie
         raise PermissionDenied(denied_message or "You cannot manage membership for this project.")
 
 
-def ensure_can_edit_mice_projects(user, mice: Iterable) -> None:
-    """Require edit rights for every distinct non-null project among the given Mouse instances."""
+def can_edit_mice_projects(user, mice: Iterable) -> bool:
+    """Whether every distinct non-null mouse project is editable by this user."""
     seen: set[int] = set()
     for mouse in mice:
         if mouse is None:
@@ -196,22 +205,35 @@ def ensure_can_edit_mice_projects(user, mice: Iterable) -> None:
         if pid in seen:
             continue
         seen.add(pid)
-        ensure_can_edit_project_data(user, project)
+        if not can_edit_project_data(user, project):
+            return False
+    return bool(seen) or is_admin(user)
 
 
-def ensure_can_edit_cage(user, cage) -> None:
-    """Cage inherits edit scope from mice currently housed in it; empty cages remain editable by any user."""
+def ensure_can_edit_mice_projects(user, mice: Iterable) -> None:
+    if not can_edit_mice_projects(user, mice):
+        raise PermissionDenied("You do not have permission to modify one or more selected mouse projects.")
+
+
+def can_edit_cage(user, cage) -> bool:
+    """Whether a user may edit a cage and every project represented in it."""
     from colony.models import Mouse
 
     if is_admin(user):
-        return
+        return True
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(cage, "project_id", None) and not can_edit_project_data(user, cage.project):
+        return False
     project_ids = set(
         Mouse.objects.filter(current_cage=cage).values_list("project_id", flat=True).distinct()
     )
-    if not project_ids:
-        return
-    for project in Project.objects.filter(pk__in=project_ids):
-        ensure_can_edit_project_data(user, project)
+    return all(can_edit_project_data(user, project) for project in Project.objects.filter(pk__in=project_ids))
+
+
+def ensure_can_edit_cage(user, cage) -> None:
+    if not can_edit_cage(user, cage):
+        raise PermissionDenied("You do not have permission to edit this cage or one of its assigned projects.")
 
 
 def ensure_cage_status_change(user, cage, previous: str, new: str) -> None:

@@ -1,11 +1,13 @@
 from django.contrib import messages
+from django.conf import settings
 from django.core.cache import cache
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.core.exceptions import PermissionDenied
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.db.models import Count, Max, Q
+from django.db import connection
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -15,8 +17,13 @@ from colony.models import Cage, Colony, Mouse, StrainLine
 from colony.genotype_requirements import mouse_requires_genotype_q
 from breeding.models import Breeding, Litter
 from breeding.analytics import breeding_litter_timing_alert
-from breeding.consistency import active_breeding_cage_mismatches
+from breeding.consistency import (
+    active_breeding_cage_mismatch_candidates,
+    active_breeding_cage_mismatches,
+    breeding_member_role_rows,
+)
 from core.audit import log_audit_event
+from core.form_error_summary import form_error_summary
 from core.list_sort import PROJECT_LIST_SORT, apply_list_sort, build_list_sort_context
 from core.history import audit_entries_for_object, merge_actor_labels, summarize_modelform_changes
 from core.owner_filters import (
@@ -31,6 +38,7 @@ from .models import Project, ProjectMembership, format_project_owner_label
 from users.permissions import (
     authenticated_required,
     can_create_project,
+    can_edit_mice_projects,
     can_manage_project_settings,
     can_view_audit,
     is_admin,
@@ -39,6 +47,16 @@ from users.permissions import (
 
 
 DASHBOARD_STATS_CACHE_TIMEOUT = 30
+
+
+def health(request: HttpRequest) -> JsonResponse:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        return JsonResponse({"status": "unavailable"}, status=503)
+    return JsonResponse({"status": "ok", "release": settings.APP_RELEASE})
 
 
 def _dashboard_stats_cache_key(user, owner: str) -> str:
@@ -145,10 +163,11 @@ def home(request: HttpRequest) -> HttpResponse:
             Q(litter_count=0, start_date__lte=breeding_overdue_cutoff)
             | Q(litter_count__gt=0, latest_litter_date__lte=breeding_overdue_cutoff)
         )
-        .order_by("-start_date")[:200]
+        .order_by("-start_date")
     )
+    breeding_overdue_count = breeding_overdue_qs.count()
     breeding_overdue_all: list[Breeding] = []
-    for b in breeding_overdue_qs:
+    for b in breeding_overdue_qs[:dashboard_list_limit]:
         alert = breeding_litter_timing_alert(
             start_date=b.start_date,
             latest_litter_date=b.latest_litter_date,
@@ -160,9 +179,16 @@ def home(request: HttpRequest) -> HttpResponse:
         if alert:
             b.litter_timing_alert = alert
             breeding_overdue_all.append(b)
-    breeding_overdue_count = len(breeding_overdue_all)
-    breeding_cage_mismatch_all = active_breeding_cage_mismatches(breedings_queryset)
-    breeding_cage_mismatch_count = len(breeding_cage_mismatch_all)
+    mismatch_candidates = active_breeding_cage_mismatch_candidates(breedings_queryset)
+    breeding_cage_mismatch_count = mismatch_candidates.count()
+    breeding_cage_mismatch_all = active_breeding_cage_mismatches(
+        list(mismatch_candidates[:dashboard_list_limit])
+    )
+    for breeding in {row.pk: row for row in [*breeding_overdue_all, *breeding_cage_mismatch_all]}.values():
+        breeding.can_edit = can_edit_mice_projects(
+            request.user,
+            [member["mouse"] for member in breeding_member_role_rows(breeding)],
+        )
 
     owner_link_params = {"owner": home_owner} if home_owner else {}
     weaning_due_soon = list(weaning_due_soon_qs.order_by("birth_date")[:dashboard_list_limit])
@@ -250,6 +276,8 @@ def home(request: HttpRequest) -> HttpResponse:
         "breeding_overdue": 80,
     }
     dashboard_alerts.sort(key=lambda a: alert_order.get(a["kind"], 999))
+    actionable_dashboard_alerts = [alert for alert in dashboard_alerts if alert["count"] > 0]
+    clear_dashboard_alerts = [alert for alert in dashboard_alerts if alert["count"] == 0]
 
     inactive_cages = total_cages - active_cages
     inactive_mice = total_mice - active_mice
@@ -273,6 +301,8 @@ def home(request: HttpRequest) -> HttpResponse:
         "breeding_cage_mismatches": breeding_cage_mismatches,
         "empty_active_cages_long": empty_active_cages_long,
         "dashboard_alerts": dashboard_alerts,
+        "actionable_dashboard_alerts": actionable_dashboard_alerts,
+        "clear_dashboard_alerts": clear_dashboard_alerts,
         "recent_mice": mice_queryset.select_related("strain_line", "current_cage").order_by("-created_at")[
             :dashboard_list_limit
         ],
@@ -420,7 +450,7 @@ def project_create(request: HttpRequest) -> HttpResponse:
     if not can_create_project(request.user):
         raise PermissionDenied("Only lab admins or lab managers can create projects.")
     if request.method == "POST":
-        form = ProjectForm(request.POST)
+        form = ProjectForm(request.POST, user=request.user)
         if form.is_valid():
             project = form.save(commit=False)
             if not project.owner_id:
@@ -438,13 +468,19 @@ def project_create(request: HttpRequest) -> HttpResponse:
                 obj=project,
                 message=f"Created project {project.name}.",
             )
+            messages.success(request, f"Project {project.name} created.")
             return redirect("project_detail", pk=project.pk)
     else:
-        form = ProjectForm(initial={"owner": request.user})
+        form = ProjectForm(initial={"owner": request.user}, user=request.user)
     return render(
         request,
         "core/project_form.html",
-        {"form": form, "page_title": "Create Project", "submit_label": "Save Project"},
+        {
+            "form": form,
+            "page_title": "Create Project",
+            "submit_label": "Save Project",
+            "error_summary": form_error_summary(form),
+        },
     )
 
 
@@ -454,7 +490,7 @@ def project_edit(request: HttpRequest, pk: int) -> HttpResponse:
     if not (is_admin(request.user) or can_manage_project_settings(request.user, project)):
         raise PermissionDenied("You cannot edit this project.")
     if request.method == "POST":
-        form = ProjectForm(request.POST, instance=project)
+        form = ProjectForm(request.POST, instance=project, user=request.user)
         if form.is_valid():
             msg = summarize_modelform_changes(form)
             form.save()
@@ -464,13 +500,19 @@ def project_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 obj=project,
                 message=msg[:4000],
             )
+            messages.success(request, f"Project {project.name} updated.")
             return redirect("project_detail", pk=project.pk)
     else:
-        form = ProjectForm(instance=project)
+        form = ProjectForm(instance=project, user=request.user)
     return render(
         request,
         "core/project_form.html",
-        {"form": form, "page_title": f"Edit Project {project.name}", "submit_label": "Save Changes"},
+        {
+            "form": form,
+            "page_title": f"Edit Project {project.name}",
+            "submit_label": "Save Changes",
+            "error_summary": form_error_summary(form),
+        },
     )
 
 
@@ -505,20 +547,25 @@ def guide(request: HttpRequest) -> HttpResponse:
 
 
 def permission_denied(request: HttpRequest, exception: PermissionDenied) -> HttpResponse:
-    """Show a friendly flash message instead of a bare 403 page."""
+    """Keep permission failures explicit; never make a rejected POST look successfully saved."""
     message = str(exception) or "You do not have permission to perform this action."
     if request.user.is_authenticated:
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            messages.error(request, f"Nothing was saved. {message}")
-            referer = request.META.get("HTTP_REFERER", "").strip()
-            if referer:
-                if url_has_allowed_host_and_scheme(
-                    referer,
-                    allowed_hosts={request.get_host()},
-                    require_https=request.is_secure(),
-                ):
-                    return redirect(referer)
-            return redirect(request.get_full_path() or reverse("home"))
-        messages.error(request, message)
-        return render(request, "403.html", {"message": message}, status=403)
+        prefix = "Nothing was saved. " if request.method not in {"GET", "HEAD", "OPTIONS"} else ""
+        referer = request.META.get("HTTP_REFERER", "").strip()
+        return_url = (
+            referer
+            if referer
+            and url_has_allowed_host_and_scheme(
+                referer,
+                allowed_hosts={request.get_host()},
+                require_https=request.is_secure(),
+            )
+            else ""
+        )
+        return render(
+            request,
+            "403.html",
+            {"message": f"{prefix}{message}", "return_url": return_url},
+            status=403,
+        )
     return redirect(reverse("login") + f"?next={request.path}")

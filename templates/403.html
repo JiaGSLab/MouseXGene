@@ -8,6 +8,9 @@
     <p class="muted">{{ message|default:"You do not have permission to perform this action." }}</p>
 </section>
 <section class="card">
-    <p><a class="button" href="{% url 'home' %}">Back to home</a></p>
+    <div class="action-links">
+        {% if return_url %}<a class="button" href="{{ return_url }}">Return to previous page</a>{% endif %}
+        <a class="button button-light" href="{% url 'home' %}">Back to home</a>
+    </div>
 </section>
 {% endblock %}

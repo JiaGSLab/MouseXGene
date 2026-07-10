@@ -67,6 +67,7 @@ from .models import (
     MouseGenotypeComponent,
     StrainLine,
     StrainLineDocument,
+    suppress_genotype_summary_signal,
 )
 from .strain_pdf import MAX_STRAIN_LINE_PDF_COUNT, resolve_pdf_description, unique_pdf_description, validate_strain_line_pdf_file
 from breeding.models import Breeding, Litter
@@ -88,12 +89,14 @@ from colony.cage_lifecycle import (
     TERMINAL_MOUSE_STATUSES,
     breeding_setup_message,
     close_active_breedings_for_terminal_mouse,
+    reconcile_active_breedings_for_terminal_mouse,
     remove_terminal_mouse_from_current_cage,
     sync_cage_after_occupancy_change,
     sync_cage_breeding_workflow,
     sync_cage_status_from_mice,
     validate_active_sex_compatible_with_cage,
 )
+from colony.mouse_status import apply_terminal_status
 from colony.strain_line_usage import (
     compute_strain_line_usage_counts_bulk,
     compute_strain_line_usage_counts,
@@ -121,6 +124,8 @@ from core.list_sort import (
 from users.permissions import (
     authenticated_required,
     can_archive_or_change_terminal_status,
+    can_edit_cage,
+    can_edit_mice_projects,
     can_edit_strain_line,
     can_edit_project_data,
     can_import,
@@ -672,7 +677,7 @@ def _filter_cages_by_use(cages, cage_use: str):
     return cages
 
 
-def _filtered_cages_queryset(request: HttpRequest):
+def _filtered_cages_queryset(request: HttpRequest, *, include_genotypes: bool = False):
     """Apply the same GET filters as the cage list page."""
     q = (request.GET.get("q") or "").strip()
     room = (request.GET.get("room") or "").strip()
@@ -757,7 +762,7 @@ def _filtered_cages_queryset(request: HttpRequest):
             )
         )
 
-    return (
+    cages = (
         cages.distinct()
         .order_by("cage_id")
         .select_related("project", "project__owner", "project__owner__profile", "colony", "colony__strain_line")
@@ -766,10 +771,14 @@ def _filtered_cages_queryset(request: HttpRequest):
             "current_mice__project",
             "current_mice__project__owner",
             "current_mice__project__owner__profile",
+        )
+    )
+    if include_genotypes:
+        cages = cages.prefetch_related(
             "current_mice__genotype_components__strain_line",
             "current_mice__genotypes__gene",
         )
-    )
+    return cages
 
 
 CAGE_EXPORT_EXTRA_COLUMNS = [
@@ -816,11 +825,15 @@ def _cages_export_rows_from_queryset(cages) -> list[list]:
 
 
 def get_cages_export_rows(request: HttpRequest) -> list[list]:
-    return _cages_export_rows_from_queryset(_filtered_cages_queryset(request))
+    return _cages_export_rows_from_queryset(_filtered_cages_queryset(request, include_genotypes=True))
 
 
 def _cages_export_http_response(request: HttpRequest, export_fmt: str) -> HttpResponse:
-    cages = apply_list_sort(_filtered_cages_queryset(request), request, CAGE_LIST_SORT)
+    cages = apply_list_sort(
+        _filtered_cages_queryset(request, include_genotypes=True),
+        request,
+        CAGE_LIST_SORT,
+    )
     rows = _cages_export_rows_from_queryset(cages)
     headers = _cages_export_headers()
     if export_fmt == "csv":
@@ -985,7 +998,13 @@ def get_mouse_genotype_rows(mouse: Mouse) -> list[list]:
 
 def build_short_genotype_summary(mouse: Mouse) -> str:
     """Read-only genotype display for lists and exports (no DB writes)."""
-    return display_genotype_summary(mouse)
+    stored = (mouse.genotype_summary or "").strip()
+    if stored and stored != "-":
+        return stored
+    prefetched = getattr(mouse, "_prefetched_objects_cache", {})
+    if "genotype_components" in prefetched or "genotypes" in prefetched:
+        return display_genotype_summary(mouse)
+    return ""
 
 
 def display_genotype_summary(mouse: Mouse) -> str:
@@ -1383,6 +1402,15 @@ def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMove
             .filter(pk__in=[mouse.pk for mouse in mice])
             .order_by("mouse_uid")
         )
+        recheck_form = BulkMouseMoveCageForm(request.POST, mice=locked_mice, user=request.user)
+        if not recheck_form.is_valid():
+            raise ValidationError(
+                "Destination cage or breeding occupancy changed while the confirmation page was open. "
+                "Review the selected mice and destination cage, then try again."
+            )
+        destination_cage = Cage.objects.select_for_update().get(
+            pk=recheck_form.cleaned_data["destination_cage"].pk
+        )
         origin_cages = Cage.objects.in_bulk(
             [mouse.current_cage_id for mouse in locked_mice if mouse.current_cage_id]
         )
@@ -1422,28 +1450,74 @@ def _move_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseMove
     return moved
 
 
+def _move_mouse_transactionally(request: HttpRequest, mouse: Mouse) -> tuple[Mouse, Cage | None, Cage, object]:
+    """Lock and revalidate a single move immediately before changing occupancy."""
+    with transaction.atomic():
+        mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
+        recheck_form = MoveCageForm(request.POST, mouse=mouse_locked, user=request.user)
+        if not recheck_form.is_valid():
+            raise ValidationError(
+                "Destination cage or breeding occupancy changed while this form was open. "
+                "Review the destination cage and try again."
+            )
+        destination_cage = Cage.objects.select_for_update().get(
+            pk=recheck_form.cleaned_data["destination_cage"].pk
+        )
+        move_date = recheck_form.cleaned_data["move_date"]
+        reason = recheck_form.cleaned_data["reason"]
+        notes = recheck_form.cleaned_data["notes"]
+        origin_cage = mouse_locked.current_cage
+        affected_cage_ids = {destination_cage.pk}
+        if origin_cage:
+            affected_cage_ids.add(origin_cage.pk)
+
+        CageMembership.objects.select_for_update().filter(
+            mouse=mouse_locked,
+            is_current=True,
+        ).update(end_date=move_date, is_current=False)
+        mouse_locked.current_cage = destination_cage
+        mouse_locked.save(update_fields=["current_cage", "updated_at"])
+        CageMembership.objects.create(
+            mouse=mouse_locked,
+            cage=destination_cage,
+            start_date=move_date,
+            end_date=None,
+            is_current=True,
+            reason=reason,
+            notes=notes,
+        )
+        for cage in Cage.objects.filter(pk__in=affected_cage_ids):
+            sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage)
+    return mouse_locked, origin_cage, destination_cage, move_date
+
+
 def _end_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseEndForm) -> int:
     terminal_status = form.cleaned_data["terminal_status"]
     end_date = form.cleaned_data["end_date"]
     reason = (form.cleaned_data.get("reason") or "").strip()
     notes = (form.cleaned_data.get("notes") or "").strip()
     ended = 0
+    closed_breeding_codes: set[str] = set()
+    continued_breeding_codes: set[str] = set()
     with transaction.atomic():
-        for mouse in mice:
+        locked_mice = list(
+            Mouse.objects.select_for_update().filter(pk__in=[mouse.pk for mouse in mice]).order_by("mouse_uid")
+        )
+        for mouse in locked_mice:
             previous_status = mouse.status
-            mouse.status = terminal_status
-            mouse.death_date = end_date
-            if terminal_status in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
-                mouse.euthanasia_date = end_date
-            else:
-                mouse.euthanasia_date = None
-            mouse.death_reason = reason
-            mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
+            apply_terminal_status(mouse, status=terminal_status, end_date=end_date, reason=reason)
             remove_terminal_mouse_from_current_cage(
                 mouse,
                 exit_date=end_date,
                 reason=f"Mouse marked as {mouse.get_status_display()} via bulk End Selected Mice workflow.",
             )
+            impact = reconcile_active_breedings_for_terminal_mouse(
+                mouse,
+                end_date=end_date,
+                reason="Bulk End Selected Mice workflow",
+            )
+            closed_breeding_codes.update(impact.closed_codes)
+            continued_breeding_codes.update(impact.continued_codes)
             MouseExperimentAssignment.objects.filter(mouse=mouse, ended_at__isnull=True).update(
                 ended_at=timezone.now(),
                 ended_by=request.user,
@@ -1462,6 +1536,14 @@ def _end_bulk_mice(request: HttpRequest, mice: list[Mouse], form: BulkMouseEndFo
                 message=message[:4000],
             )
             ended += 1
+    if closed_breeding_codes:
+        messages.info(request, f"Closed active breeding(s): {', '.join(sorted(closed_breeding_codes))}.")
+    if continued_breeding_codes:
+        messages.info(
+            request,
+            "Continued breeding(s) with the remaining active dam(s): "
+            f"{', '.join(sorted(continued_breeding_codes))}.",
+        )
     return ended
 
 
@@ -1516,19 +1598,22 @@ def mouse_bulk_action(request: HttpRequest) -> HttpResponse:
         return redirect(next_url)
 
     if is_confirm and form.is_valid() and not errors:
-        if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
-            count = _mark_mice_in_experiment(request, mice, form)
-            messages.success(request, f"Marked {count} mouse/mice as in experiment.")
-        elif action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
-            count = _clear_mice_experiment(request, mice)
-            messages.success(request, f"Cleared experiment status for {count} mouse/mice.")
-        elif action == BULK_MOUSE_ACTION_MOVE_CAGE:
-            count = _move_bulk_mice(request, mice, form)
-            messages.success(request, f"Moved {count} mouse/mice.")
-        elif action == BULK_MOUSE_ACTION_END:
-            count = _end_bulk_mice(request, mice, form)
-            messages.success(request, f"Ended {count} mouse/mice.")
-        return redirect(next_url)
+        try:
+            if action == BULK_MOUSE_ACTION_MARK_EXPERIMENT:
+                count = _mark_mice_in_experiment(request, mice, form)
+                messages.success(request, f"Marked {count} mouse/mice as in experiment.")
+            elif action == BULK_MOUSE_ACTION_CLEAR_EXPERIMENT:
+                count = _clear_mice_experiment(request, mice)
+                messages.success(request, f"Cleared experiment status for {count} mouse/mice.")
+            elif action == BULK_MOUSE_ACTION_MOVE_CAGE:
+                count = _move_bulk_mice(request, mice, form)
+                messages.success(request, f"Moved {count} mouse/mice.")
+            elif action == BULK_MOUSE_ACTION_END:
+                count = _end_bulk_mice(request, mice, form)
+                messages.success(request, f"Ended {count} mouse/mice.")
+            return redirect(next_url)
+        except (IntegrityError, ValidationError) as exc:
+            form.add_error(None, str(exc))
 
     context = _bulk_action_confirm_context(
         request,
@@ -1872,7 +1957,7 @@ def _template_loci_union_for_mouse_relations(
             text = (entry.get("locus_name") or "").strip()
             if not text:
                 continue
-            key = text.casefold()
+            key = StrainLine.normalize_locus_name(text).casefold()
             if key in seen:
                 continue
             seen.add(key)
@@ -2022,7 +2107,10 @@ def _apply_locus_renames_on_mice(
         renamed += MouseGenotypeComponent.objects.filter(
             mouse__strain_line=line,
             locus_name=old_name,
-        ).update(locus_name=new_name)
+        ).update(
+            locus_name=new_name,
+            locus_key=StrainLine.normalize_locus_name(new_name).casefold(),
+        )
     return renamed
 
 
@@ -2033,33 +2121,83 @@ def _propagate_strain_line_template_to_mice(
 ) -> tuple[int, int, int]:
     """Sync template loci to mice on this strain line and refresh genotype summaries."""
     entries = line.expected_loci_entries()
-    entry_by_name = {e["locus_name"]: e for e in entries}
-    if before_entries:
-        _apply_locus_renames_on_mice(line, before_entries, entries)
-    mice_count = 0
-    components_added = 0
-    components_removed = 0
-    for mouse in Mouse.objects.filter(strain_line=line).iterator(chunk_size=100):
-        components_added += mouse.ensure_template_genotype_components(include_strain_template=True)
-        for comp in list(mouse.genotype_components.all()):
-            locus = (comp.locus_name or "").strip()
-            if not locus:
-                continue
-            entry = entry_by_name.get(locus)
-            if entry is None:
-                comp.delete()
-                components_removed += 1
-                continue
-            chromosome_type = entry.get("chromosome_type", "")
-            if (
-                chromosome_type in MouseGenotypeComponent.ChromosomeType.values
-                and comp.chromosome_type != chromosome_type
-            ):
-                comp.chromosome_type = chromosome_type
-                comp.save(update_fields=["chromosome_type", "updated_at"])
-        mouse.rebuild_genotype_summary(save=True)
-        mice_count += 1
-    return mice_count, components_added, components_removed
+    entry_by_key = {
+        StrainLine.normalize_locus_name(entry["locus_name"]).casefold(): entry
+        for entry in entries
+        if StrainLine.normalize_locus_name(entry["locus_name"])
+    }
+    with transaction.atomic(), suppress_genotype_summary_signal():
+        if before_entries:
+            _apply_locus_renames_on_mice(line, before_entries, entries)
+        mice = list(
+            Mouse.objects.filter(strain_line=line)
+            .select_related("strain_line")
+            .prefetch_related("genotype_components")
+            .order_by("pk")
+        )
+        to_create: list[MouseGenotypeComponent] = []
+        to_update: list[MouseGenotypeComponent] = []
+        to_delete_ids: list[int] = []
+        now = timezone.now()
+        for mouse in mice:
+            existing_by_key = {
+                StrainLine.normalize_locus_name(component.locus_name or "").casefold(): component
+                for component in mouse.genotype_components.all()
+                if StrainLine.normalize_locus_name(component.locus_name or "")
+            }
+            next_sort = max((component.sort_order for component in existing_by_key.values()), default=0) + 1
+            for key, entry in entry_by_key.items():
+                component = existing_by_key.get(key)
+                chromosome_type = entry.get("chromosome_type") or MouseGenotypeComponent.ChromosomeType.UNKNOWN
+                if chromosome_type not in MouseGenotypeComponent.ChromosomeType.values:
+                    chromosome_type = MouseGenotypeComponent.ChromosomeType.UNKNOWN
+                if component is None:
+                    to_create.append(
+                        MouseGenotypeComponent(
+                            mouse=mouse,
+                            strain_line=line,
+                            locus_name=(entry["locus_name"] or "").strip(),
+                            locus_key=key,
+                            chromosome_type=chromosome_type,
+                            zygosity_class=MouseGenotypeComponent.ZygosityClass.UNKNOWN,
+                            sort_order=next_sort,
+                        )
+                    )
+                    next_sort += 1
+                elif component.chromosome_type != chromosome_type:
+                    component.chromosome_type = chromosome_type
+                    component.updated_at = now
+                    to_update.append(component)
+            for key, component in existing_by_key.items():
+                if key not in entry_by_key:
+                    to_delete_ids.append(component.pk)
+
+        if to_create:
+            MouseGenotypeComponent.objects.bulk_create(to_create, batch_size=500)
+        if to_update:
+            MouseGenotypeComponent.objects.bulk_update(
+                to_update,
+                ["chromosome_type", "updated_at"],
+                batch_size=500,
+            )
+        if to_delete_ids:
+            MouseGenotypeComponent.objects.filter(pk__in=to_delete_ids).delete()
+
+        refreshed_mice = list(
+            Mouse.objects.filter(pk__in=[mouse.pk for mouse in mice])
+            .select_related("strain_line")
+            .prefetch_related("genotype_components__strain_line")
+        )
+        for mouse in refreshed_mice:
+            mouse.genotype_summary = mouse.compute_genotype_summary()
+            mouse.updated_at = now
+        if refreshed_mice:
+            Mouse.objects.bulk_update(
+                refreshed_mice,
+                ["genotype_summary", "updated_at"],
+                batch_size=500,
+            )
+    return len(mice), len(to_create), len(to_delete_ids)
 
 
 def _apply_strain_template_resolution(mouse: Mouse, *, mode: str, target_loci: list[str]) -> None:
@@ -2118,9 +2256,10 @@ def _apply_mouse_genotype_rows(mouse: Mouse, rows: list[dict[str, str]]) -> int:
         if "/" not in cleaned:
             obj, _ = MouseGenotypeComponent.objects.get_or_create(
                 mouse=mouse,
-                locus_name=locus,
+                locus_key=locus.casefold(),
                 defaults={
                     "strain_line": mouse.strain_line,
+                    "locus_name": (row.get("locus") or locus).strip(),
                     "sort_order": i + 1,
                 },
             )
@@ -2138,9 +2277,10 @@ def _apply_mouse_genotype_rows(mouse: Mouse, rows: list[dict[str, str]]) -> int:
             continue
         obj, _ = MouseGenotypeComponent.objects.get_or_create(
             mouse=mouse,
-            locus_name=locus,
+            locus_key=locus.casefold(),
             defaults={
                 "strain_line": mouse.strain_line,
+                "locus_name": (row.get("locus") or locus).strip(),
                 "sort_order": i + 1,
             },
         )
@@ -2169,7 +2309,34 @@ def _apply_mouse_genotype_rows_to_template(mouse: Mouse, rows: list[dict[str, st
         for c in mouse.genotype_components.all()
         if StrainLine.normalize_locus_name((c.locus_name or "").strip())
     }
+    missing: list[MouseGenotypeComponent] = []
+    for index, template in enumerate(template_rows, start=1):
+        locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
+        if not locus or locus.casefold() in components:
+            continue
+        missing.append(
+            MouseGenotypeComponent(
+                mouse=mouse,
+                strain_line=mouse.strain_line,
+                locus_name=(template.get("locus_name") or locus).strip(),
+                locus_key=locus.casefold(),
+                chromosome_type=(
+                    template.get("chromosome_type")
+                    or MouseGenotypeComponent.ChromosomeType.UNKNOWN
+                ),
+                zygosity_class=MouseGenotypeComponent.ZygosityClass.UNKNOWN,
+                sort_order=index,
+            )
+        )
+    if missing:
+        MouseGenotypeComponent.objects.bulk_create(missing)
+        components = {
+            StrainLine.normalize_locus_name((component.locus_name or "").strip()).casefold(): component
+            for component in MouseGenotypeComponent.objects.filter(mouse=mouse)
+            if StrainLine.normalize_locus_name((component.locus_name or "").strip())
+        }
     updated = 0
+    changed_components: list[MouseGenotypeComponent] = []
     for template in template_rows:
         locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
         if not locus:
@@ -2217,8 +2384,24 @@ def _apply_mouse_genotype_rows_to_template(mouse: Mouse, rows: list[dict[str, st
             component.zygosity_class or "",
         )
         if after != before:
-            component.save()
+            component.clean()
+            component.updated_at = timezone.now()
+            changed_components.append(component)
             updated += 1
+    if changed_components:
+        MouseGenotypeComponent.objects.bulk_update(
+            changed_components,
+            [
+                "zygosity",
+                "allele_display_1",
+                "allele_display_2",
+                "chromosome_type",
+                "zygosity_class",
+                "updated_at",
+            ],
+        )
+    if hasattr(mouse, "_prefetched_objects_cache"):
+        mouse._prefetched_objects_cache.pop("genotype_components", None)
     mouse.rebuild_genotype_summary(save=True)
     return updated
 
@@ -2707,7 +2890,10 @@ def _execute_two_pass_mouse_import(
     genotype_to_create: list[MouseGenotypeComponent] = []
     genotype_to_update: list[MouseGenotypeComponent] = []
     existing_by_mouse_locus = {
-        (gt.mouse_id, (gt.locus_name or "").strip()): gt
+        (
+            gt.mouse_id,
+            gt.locus_key or StrainLine.normalize_locus_name(gt.locus_name or "").casefold(),
+        ): gt
         for gt in MouseGenotypeComponent.objects.filter(mouse_id__in=[m.id for m in mice_by_uid.values()])
     }
     for row in rows:
@@ -2718,13 +2904,15 @@ def _execute_two_pass_mouse_import(
             locus_name = (slot.get("locus_name") or "").strip()
             if not locus_name:
                 continue
-            key = (mouse.id, locus_name)
+            locus_key = StrainLine.normalize_locus_name(locus_name).casefold()
+            key = (mouse.id, locus_key)
             existing = existing_by_mouse_locus.get(key)
             if existing is None:
                 obj = MouseGenotypeComponent(
                     mouse=mouse,
                     strain_line=mouse.strain_line,
                     locus_name=locus_name,
+                    locus_key=locus_key,
                     chromosome_type=slot.get("chromosome_type") or MouseGenotypeComponent.ChromosomeType.UNKNOWN,
                     zygosity_class=slot.get("zygosity_class") or MouseGenotypeComponent.ZygosityClass.UNKNOWN,
                     zygosity=slot.get("zygosity_display", ""),
@@ -2795,12 +2983,6 @@ def mouse_genotype_components_edit(request: HttpRequest, pk: int) -> HttpRespons
     mouse = Mouse.objects.prefetch_related("possible_dams__strain_line", "genotype_components").get(pk=mouse.pk)
     template_rows, template_source_label = _genotyping_template_rows_for_mouse(mouse)
     template_loci = [row.get("locus_name", "") for row in template_rows if (row.get("locus_name") or "").strip()]
-    mouse.ensure_template_genotype_components(
-        extra_loci=template_loci,
-        include_strain_template=False,
-    )
-    if hasattr(mouse, "_prefetched_objects_cache"):
-        mouse._prefetched_objects_cache.pop("genotype_components", None)
     before_signature = _genotype_components_signature(mouse)
     posted_genotype_rows: list[dict[str, str]] = []
     if request.method == "POST":
@@ -3207,6 +3389,12 @@ def strain_line_upload_documents(request: HttpRequest, pk: int) -> HttpResponse:
                 uploaded_by=request.user,
             )
             created_labels.append(unique_description)
+        log_audit_event(
+            user=request.user,
+            action=AuditLog.Action.CREATE,
+            obj=line,
+            message=f"Uploaded strain-line PDF document(s): {', '.join(created_labels)}.",
+        )
     messages.success(request, f"Uploaded {len(created_labels)} PDF file(s): {', '.join(created_labels)}.")
     return redirect(next_url)
 
@@ -3236,9 +3424,19 @@ def strain_line_document_delete(request: HttpRequest, pk: int, doc_pk: int) -> H
         reverse("colony:strain_line_detail", kwargs={"pk": pk}),
     )
     label = doc.display_name
-    if doc.file:
-        doc.file.delete(save=False)
-    doc.delete()
+    line = doc.strain_line
+    file_storage = doc.file.storage if doc.file else None
+    file_name = doc.file.name if doc.file else ""
+    with transaction.atomic():
+        doc.delete()
+        log_audit_event(
+            user=request.user,
+            action=AuditLog.Action.DELETE,
+            obj=line,
+            message=f"Deleted strain-line PDF document: {label}.",
+        )
+        if file_storage is not None and file_name:
+            transaction.on_commit(lambda: file_storage.delete(file_name))
     messages.success(request, f"Removed PDF “{label}”.")
     return redirect(next_url)
 
@@ -3291,34 +3489,37 @@ def strain_line_edit(request: HttpRequest, pk: int) -> HttpResponse:
                     changed_fields=admin_changed_fields,
                     reason=correction_reason,
                 )
-                line = form.save()
-                line.refresh_from_db()
-                after_name = (line.name or line.line_name or "").strip()
                 loci_changed = submitted_loci_names != before_loci_names
-                log_audit_event(
-                    user=request.user,
-                    action=AuditLog.Action.UPDATE,
-                    obj=line,
-                    message=msg[:4000],
-                )
-                messages.success(request, "Strain line updated.")
-                if loci_changed or before_name != after_name:
-                    mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
-                        line,
-                        before_entries=before_editable if loci_changed else None,
+                mice_updated = rows_added = rows_removed = 0
+                with transaction.atomic():
+                    locked_line = StrainLine.objects.select_for_update().get(pk=line.pk)
+                    line = form.save()
+                    line.refresh_from_db()
+                    after_name = (line.name or line.line_name or "").strip()
+                    log_audit_event(
+                        user=request.user,
+                        action=AuditLog.Action.UPDATE,
+                        obj=line,
+                        message=msg[:4000],
                     )
-                    if mice_updated:
-                        detail_parts = [f"synced {mice_updated} mouse(s)"]
-                        if rows_added:
-                            detail_parts.append(f"{rows_added} locus row(s) added")
-                        if rows_removed:
-                            detail_parts.append(f"{rows_removed} locus row(s) removed from mice")
-                        messages.info(
-                            request,
-                            "Definition changes applied: "
-                            + ", ".join(detail_parts)
-                            + "; genotype summaries refreshed.",
+                    if loci_changed or before_name != after_name:
+                        mice_updated, rows_added, rows_removed = _propagate_strain_line_template_to_mice(
+                            line,
+                            before_entries=before_editable if loci_changed else None,
                         )
+                messages.success(request, "Strain line updated.")
+                if mice_updated:
+                    detail_parts = [f"synced {mice_updated} mouse(s)"]
+                    if rows_added:
+                        detail_parts.append(f"{rows_added} locus row(s) added")
+                    if rows_removed:
+                        detail_parts.append(f"{rows_removed} locus row(s) removed from mice")
+                    messages.info(
+                        request,
+                        "Definition changes applied: "
+                        + ", ".join(detail_parts)
+                        + "; genotype summaries refreshed.",
+                    )
                 return redirect("colony:strain_line_detail", pk=line.pk)
         messages.error(request, "Could not save strain line. Please fix the errors below.")
     else:
@@ -3895,26 +4096,20 @@ def cage_genotyping_edit(request: HttpRequest, pk: int) -> HttpResponse:
             for row in template_rows
             if (row.get("locus_name") or "").strip()
         ]
-        if template_loci:
-            mouse.ensure_template_genotype_components(
-                extra_loci=template_loci,
-                include_strain_template=False,
-            )
-            if hasattr(mouse, "_prefetched_objects_cache"):
-                mouse._prefetched_objects_cache.pop("genotype_components", None)
         existing_genotype_map = _genotype_map_for_mouse(mouse)
         genotype_rows = []
         for idx, template in enumerate(template_rows):
-            locus = StrainLine.normalize_locus_name(template.get("locus_name") or "")
-            if not locus:
+            display_locus = (template.get("locus_name") or "").strip()
+            logical_locus = StrainLine.normalize_locus_name(display_locus)
+            if not logical_locus:
                 continue
             genotype_rows.append(
                 {
                     "index": idx,
-                    "locus": locus,
+                    "locus": display_locus,
                     "locus_type": template.get("locus_type") or "",
                     "chromosome_type": template.get("chromosome_type") or "",
-                    "current_value": existing_genotype_map.get(locus, ""),
+                    "current_value": existing_genotype_map.get(logical_locus, ""),
                 }
             )
         mouse_rows.append(
@@ -3986,7 +4181,6 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         _scoped_mouse_queryset(request.user)
         .filter(current_cage=cage, status=Mouse.Status.ACTIVE)
         .select_related("project", "project__owner", "project__owner__profile")
-        .prefetch_related("genotype_components__strain_line", "genotypes__gene")
         .order_by("mouse_uid")
     )
     breeding_badges_map = _active_breeding_badges_for_mouse_ids([m.pk for m in current_mice])
@@ -4027,6 +4221,26 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         or cage.cage_type == Cage.CageType.BREEDING
         or active_breeding_count > 0
     )
+    breeding_start_url = ""
+    if is_breeding_cage and active_breeding_count == 0:
+        sires = [mouse for mouse in current_mice if mouse.sex == Mouse.Sex.MALE]
+        dams = [mouse for mouse in current_mice if mouse.sex == Mouse.Sex.FEMALE]
+        if (
+            len(sires) == 1
+            and 1 <= len(dams) <= 3
+            and can_edit_mice_projects(request.user, current_mice)
+        ):
+            breeding_start_url = (
+                reverse("breeding:breeding_create")
+                + "?"
+                + urlencode(
+                    {
+                        "sire": sires[0].pk,
+                        "dams": ",".join(str(dam.pk) for dam in dams),
+                        "cage": cage.pk,
+                    }
+                )
+            )
     can_retire_cage = _can_retire_cage(request.user, cage)
     cage_retire_block_reason = ""
     if can_retire_cage:
@@ -4056,6 +4270,8 @@ def cage_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "cage_project_rows": cage_project_rows,
         "active_breeding_count": active_breeding_count,
         "is_breeding_cage": is_breeding_cage,
+        "breeding_start_url": breeding_start_url,
+        "can_edit_cage": can_edit_cage(request.user, cage),
         "can_retire_cage": can_retire_cage,
         "cage_retire_block_reason": cage_retire_block_reason,
         "can_restore_cage": can_restore_cage,
@@ -4090,7 +4306,6 @@ def cage_print(request: HttpRequest, pk: int) -> HttpResponse:
     current_mice = list(
         _scoped_mouse_queryset(request.user).filter(current_cage=cage)
         .select_related("strain_line", "project", "project__owner", "project__owner__profile")
-        .prefetch_related("genotypes__gene")
         .order_by("mouse_uid")
     )
     project_rows = cage_projects_from_mice(current_mice, cage=cage)
@@ -4240,11 +4455,6 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
         "colony__project",
         "colony__strain_line",
     )
-    mice = mice.prefetch_related(
-        "genotype_components__strain_line",
-        "genotypes__gene",
-    )
-
     mice = apply_list_sort(mice, request, MICE_LIST_SORT)
 
     if export in {"csv", "xlsx"}:
@@ -4280,7 +4490,7 @@ def mouse_list(request: HttpRequest) -> HttpResponse:
     }
     today = timezone.localdate()
     for m in mice_page:
-        m.genotype_summary = display_genotype_summary(m)
+        m.genotype_summary = build_short_genotype_summary(m)
         m.list_age_band = mouse_list_age_band(m.birth_date, today)
         if m.birth_date:
             age_days = (today - m.birth_date).days
@@ -5078,55 +5288,29 @@ def mouse_move(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = MoveCageForm(request.POST, mouse=mouse, user=request.user)
         if form.is_valid():
-            destination_cage = form.cleaned_data["destination_cage"]
-            move_date = form.cleaned_data["move_date"]
-            reason = form.cleaned_data["reason"]
-            notes = form.cleaned_data["notes"]
-
-            with transaction.atomic():
-                mouse_locked = Mouse.objects.select_for_update().get(pk=mouse.pk)
-                origin_cage = mouse_locked.current_cage
-                affected_cage_ids = {destination_cage.pk}
-                if origin_cage:
-                    affected_cage_ids.add(origin_cage.pk)
-
-                current_memberships = CageMembership.objects.select_for_update().filter(
-                    mouse=mouse_locked,
-                    is_current=True,
+            try:
+                mouse_locked, origin_cage, destination_cage, move_date = _move_mouse_transactionally(
+                    request,
+                    mouse,
                 )
-                if current_memberships.exists():
-                    current_memberships.update(end_date=move_date, is_current=False)
-
-                mouse_locked.current_cage = destination_cage
-                mouse_locked.save(update_fields=["current_cage", "updated_at"])
-
-                CageMembership.objects.create(
-                    mouse=mouse_locked,
-                    cage=destination_cage,
-                    start_date=move_date,
-                    end_date=None,
-                    is_current=True,
-                    reason=reason,
-                    notes=notes,
+            except (IntegrityError, ValidationError) as exc:
+                form.add_error(None, str(exc))
+            else:
+                source_label = origin_cage.cage_id if origin_cage else "None"
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.MOVE_CAGE,
+                    obj=mouse_locked,
+                    message=(
+                        f"Moved mouse {mouse_locked.mouse_uid} from cage {source_label} "
+                        f"to {destination_cage.cage_id} on {move_date}."
+                    ),
                 )
-                for cage in Cage.objects.filter(pk__in=affected_cage_ids):
-                    sync_cage_status_from_mice(cage) or sync_cage_after_occupancy_change(cage)
-
-            source_label = origin_cage.cage_id if origin_cage else "None"
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.MOVE_CAGE,
-                obj=mouse_locked,
-                message=(
-                    f"Moved mouse {mouse_locked.mouse_uid} from cage {source_label} "
-                    f"to {destination_cage.cage_id} on {move_date}."
-                ),
-            )
-            messages.success(
-                request,
-                f"Moved {mouse_locked.mouse_uid} from {source_label} to {destination_cage.cage_id}.",
-            )
-            return redirect("mice:mouse_detail", pk=mouse.pk)
+                messages.success(
+                    request,
+                    f"Moved {mouse_locked.mouse_uid} from {source_label} to {destination_cage.cage_id}.",
+                )
+                return redirect("mice:mouse_detail", pk=mouse.pk)
     else:
         form = MoveCageForm(mouse=mouse, user=request.user)
 
@@ -5146,44 +5330,48 @@ def mouse_end(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST":
         form = MouseEndForm(request.POST, mouse=mouse)
         if form.is_valid():
-            previous_status = mouse.status
             terminal_status = form.cleaned_data["terminal_status"]
             end_date = form.cleaned_data["end_date"]
             reason = form.cleaned_data["reason"].strip()
-            mouse.status = terminal_status
-            mouse.death_date = end_date
-            if terminal_status in {Mouse.Status.EUTHANIZED, Mouse.Status.CULLED}:
-                mouse.euthanasia_date = end_date
-            else:
-                mouse.euthanasia_date = None
-            mouse.death_reason = reason
-            mouse.save(update_fields=["status", "euthanasia_date", "death_date", "death_reason", "updated_at"])
-            terminal_cage_ids = remove_terminal_mouse_from_current_cage(
-                mouse,
-                exit_date=end_date,
-                reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
-            )
-            closed_breeding_codes = close_active_breedings_for_terminal_mouse(
-                mouse,
-                end_date=end_date,
-                reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
-            )
-
-            log_audit_event(
-                user=request.user,
-                action=AuditLog.Action.UPDATE,
-                obj=mouse,
-                message=(
-                    f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status} "
-                    f"on {end_date}. Reason: {reason}"
-                )[:4000],
-            )
+            with transaction.atomic():
+                mouse = Mouse.objects.select_for_update().select_related("project").get(pk=mouse.pk)
+                previous_status = mouse.status
+                if mouse.status in TERMINAL_MOUSE_STATUSES:
+                    messages.info(request, f"Mouse {mouse.mouse_uid} is already {mouse.get_status_display()}.")
+                    return redirect("mice:mouse_detail", pk=mouse.pk)
+                apply_terminal_status(mouse, status=terminal_status, end_date=end_date, reason=reason)
+                terminal_cage_ids = remove_terminal_mouse_from_current_cage(
+                    mouse,
+                    exit_date=end_date,
+                    reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
+                )
+                breeding_impact = reconcile_active_breedings_for_terminal_mouse(
+                    mouse,
+                    end_date=end_date,
+                    reason=f"Mouse marked as {mouse.get_status_display()} via End Mouse workflow.",
+                )
+                log_audit_event(
+                    user=request.user,
+                    action=AuditLog.Action.UPDATE,
+                    obj=mouse,
+                    message=(
+                        f"Changed mouse {mouse.mouse_uid} status from {previous_status} to {mouse.status} "
+                        f"on {end_date}. Reason: {reason}"
+                    )[:4000],
+                )
             if terminal_cage_ids:
                 messages.info(request, f"Removed mouse from current cage occupancy: {', '.join(terminal_cage_ids)}.")
-            if closed_breeding_codes:
+            if breeding_impact.closed_codes:
                 messages.info(
                     request,
-                    f"Closed active breeding(s) because this mouse is no longer active: {', '.join(closed_breeding_codes)}.",
+                    "Closed active breeding(s) because a valid sire/dam pair no longer remains: "
+                    f"{', '.join(breeding_impact.closed_codes)}.",
+                )
+            if breeding_impact.continued_codes:
+                messages.info(
+                    request,
+                    "Continued breeding(s) with the remaining active dam(s): "
+                    f"{', '.join(breeding_impact.continued_codes)}.",
                 )
             messages.success(request, f"Mouse {mouse.mouse_uid} marked as {mouse.get_status_display()}.")
             return redirect("mice:mouse_detail", pk=mouse.pk)

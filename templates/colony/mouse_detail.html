@@ -10,11 +10,15 @@
         <p class="muted">Workflow hub for this mouse: status, genotype, family, and full record history.</p>
     </div>
     <div class="action-links">
-        <a class="button" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        {% if can_edit_mouse %}
+            <a class="button" href="{% url 'mice:mouse_edit' mouse.pk %}">Edit Mouse</a>
+        {% endif %}
         {% if can_correct_mouse_sex %}
             <a class="button button-light" href="{% url 'mice:mouse_correct_sex' mouse.pk %}">Correct Sex</a>
         {% endif %}
-        <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
+        {% if can_edit_mouse %}
+            <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
+        {% endif %}
         {% if can_move_mouse %}
             <a class="button" href="{% url 'mice:mouse_move' mouse.pk %}">Move Cage</a>
         {% endif %}
@@ -85,7 +89,7 @@
             {% if active_breeding_badges %}
                 <div class="breeding-badge-list">
                     {% for b in active_breeding_badges %}
-                        <span class="breeding-badge">{{ b.role }} · {{ b.code }}</span>
+                        <a class="breeding-badge" href="{% url 'breeding:breeding_detail' b.id %}">{{ b.role }} · {{ b.code }}</a>
                     {% endfor %}
                 </div>
             {% else %}
@@ -103,7 +107,9 @@
     <h2>Genotype</h2>
     <p><strong>Genotype Summary:</strong> {{ genotype_summary|default:"-" }}</p>
     <div class="action-links">
-        <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
+        {% if can_edit_mouse %}
+            <a class="button" href="{% url 'mice:mouse_genotype_components_edit' mouse.pk %}">Edit Genotyping Results</a>
+        {% endif %}
     </div>
     <h3>Genotype Components (Current Truth)</h3>
     <table class="data-table">

@@ -1,4 +1,6 @@
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from django.db import models
 from django.db.models.signals import post_delete, post_save, pre_save
@@ -10,6 +12,18 @@ from django.utils.text import get_valid_filename
 from django.conf import settings
 
 from core.models import ActorStampedModel, TimeStampedModel, format_project_owner_label
+
+
+_genotype_summary_sync_suppressed = ContextVar("genotype_summary_sync_suppressed", default=False)
+
+
+@contextmanager
+def suppress_genotype_summary_signal():
+    token = _genotype_summary_sync_suppressed.set(True)
+    try:
+        yield
+    finally:
+        _genotype_summary_sync_suppressed.reset(token)
 
 
 class StrainLine(ActorStampedModel):
@@ -775,8 +789,10 @@ class Mouse(ActorStampedModel):
     def rebuild_genotype_summary(self, *, save: bool = True) -> str:
         summary = self.compute_genotype_summary()
         self.genotype_summary = summary
-        if save:
-            self.save(update_fields=["genotype_summary", "updated_at"])
+        if save and self.pk:
+            now = timezone.now()
+            Mouse.objects.filter(pk=self.pk).update(genotype_summary=summary, updated_at=now)
+            self.updated_at = now
         return summary
 
     def ensure_template_genotype_components(
@@ -785,34 +801,36 @@ class Mouse(ActorStampedModel):
         extra_loci: list[str] | None = None,
         include_strain_template: bool = True,
     ) -> int:
-        loci = self.strain_line.expected_loci_list() if (include_strain_template and self.strain_line_id) else []
-        loci = [(locus or "").strip() for locus in loci if (locus or "").strip()]
-        if extra_loci:
-            seen = set(loci)
-            for locus in extra_loci:
-                text = (locus or "").strip()
-                if not text or text in seen:
-                    continue
-                seen.add(text)
-                loci.append(text)
+        template_entries = self.strain_line.expected_loci_entries() if self.strain_line_id else []
+        raw_loci = self.strain_line.expected_loci_list() if (include_strain_template and self.strain_line_id) else []
+        raw_loci.extend(extra_loci or [])
+        loci: list[tuple[str, str]] = []
+        requested_keys: set[str] = set()
+        for raw_locus in raw_loci:
+            display_locus = " ".join((raw_locus or "").strip().split())
+            locus_key = StrainLine.normalize_locus_name(display_locus).casefold()
+            if not display_locus or not locus_key or locus_key in requested_keys:
+                continue
+            requested_keys.add(locus_key)
+            loci.append((display_locus, locus_key))
         if not loci:
             return 0
         entry_by_key = {
-            e["locus_name"]: e
-            for e in (self.strain_line.expected_loci_entries() if self.strain_line_id else [])
+            StrainLine.normalize_locus_name(e["locus_name"]).casefold(): e
+            for e in template_entries
         }
         existing: set[str] = set()
         for c in self.genotype_components.all():
-            raw = (c.locus_name or "").strip()
-            if raw:
-                existing.add(raw)
+            locus_key = c.locus_key or StrainLine.normalize_locus_name(c.locus_name).casefold()
+            if locus_key:
+                existing.add(locus_key)
         current_max_sort = self.genotype_components.aggregate(models.Max("sort_order")).get("sort_order__max") or 0
         to_create: list["MouseGenotypeComponent"] = []
         next_sort = current_max_sort + 1
-        for locus in loci:
-            if locus in existing:
+        for locus, locus_key in loci:
+            if locus_key in existing:
                 continue
-            entry = entry_by_key.get(locus) or {}
+            entry = entry_by_key.get(locus_key) or {}
             chromosome_type = str(entry.get("chromosome_type") or "").strip()
             if chromosome_type not in MouseGenotypeComponent.ChromosomeType.values:
                 chromosome_type = MouseGenotypeComponent.ChromosomeType.UNKNOWN
@@ -821,6 +839,7 @@ class Mouse(ActorStampedModel):
                     mouse=self,
                     strain_line=self.strain_line,
                     locus_name=locus,
+                    locus_key=locus_key,
                     chromosome_type=chromosome_type,
                     zygosity_class=MouseGenotypeComponent.ZygosityClass.UNKNOWN,
                     sort_order=next_sort,
@@ -889,6 +908,7 @@ class MouseGenotypeComponent(TimeStampedModel):
     mouse = models.ForeignKey(Mouse, on_delete=models.CASCADE, related_name="genotype_components")
     strain_line = models.ForeignKey(StrainLine, on_delete=models.PROTECT, related_name="mouse_components")
     locus_name = models.CharField(max_length=128, blank=True)
+    locus_key = models.CharField(max_length=128, blank=True, editable=False)
     chromosome_type = models.CharField(
         max_length=16,
         choices=ChromosomeType.choices,
@@ -907,6 +927,18 @@ class MouseGenotypeComponent(TimeStampedModel):
 
     class Meta:
         ordering = ("sort_order", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mouse", "locus_key"],
+                condition=~models.Q(locus_key=""),
+                name="colony_mouse_locus_unique_ci",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.locus_name = (self.locus_name or "").strip()
+        self.locus_key = StrainLine.normalize_locus_name(self.locus_name).casefold()
+        super().save(*args, **kwargs)
 
     def clean(self) -> None:
         allele_1 = (self.allele_display_1 or "").strip()
@@ -968,6 +1000,13 @@ class CageMembership(TimeStampedModel):
 
     class Meta:
         ordering = ("-start_date", "-created_at")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mouse"],
+                condition=models.Q(is_current=True),
+                name="colony_mouse_one_current_cage",
+            ),
+        ]
 
     def clean(self) -> None:
         if self.end_date and self.end_date < self.start_date:
@@ -981,37 +1020,56 @@ class CageMembership(TimeStampedModel):
 
 @receiver(post_save, sender=MouseGenotypeComponent)
 def _sync_mouse_genotype_summary_on_save(sender, instance: MouseGenotypeComponent, **kwargs) -> None:
+    if _genotype_summary_sync_suppressed.get():
+        return
     instance.mouse.rebuild_genotype_summary(save=True)
 
 
 @receiver(post_delete, sender=MouseGenotypeComponent)
 def _sync_mouse_genotype_summary_on_delete(sender, instance: MouseGenotypeComponent, **kwargs) -> None:
+    if _genotype_summary_sync_suppressed.get():
+        return
     instance.mouse.rebuild_genotype_summary(save=True)
 
 
 @receiver(pre_save, sender=Mouse)
 def _remember_mouse_previous_cage(sender, instance: Mouse, **kwargs) -> None:
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and not {"current_cage", "status"}.intersection(update_fields):
+        instance._mxg_previous_cage_id = instance.current_cage_id
+        instance._mxg_previous_status = instance.status
+        return
     if instance.pk:
-        instance._mxg_previous_cage_id = (
-            Mouse.objects.filter(pk=instance.pk).values_list("current_cage_id", flat=True).first()
-        )
+        previous = Mouse.objects.filter(pk=instance.pk).values("current_cage_id", "status").first() or {}
+        instance._mxg_previous_cage_id = previous.get("current_cage_id")
+        instance._mxg_previous_status = previous.get("status")
     else:
         instance._mxg_previous_cage_id = None
+        instance._mxg_previous_status = None
 
 
 @receiver(post_save, sender=Mouse)
 def _sync_cages_after_mouse_save(sender, instance: Mouse, **kwargs) -> None:
+    if kwargs.get("raw"):
+        return
+    previous_cage_id = getattr(instance, "_mxg_previous_cage_id", instance.current_cage_id)
+    previous_status = getattr(instance, "_mxg_previous_status", instance.status)
+    if previous_cage_id == instance.current_cage_id and previous_status == instance.status:
+        return
     from colony.cage_lifecycle import sync_cages_after_mouse_change
 
     sync_cages_after_mouse_change(
         current_cage_id=instance.current_cage_id,
-        previous_cage_id=getattr(instance, "_mxg_previous_cage_id", None),
+        previous_cage_id=previous_cage_id,
     )
 
 
 @receiver(post_save, sender=Mouse)
 def _sync_strain_line_projects_after_mouse_save(sender, instance: Mouse, **kwargs) -> None:
     if kwargs.get("raw"):
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and not {"strain_line", "project"}.intersection(update_fields):
         return
     if instance.strain_line_id and instance.project_id:
         instance.strain_line.projects.add(instance.project_id)
@@ -1020,6 +1078,9 @@ def _sync_strain_line_projects_after_mouse_save(sender, instance: Mouse, **kwarg
 @receiver(post_save, sender=Mouse)
 def _sync_cage_home_from_mouse_save(sender, instance: Mouse, **kwargs) -> None:
     if kwargs.get("raw") or not instance.current_cage_id:
+        return
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None and not {"current_cage", "project", "colony"}.intersection(update_fields):
         return
     updates: list[str] = []
     cage = Cage.objects.filter(pk=instance.current_cage_id).select_related("colony").first()

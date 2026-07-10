@@ -171,7 +171,7 @@ class MouseImportGenotypeTests(TestCase):
         self.assertEqual(comps["Foxp3"], "Cre/+")
         self.assertEqual(comps["CustomGene"], "")
 
-    def test_execute_import_creates_separate_row_when_locus_name_differs(self):
+    def test_execute_import_merges_construct_suffix_with_same_logical_locus(self):
         mouse = Mouse.objects.create(
             mouse_uid="M-GT-EXIST",
             sex=Mouse.Sex.FEMALE,
@@ -193,12 +193,11 @@ class MouseImportGenotypeTests(TestCase):
             import_date=timezone.localdate(),
             acting_user=self.user,
         )
-        self.assertEqual(stats["genotype_rows_updated"], 0)
-        self.assertEqual(stats["genotype_rows_created"], 1)
+        self.assertEqual(stats["genotype_rows_updated"], 1)
+        self.assertEqual(stats["genotype_rows_created"], 0)
         template_row = MouseGenotypeComponent.objects.get(mouse=mouse, locus_name="Foxp3")
-        self.assertEqual(template_row.zygosity, "")
-        imported_row = MouseGenotypeComponent.objects.get(mouse=mouse, locus_name="Foxp3 flox")
-        self.assertEqual(imported_row.zygosity, "+/+")
+        self.assertEqual(template_row.zygosity, "+/+")
+        self.assertFalse(MouseGenotypeComponent.objects.filter(mouse=mouse, locus_name="Foxp3 flox").exists())
 
     def test_multi_strain_file_skips_unrelated_empty_locus_columns(self):
         strain_b = StrainLine.objects.create(

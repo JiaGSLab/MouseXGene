@@ -52,6 +52,12 @@ class Breeding(ActorStampedModel):
             models.Index(fields=["active", "female_1"], name="breeding_active_f1"),
             models.Index(fields=["active", "female_2"], name="breeding_active_f2"),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(active=False) | ~models.Q(status="closed"),
+                name="breeding_active_status_consistent",
+            ),
+        ]
 
     def clean(self) -> None:
         if not self.cage_id and not getattr(self, "_allow_pending_auto_cage", False):
@@ -131,6 +137,14 @@ class Litter(models.Model):
         ENDED = "ended", "Ended"
         ARCHIVED = "archived", "Archived"
 
+    class EndOutcome(models.TextChoices):
+        WEANED_COMPLETE = "weaned_complete", "Weaning and pup registration complete"
+        ALL_PUPS_DIED = "all_pups_died", "All pups died before weaning"
+        RECORD_ERROR = "record_error", "Litter record was entered in error"
+        TRANSFERRED = "transferred", "Pups transferred outside this colony"
+        NOT_TRACKED = "not_tracked", "Pups intentionally not tracked individually"
+        OTHER = "other", "Other documented outcome"
+
     breeding = models.ForeignKey(Breeding, on_delete=models.CASCADE, related_name="litters")
     litter_code = models.CharField(max_length=64, unique=True, null=True, blank=True)
     birth_date = models.DateField()
@@ -162,12 +176,26 @@ class Litter(models.Model):
     is_archived = models.BooleanField(default=False)
     archived_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    end_outcome = models.CharField(max_length=32, choices=EndOutcome.choices, blank=True)
+    end_notes = models.TextField(blank=True)
 
     class Meta:
         ordering = ("-birth_date", "litter_code")
         indexes = [
             models.Index(fields=["birth_date"], name="breeding_litter_birth"),
             models.Index(fields=["wean_date"], name="breeding_litter_wean"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(is_archived=False)
+                    & ~models.Q(litter_status__in=["ended", "archived"])
+                ) | (
+                    models.Q(is_archived=True)
+                    & models.Q(litter_status__in=["ended", "archived"])
+                ),
+                name="litter_archive_status_consistent",
+            ),
         ]
 
     def clean(self) -> None:

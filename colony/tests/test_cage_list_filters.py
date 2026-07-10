@@ -313,3 +313,16 @@ class CageEditFreezeTests(TestCase):
         self.assertRedirects(response, reverse("colony:cage_detail", args=[self.cage.pk]))
         self.cage.refresh_from_db()
         self.assertEqual(self.cage.cage_id, "FREEZE-CAGE-CHANGED")
+
+    def test_user_cannot_edit_empty_cage_assigned_to_another_project(self):
+        owner = get_user_model().objects.create_user(username="other-cage-owner", password="x")
+        project = Project.objects.create(name="Other Cage Project", owner=owner)
+        self.cage.project = project
+        self.cage.save(update_fields=["project", "updated_at"])
+        self.client.login(username="cagefreezemember", password="x")
+
+        detail = self.client.get(reverse("colony:cage_detail", args=[self.cage.pk]))
+        edit = self.client.get(reverse("colony:cage_edit", args=[self.cage.pk]))
+
+        self.assertNotContains(detail, reverse("colony:cage_edit", args=[self.cage.pk]))
+        self.assertEqual(edit.status_code, 403)

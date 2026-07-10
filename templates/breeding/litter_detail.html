@@ -33,6 +33,10 @@
         <dt>Male / female counts</dt><dd>{{ litter.male_count|default:"—" }} / {{ litter.female_count|default:"—" }}</dd>
         <dt>Wean date</dt><dd>{{ litter.wean_date|default:"—" }}</dd>
         <dt>Tail tag (litter)</dt><dd>{{ litter.tail_tag_date|default:"—" }}</dd>
+        {% if litter.end_outcome %}
+            <dt>End outcome</dt><dd>{{ litter.get_end_outcome_display }}</dd>
+            <dt>Outcome notes</dt><dd>{{ litter.end_notes|default:"—" }}</dd>
+        {% endif %}
     </dl>
 </section>
 

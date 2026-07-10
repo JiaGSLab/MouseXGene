@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from django.db.models import QuerySet
+from django.db.models import F, Q, QuerySet
 
 from colony.models import Mouse
 
@@ -120,6 +120,33 @@ def active_breeding_cage_mismatches(breedings: QuerySet[Breeding] | Iterable[Bre
     return mismatches
 
 
+def active_breeding_cage_mismatch_candidates(breedings: QuerySet[Breeding]) -> QuerySet[Breeding]:
+    """Filter mismatch candidates in SQL before detailed Python enrichment."""
+    return (
+        breedings.filter(active=True, cage__isnull=False)
+        .exclude(status=Breeding.Status.CLOSED)
+        .filter(
+            Q(male__status=Mouse.Status.ACTIVE)
+            & (Q(male__current_cage__isnull=True) | ~Q(male__current_cage_id=F("cage_id")))
+            | Q(female_1__status=Mouse.Status.ACTIVE)
+            & (Q(female_1__current_cage__isnull=True) | ~Q(female_1__current_cage_id=F("cage_id")))
+            | Q(female_2__status=Mouse.Status.ACTIVE)
+            & (Q(female_2__current_cage__isnull=True) | ~Q(female_2__current_cage_id=F("cage_id")))
+            | Q(extra_female_links__mouse__status=Mouse.Status.ACTIVE)
+            & (
+                Q(extra_female_links__mouse__current_cage__isnull=True)
+                | ~Q(extra_female_links__mouse__current_cage_id=F("cage_id"))
+            )
+            | Q(breeding_members__mouse__status=Mouse.Status.ACTIVE)
+            & (
+                Q(breeding_members__mouse__current_cage__isnull=True)
+                | ~Q(breeding_members__mouse__current_cage_id=F("cage_id"))
+            )
+        )
+        .distinct()
+    )
+
+
 def active_breedings_for_mouse(mouse: Mouse) -> QuerySet[Breeding]:
     """Active breedings where the mouse is a sire or dam."""
     return (
@@ -134,8 +161,6 @@ def active_breedings_for_mouse(mouse: Mouse) -> QuerySet[Breeding]:
 
 
 def models_q_for_mouse(mouse: Mouse):
-    from django.db.models import Q
-
     return (
         Q(male_id=mouse.pk)
         | Q(female_1_id=mouse.pk)

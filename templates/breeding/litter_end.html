@@ -50,6 +50,22 @@
         {% endif %}
 
         <div class="form-row">
+            <label for="{{ form.end_outcome.id_for_label }}">{{ form.end_outcome.label }}</label>
+            {{ form.end_outcome }}
+            {% if form.end_outcome.errors %}
+                <div class="field-error">{% for error in form.end_outcome.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
+            <label for="{{ form.end_notes.id_for_label }}">{{ form.end_notes.label }}</label>
+            {{ form.end_notes }}
+            {% if form.end_notes.errors %}
+                <div class="field-error">{% for error in form.end_notes.errors %}<div>{{ error }}</div>{% endfor %}</div>
+            {% endif %}
+        </div>
+
+        <div class="form-row">
             <label class="checkbox-inline" for="{{ form.confirm_end.id_for_label }}">
                 {{ form.confirm_end }}
                 <span>{{ form.confirm_end.label }}</span>

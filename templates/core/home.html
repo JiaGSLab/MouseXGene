@@ -98,7 +98,7 @@
             <a class="button" href="{% url 'mice:mouse_import' %}">Import Mice</a>
             <a class="button" href="{% url 'colony:cage_import' %}">Import Cages</a>
         {% endif %}
-        {% if can_manage_breeding %}
+        {% if can_create_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
     </div>
@@ -113,16 +113,27 @@
 </section>
 
 <section class="cards dashboard-sections">
-    {% for alert in dashboard_alerts %}
-        <article class="card dashboard-alert {% if alert.count > 0 %}dashboard-alert--hot{% else %}dashboard-alert--clear{% endif %}">
+    {% for alert in actionable_dashboard_alerts %}
+        <article class="card dashboard-alert dashboard-alert--hot">
             <h2 class="dashboard-alert__title">
                 <a href="{{ alert.href }}">{{ alert.title }}</a>
                 <span class="dashboard-alert-count {% if alert.count > 0 %}dashboard-alert-count--warn{% endif %}">({{ alert.count }})</span>
             </h2>
             {% include "core/dashboard_alert_items.html" with alert=alert %}
         </article>
+    {% empty %}
+        <article class="card dashboard-alert dashboard-alert--clear">
+            <h2 class="dashboard-alert__title">All monitored workflows are clear</h2>
+            <p class="muted">No current colony warning requires attention.</p>
+        </article>
     {% endfor %}
 </section>
+{% if clear_dashboard_alerts %}
+    <p class="muted small-print dashboard-clear-summary">
+        Clear checks:
+        {% for alert in clear_dashboard_alerts %}<a href="{{ alert.href }}">{{ alert.title }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}
+    </p>
+{% endif %}
 
 <section class="cards dashboard-sections">
     <article class="card">

@@ -136,7 +136,11 @@ DATABASES = {
 }
 
 # `manage.py test` without a live Postgres instance (local / CI).
-if len(sys.argv) > 1 and sys.argv[1] == "test":
+if (
+    len(sys.argv) > 1
+    and sys.argv[1] == "test"
+    and get_env("TEST_DATABASE_ENGINE", "sqlite").strip().lower() != "postgres"
+):
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -188,13 +192,14 @@ if not DEBUG:
     }
     if get_env_bool("DJANGO_SECURE_PROXY_SSL_HEADER", default=True):
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_SSL_REDIRECT = get_env_bool("DJANGO_SECURE_SSL_REDIRECT", default=False)
+    SECURE_SSL_REDIRECT = get_env_bool("DJANGO_SECURE_SSL_REDIRECT", default=True)
     SESSION_COOKIE_SECURE = get_env_bool("DJANGO_SESSION_COOKIE_SECURE", default=True)
     CSRF_COOKIE_SECURE = get_env_bool("DJANGO_CSRF_COOKIE_SECURE", default=True)
-    SECURE_HSTS_SECONDS = get_env_int("DJANGO_SECURE_HSTS_SECONDS", 0)
+    SECURE_HSTS_SECONDS = get_env_int("DJANGO_SECURE_HSTS_SECONDS", 604800)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = get_env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False)
     SECURE_HSTS_PRELOAD = get_env_bool("DJANGO_SECURE_HSTS_PRELOAD", default=False)
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
     X_FRAME_OPTIONS = "DENY"
 
 
@@ -205,3 +210,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "/accounts/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
+SESSION_COOKIE_AGE = get_env_int("DJANGO_SESSION_COOKIE_AGE", 8 * 60 * 60)
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"

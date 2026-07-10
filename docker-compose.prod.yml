@@ -29,6 +29,12 @@ services:
       TZ: ${DJANGO_TIME_ZONE:-Asia/Shanghai}
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/health/', headers={'Host': 'jialabmouse.top'}); urllib.request.urlopen(request, timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 20s
     volumes:
       # Mount project root so rsync/git pull on the host updates live code (restart web after sync).
       - .:/app
@@ -44,7 +50,8 @@ services:
     environment:
       TZ: ${DJANGO_TIME_ZONE:-Asia/Shanghai}
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"

@@ -81,6 +81,7 @@ class LitterEndWorkflowTests(TestCase):
             {
                 "confirm_end": "on",
                 "confirm_unweaned": "on",
+                "end_outcome": Litter.EndOutcome.ALL_PUPS_DIED,
             },
         )
 
@@ -88,6 +89,7 @@ class LitterEndWorkflowTests(TestCase):
         self.litter.refresh_from_db()
         self.assertEqual(self.litter.litter_status, Litter.LitterStatus.ENDED)
         self.assertTrue(self.litter.is_archived)
+        self.assertEqual(self.litter.end_outcome, Litter.EndOutcome.ALL_PUPS_DIED)
 
     def test_weaned_litter_can_be_ended_without_unweaned_confirmation(self):
         self.litter.wean_date = date(2026, 2, 12)
@@ -96,7 +98,10 @@ class LitterEndWorkflowTests(TestCase):
 
         response = self.client.post(
             reverse("litters:litter_end", args=[self.litter.pk]),
-            {"confirm_end": "on"},
+            {
+                "confirm_end": "on",
+                "end_outcome": Litter.EndOutcome.WEANED_COMPLETE,
+            },
         )
 
         self.assertRedirects(response, reverse("litters:litter_detail", args=[self.litter.pk]))

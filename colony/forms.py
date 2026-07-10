@@ -1754,9 +1754,10 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
                 )
                 if chromosome_type not in StrainLine.ChromosomeType.values:
                     chromosome_type = StrainLine.ChromosomeType.AUTOSOMAL
-                if locus in seen:
+                locus_key = StrainLine.normalize_locus_name(locus).casefold()
+                if locus_key in seen:
                     continue
-                seen.add(locus)
+                seen.add(locus_key)
                 parsed.append(
                     {
                         "locus_name": locus,

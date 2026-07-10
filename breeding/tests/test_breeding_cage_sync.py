@@ -234,6 +234,25 @@ class BreedingCageSyncTests(TestCase):
         self.assertContains(response, "Breeding Cage Mismatch")
         self.assertContains(response, "BR-SYNC-DASH-MISMATCH")
 
+    def test_dashboard_warns_when_active_breeder_has_no_current_cage(self):
+        self.sire.current_cage = None
+        self.sire.save(update_fields=["current_cage", "updated_at"])
+        self.dam.current_cage = self.new_cage
+        self.dam.save(update_fields=["current_cage", "updated_at"])
+        Breeding.objects.create(
+            breeding_code="BR-SYNC-NO-CAGE",
+            cage=self.new_cage,
+            male=self.sire,
+            female_1=self.dam,
+            start_date="2026-01-01",
+            active=True,
+        )
+
+        response = self.client.get(reverse("home"))
+
+        self.assertContains(response, "Breeding Cage Mismatch")
+        self.assertContains(response, "BR-SYNC-NO-CAGE")
+
     def test_active_breeding_cage_mismatch_uses_prefetched_members(self):
         for idx in range(5):
             cage = Cage.objects.create(cage_id=f"NEW-CAGE-PREFETCH-{idx}", purpose=Cage.Purpose.BREEDING)
@@ -287,4 +306,4 @@ class BreedingCageSyncTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Age: 8w 3d")
-        self.assertContains(response, "<td>8w 3d</td>", html=True)
+        self.assertContains(response, '<span class="muted">8w 3d</span>', html=True)

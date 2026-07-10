@@ -16,7 +16,12 @@
         <p class="muted">Cage details and current occupancy.</p>
     </div>
     <div class="action-links">
-        <a class="button button-light" href="{% url 'colony:cage_edit' cage.pk %}">Edit Cage</a>
+        {% if can_edit_cage %}
+            <a class="button button-light" href="{% url 'colony:cage_edit' cage.pk %}">Edit Cage</a>
+        {% endif %}
+        {% if breeding_start_url %}
+            <a class="button" href="{{ breeding_start_url }}">Start Breeding</a>
+        {% endif %}
         {% if can_edit_cage_genotyping %}
             <a class="button" href="{% url 'colony:cage_genotyping_edit' cage.pk %}">Edit Genotyping Results</a>
         {% endif %}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 
 from django.core.exceptions import ValidationError
@@ -134,16 +135,22 @@ def _active_breeding_q_for_mouse(mouse: Mouse) -> Q:
     )
 
 
-def close_active_breedings_for_terminal_mouse(
+@dataclass(frozen=True)
+class TerminalBreedingImpact:
+    closed_codes: tuple[str, ...] = ()
+    continued_codes: tuple[str, ...] = ()
+
+
+def reconcile_active_breedings_for_terminal_mouse(
     mouse: Mouse,
     *,
     end_date: date | None = None,
     reason: str = "",
     exclude_breeding_id: int | None = None,
-) -> tuple[str, ...]:
-    """Close active breeding records that still reference a terminal mouse."""
+) -> TerminalBreedingImpact:
+    """Close invalid pairings, but keep a trio/custom breeding when another active dam remains."""
     if mouse.status not in TERMINAL_MOUSE_STATUSES:
-        return ()
+        return TerminalBreedingImpact()
     candidate_qs = (
         Breeding.objects
         .filter(active=True)
@@ -155,26 +162,79 @@ def close_active_breedings_for_terminal_mouse(
         candidate_qs = candidate_qs.exclude(pk=exclude_breeding_id)
     breeding_ids = list(candidate_qs.values_list("pk", flat=True))
     closed_codes: list[str] = []
+    continued_codes: list[str] = []
     affected_cages: list[Cage] = []
     with transaction.atomic():
         locked_breedings = (
-            Breeding.objects.select_for_update()
+            Breeding.objects.select_for_update(of=("self",))
             .filter(pk__in=breeding_ids)
             .select_related("cage")
             .order_by("breeding_code")
         )
         for breeding in locked_breedings:
+            extra_dam_ids = list(
+                breeding.extra_female_links.order_by("mouse__mouse_uid").values_list("mouse_id", flat=True)
+            )
+            remaining_dam_ids = [
+                dam_id
+                for dam_id in [breeding.female_1_id, breeding.female_2_id, *extra_dam_ids]
+                if dam_id and dam_id != mouse.pk
+            ]
+            active_dam_ids = list(
+                Mouse.objects.filter(pk__in=remaining_dam_ids, status=Mouse.Status.ACTIVE)
+                .order_by("mouse_uid")
+                .values_list("pk", flat=True)
+            )
+            can_continue = breeding.male_id != mouse.pk and bool(active_dam_ids)
+            if can_continue:
+                breeding.female_1_id = active_dam_ids[0]
+                breeding.female_2_id = active_dam_ids[1] if len(active_dam_ids) > 1 else None
+                breeding.breeding_type = (
+                    Breeding.BreedingType.PAIR
+                    if len(active_dam_ids) == 1
+                    else Breeding.BreedingType.TRIO
+                    if len(active_dam_ids) == 2
+                    else Breeding.BreedingType.CUSTOM
+                )
+                breeding.save(update_fields=["female_1", "female_2", "breeding_type", "updated_at"])
+                breeding.extra_female_links.all().delete()
+                BreedingExtraFemale.objects.bulk_create(
+                    [
+                        BreedingExtraFemale(breeding=breeding, mouse_id=mouse_id)
+                        for mouse_id in active_dam_ids[2:]
+                    ]
+                )
+                breeding.sync_members_from_legacy_fields()
+                continued_codes.append(breeding.breeding_code)
+                continue
+
             breeding.status = Breeding.Status.CLOSED
             breeding.active = False
             if not breeding.archived_at:
                 breeding.archived_at = timezone.now()
-            breeding.save(update_fields=["status", "active", "archived_at"])
+            breeding.save(update_fields=["status", "active", "archived_at", "updated_at"])
             closed_codes.append(breeding.breeding_code)
             if breeding.cage_id:
                 affected_cages.append(breeding.cage)
         for cage in affected_cages:
             sync_cage_after_occupancy_change(cage)
-    return tuple(closed_codes)
+    return TerminalBreedingImpact(tuple(closed_codes), tuple(continued_codes))
+
+
+def close_active_breedings_for_terminal_mouse(
+    mouse: Mouse,
+    *,
+    end_date: date | None = None,
+    reason: str = "",
+    exclude_breeding_id: int | None = None,
+) -> tuple[str, ...]:
+    """Backward-compatible wrapper for code that only needs closed breeding codes."""
+    return reconcile_active_breedings_for_terminal_mouse(
+        mouse,
+        end_date=end_date,
+        reason=reason,
+        exclude_breeding_id=exclude_breeding_id,
+    ).closed_codes
 
 
 def cage_allows_mixed_active_sexes(cage: Cage | None) -> bool:
@@ -456,6 +516,7 @@ def ensure_breeding_for_cage(cage: Cage | None) -> Breeding | None:
     """Create or refresh an active breeding when a cage is marked for breeding and has breeders."""
     if cage is None or cage.purpose != Cage.Purpose.BREEDING:
         return None
+    mark_cage_as_breeding(cage)
 
     existing = (
         Breeding.objects.filter(cage=cage, active=True)
@@ -679,4 +740,3 @@ def sync_cages_after_mouse_change(
         if cage is None:
             continue
         sync_cage_status_from_mice(cage)
-        sync_cage_breeding_workflow(cage)

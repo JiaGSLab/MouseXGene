@@ -1,5 +1,5 @@
 from django import forms
-from django.forms import formset_factory, inlineformset_factory
+from django.forms import BaseInlineFormSet, formset_factory, inlineformset_factory
 from django.db import IntegrityError, OperationalError, ProgrammingError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -364,13 +364,18 @@ class BreedingForm(forms.ModelForm):
                 | Q(female_1=mouse)
                 | Q(female_2=mouse)
                 | Q(extra_female_links__mouse=mouse)
+                | Q(breeding_members__mouse=mouse)
             )
             if self.instance.pk:
                 active_breeding_q = active_breeding_q.exclude(pk=self.instance.pk)
             active_codes = sorted(set(active_breeding_q.values_list("breeding_code", flat=True)))
             if active_codes:
-                warning_messages.append(
-                    f"{mouse.mouse_uid}: already in active breeding(s): {', '.join(active_codes)}."
+                self.add_error(
+                    "sire" if mouse == male else "dams",
+                    (
+                        f"{mouse.mouse_uid} is already in active breeding(s): {', '.join(active_codes)}. "
+                        "End or edit the existing breeding before assigning this mouse to another active breeding."
+                    ),
                 )
             self.member_rows.append(
                 {
@@ -684,14 +689,11 @@ class LitterForm(forms.ModelForm):
             "dead_count",
             "male_count",
             "female_count",
-            "wean_date",
             "tail_tag_date",
-            "litter_status",
             "notes",
         ]
         widgets = {
             "birth_date": forms.DateInput(attrs={"type": "date"}),
-            "wean_date": forms.DateInput(attrs={"type": "date"}),
             "tail_tag_date": forms.DateInput(attrs={"type": "date"}),
             "notes": forms.Textarea(attrs={"rows": 4}),
         }
@@ -767,6 +769,18 @@ def litter_has_weaned(litter: Litter) -> bool:
 
 
 class EndLitterForm(forms.Form):
+    end_outcome = forms.ChoiceField(
+        label="Pup outcome",
+        choices=Litter.EndOutcome.choices,
+        required=True,
+    )
+    end_notes = forms.CharField(
+        label="Outcome notes",
+        required=False,
+        widget=forms.Textarea(
+            attrs={"rows": 3, "placeholder": "Add the reason or transfer destination when relevant."}
+        ),
+    )
     confirm_end = forms.BooleanField(
         label="I confirm this litter workflow should be closed.",
         required=True,
@@ -787,6 +801,18 @@ class EndLitterForm(forms.Form):
             )
         else:
             self.fields.pop("confirm_unweaned")
+            self.fields["end_outcome"].initial = Litter.EndOutcome.WEANED_COMPLETE
+
+    def clean(self):
+        cleaned = super().clean()
+        outcome = cleaned.get("end_outcome")
+        notes = (cleaned.get("end_notes") or "").strip()
+        if self.requires_unweaned_confirmation and outcome == Litter.EndOutcome.WEANED_COMPLETE:
+            self.add_error("end_outcome", "Choose what happened to the pups before weaning.")
+        if outcome in {Litter.EndOutcome.TRANSFERRED, Litter.EndOutcome.OTHER} and not notes:
+            self.add_error("end_notes", "Add a short note for this outcome.")
+        cleaned["end_notes"] = notes
+        return cleaned
 
 
 class LitterPupForm(forms.ModelForm):
@@ -799,10 +825,30 @@ class LitterPupForm(forms.ModelForm):
         }
 
 
+class LitterPupInlineFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        linked_rows: list[str] = []
+        for form in self.forms:
+            if not hasattr(form, "cleaned_data") or not form.cleaned_data.get("DELETE"):
+                continue
+            pup = form.instance
+            if pup.pk and pup.mouse_id:
+                linked_rows.append(f"row {pup.sort_order or pup.pk} ({pup.mouse.mouse_uid})")
+        if linked_rows:
+            raise forms.ValidationError(
+                "Pup "
+                + ", ".join(linked_rows)
+                + " cannot be deleted because it is linked to a mouse record. "
+                "Use the mouse correction workflow instead."
+            )
+
+
 LitterPupFormSet = inlineformset_factory(
     Litter,
     LitterPup,
     form=LitterPupForm,
+    formset=LitterPupInlineFormSet,
     extra=1,
     can_delete=True,
     min_num=0,

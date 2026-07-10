@@ -29,7 +29,7 @@
         {% endif %}
     </div>
     <div class="action-links">
-        {% if can_manage_breeding %}
+        {% if can_create_breeding %}
             <a class="button" href="{% url 'breeding:breeding_create' %}">New Breeding</a>
         {% endif %}
     </div>
@@ -186,7 +186,7 @@
                                 No litter recorded since setup.
                             {% endif %}
                         </div>
-                        {% if can_manage_breeding %}
+                        {% if breeding.can_edit %}
                             <div class="breeding-alert-actions">
                                 <a href="{% url 'breeding:litter_create' breeding.pk %}">Record litter</a>
                                 {% if breeding.status != "closed" or breeding.active %}
@@ -218,25 +218,14 @@
                 </td>
                 <td>
                     {% if breeding.display_dam_rows %}
-                        <div class="table-wrap">
-                            <table class="data-table data-table--compact">
-                                <thead>
-                                    <tr>
-                                        <th>Mouse</th>
-                                        <th>Age</th>
-                                        <th>Genotype</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for row in breeding.display_dam_rows %}
-                                        <tr>
-                                            <td><a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a></td>
-                                            <td>{{ row.age_display|default:"-" }}</td>
-                                            <td>{{ row.genotype|default:"-" }}</td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
+                        <div class="breeder-stack">
+                            {% for row in breeding.display_dam_rows %}
+                                <div class="breeder-stack__row">
+                                    <a href="{% url 'mice:mouse_detail' row.mouse.pk %}">{{ row.mouse.mouse_uid }}</a>
+                                    <span class="muted">{{ row.age_display|default:"-" }}</span>
+                                    <span class="breeder-stack__genotype">{{ row.genotype|default:"-" }}</span>
+                                </div>
+                            {% endfor %}
                         </div>
                     {% else %}
                         -

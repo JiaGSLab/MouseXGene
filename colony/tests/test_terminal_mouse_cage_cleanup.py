@@ -305,3 +305,57 @@ class TerminalMouseCageCleanupTests(TestCase):
         self.assertEqual(breeding.status, Breeding.Status.CLOSED)
         self.assertIsNone(self.mouse.current_cage_id)
         self.assertEqual(self.cage.status, Cage.Status.ACTIVE)
+
+    def test_end_one_trio_dam_keeps_breeding_as_pair(self):
+        dam_one = Mouse.objects.create(
+            mouse_uid="TERM-DAM-TRIO-1",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        dam_two = Mouse.objects.create(
+            mouse_uid="TERM-DAM-TRIO-2",
+            sex=Mouse.Sex.FEMALE,
+            status=Mouse.Status.ACTIVE,
+            strain_line=self.strain,
+            project=self.project,
+            current_cage=self.cage,
+        )
+        for dam in (dam_one, dam_two):
+            CageMembership.objects.create(
+                mouse=dam,
+                cage=self.cage,
+                start_date=self.start_date,
+                is_current=True,
+            )
+        breeding = Breeding.objects.create(
+            breeding_code="TERM-BR-TRIO",
+            cage=self.cage,
+            breeding_type=Breeding.BreedingType.TRIO,
+            male=self.mouse,
+            female_1=dam_one,
+            female_2=dam_two,
+            start_date=self.start_date,
+            active=True,
+        )
+
+        response = self.client.post(
+            reverse("mice:mouse_end", args=[dam_one.pk]),
+            {
+                "terminal_status": Mouse.Status.EUTHANIZED,
+                "end_date": timezone.localdate().isoformat(),
+                "reason": "Scheduled endpoint",
+                "confirm": "on",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "Continued breeding(s) with the remaining active dam")
+        breeding.refresh_from_db()
+        self.assertTrue(breeding.active)
+        self.assertEqual(breeding.status, Breeding.Status.SETUP)
+        self.assertEqual(breeding.breeding_type, Breeding.BreedingType.PAIR)
+        self.assertEqual(breeding.female_1_id, dam_two.pk)
+        self.assertIsNone(breeding.female_2_id)

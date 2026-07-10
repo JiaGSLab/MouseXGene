@@ -1,5 +1,6 @@
 from .permissions import (
     can_create_project,
+    can_create_breeding,
     can_import,
     can_manage_breeding,
     can_manage_strain_lines,
@@ -17,6 +18,7 @@ def role_permissions(request):
         "is_admin": is_admin(user),
         "is_manager": is_manager(user),
         "can_create_project": can_create_project(user),
+        "can_create_breeding": can_create_breeding(user),
         "can_import": can_import(user),
         "can_manage_breeding": can_manage_breeding(user),
         "can_manage_strain_lines": can_manage_strain_lines(user),
