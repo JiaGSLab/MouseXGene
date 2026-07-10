@@ -17,6 +17,12 @@
 </section>
 
 <section class="card">
+    {% if save_error %}
+        <div class="form-error-summary" role="alert">
+            <strong>Genotype results were not saved.</strong>
+            <div>{{ save_error }}</div>
+        </div>
+    {% endif %}
     <div class="workflow-note">
         <strong>Current cage mice only.</strong>
         <span>Rows come from each mouse's strain-line or parent template. Leave a genotype blank if the real result is not available yet.</span>

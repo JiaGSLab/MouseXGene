@@ -2,6 +2,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.core.exceptions import ValidationError
+from unittest.mock import patch
 
 from colony.models import Cage, Mouse, MouseGenotypeComponent, StrainLine
 from core.models import Project, ProjectMembership
@@ -98,3 +100,34 @@ class CageGenotypingTests(TestCase):
             MouseGenotypeComponent.objects.get(mouse=self.mouse_b, locus_name="Gpnmb flox").zygosity,
             "fl/+",
         )
+
+    def test_cage_genotyping_rolls_back_all_mice_and_displays_save_error(self):
+        from colony.views import _apply_mouse_genotype_rows_to_template
+
+        call_count = 0
+
+        def fail_on_second_mouse(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise ValidationError("Simulated genotype conflict.")
+            return _apply_mouse_genotype_rows_to_template(*args, **kwargs)
+
+        with patch(
+            "colony.views._apply_mouse_genotype_rows_to_template",
+            side_effect=fail_on_second_mouse,
+        ):
+            response = self.client.post(
+                reverse("colony:cage_genotyping_edit", args=[self.cage.pk]),
+                {
+                    f"mouse_{self.mouse_a.pk}_genotype_display_0": "Cre/+",
+                    f"mouse_{self.mouse_a.pk}_genotype_display_1": "fl/fl",
+                    f"mouse_{self.mouse_b.pk}_genotype_display_0": "+/+",
+                    f"mouse_{self.mouse_b.pk}_genotype_display_1": "fl/+",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Genotype results were not saved")
+        self.assertContains(response, "Simulated genotype conflict")
+        self.assertFalse(MouseGenotypeComponent.objects.exists())

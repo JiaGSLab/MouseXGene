@@ -4142,36 +4142,48 @@ def cage_genotyping_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.method == "POST":
         changed_uids: list[str] = []
-        with transaction.atomic():
-            for row in mouse_rows:
-                mouse = row["mouse"]
-                template_rows = row["template_rows"]
-                if not template_rows:
-                    continue
-                before_signature = _genotype_components_signature(mouse)
-                posted_rows = _extract_cage_genotype_rows_from_post(request, mouse, template_rows)
-                _apply_mouse_genotype_rows_to_template(mouse, posted_rows, template_rows)
-                mouse.refresh_from_db()
-                after_signature = _genotype_components_signature(mouse)
-                if after_signature != before_signature:
-                    changed_uids.append(mouse.mouse_uid)
-                    _log_specific_genotype_changes(
-                        user=request.user,
-                        mouse=mouse,
-                        before_signature=before_signature,
-                        after_signature=after_signature,
-                        source_label=f"Cage Genotyping {cage.cage_id}",
-                    )
-        if changed_uids:
-            preview = ", ".join(changed_uids[:8])
-            suffix = f" ... (+{len(changed_uids) - 8} more)" if len(changed_uids) > 8 else ""
-            messages.success(
-                request,
-                f"Updated genotyping for {len(changed_uids)} mouse(s) in cage {cage.cage_id}: {preview}{suffix}.",
-            )
+        try:
+            with transaction.atomic():
+                locked_mice = {
+                    mouse.pk: mouse
+                    for mouse in Mouse.objects.select_for_update()
+                    .filter(pk__in=[row["mouse"].pk for row in mouse_rows])
+                    .order_by("pk")
+                }
+                for row in mouse_rows:
+                    mouse = locked_mice[row["mouse"].pk]
+                    template_rows = row["template_rows"]
+                    if not template_rows:
+                        continue
+                    before_signature = _genotype_components_signature(mouse)
+                    posted_rows = _extract_cage_genotype_rows_from_post(request, mouse, template_rows)
+                    _apply_mouse_genotype_rows_to_template(mouse, posted_rows, template_rows)
+                    mouse.refresh_from_db()
+                    after_signature = _genotype_components_signature(mouse)
+                    if after_signature != before_signature:
+                        changed_uids.append(mouse.mouse_uid)
+                        _log_specific_genotype_changes(
+                            user=request.user,
+                            mouse=mouse,
+                            before_signature=before_signature,
+                            after_signature=after_signature,
+                            source_label=f"Cage Genotyping {cage.cage_id}",
+                        )
+        except (IntegrityError, ValidationError) as exc:
+            save_error = f"No genotype results were saved. {exc}"
         else:
-            messages.info(request, f"No genotype changes to save for cage {cage.cage_id}.")
-        return redirect("colony:cage_detail", pk=cage.pk)
+            if changed_uids:
+                preview = ", ".join(changed_uids[:8])
+                suffix = f" ... (+{len(changed_uids) - 8} more)" if len(changed_uids) > 8 else ""
+                messages.success(
+                    request,
+                    f"Updated genotyping for {len(changed_uids)} mouse(s) in cage {cage.cage_id}: {preview}{suffix}.",
+                )
+            else:
+                messages.info(request, f"No genotype changes to save for cage {cage.cage_id}.")
+            return redirect("colony:cage_detail", pk=cage.pk)
+    else:
+        save_error = ""
 
     return render(
         request,
@@ -4179,6 +4191,7 @@ def cage_genotyping_edit(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "cage": cage,
             "mouse_rows": mouse_rows,
+            "save_error": save_error,
         },
     )
 
