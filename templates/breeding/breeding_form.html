@@ -29,7 +29,7 @@
 
         <div class="card card-nested">
             <h2>Breeder Selection</h2>
-            <p class="muted small-print">Choose sire and dams first. Set a user, project, strain line, or UID search, then apply filters to load mice.</p>
+            <p class="muted small-print">Choose one sire and 1-3 dams. When editing an existing breeding, current breeders load first; use filters or Find dam candidates to add another female.</p>
             <div class="filter-grid">
                 <div class="form-row">
                     <label for="id_mouse_owner_filter">Filter by user</label>
@@ -62,6 +62,9 @@
             </div>
             <div class="form-row" style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
                 <button type="button" class="button button-light" id="breeder-filter-apply">Apply filters</button>
+                {% if form.instance.pk %}
+                    <button type="button" class="button button-light" id="breeder-load-dam-candidates">Find dam candidates</button>
+                {% endif %}
                 <span class="muted small-print" id="breeder-filter-status">Select at least one filter, then apply.</span>
             </div>
             <div style="display:none;">
@@ -274,6 +277,7 @@
     const strainFilter = document.getElementById("id_mouse_strain_filter");
     const uidFilter = document.getElementById("id_mouse_uid_filter");
     const applyFilterBtn = document.getElementById("breeder-filter-apply");
+    const loadDamCandidatesBtn = document.getElementById("breeder-load-dam-candidates");
     const filterStatus = document.getElementById("breeder-filter-status");
     const sireSelect = document.getElementById("id_sire");
     const damsSelect = document.getElementById("id_dams");
@@ -458,6 +462,48 @@
         }
         return filters;
     }
+    function mergePickerFilters(baseFilters, extraFilters) {
+        const merged = { ...baseFilters };
+        Object.entries(extraFilters || {}).forEach(([key, value]) => {
+            if (Array.isArray(value)) {
+                merged[key] = value.filter((item) => item !== undefined && item !== null && String(item).trim() !== "");
+            } else if (value !== undefined && value !== null && String(value).trim() !== "") {
+                merged[key] = value;
+            }
+        });
+        return merged;
+    }
+    function uniqueValues(rows, key) {
+        return [...new Set(
+            (rows || [])
+                .map((row) => row?.[key])
+                .filter((value) => value !== undefined && value !== null && String(value).trim() !== "")
+                .map((value) => String(value))
+        )];
+    }
+    function currentSelectedMouseRows() {
+        const ids = new Set(selectedMouseIds());
+        return mice.filter((m) => ids.has(String(m.id)));
+    }
+    function damCandidateFiltersFromCurrentBreeders() {
+        const rows = currentSelectedMouseRows();
+        const filters = { sex: "F" };
+        const projectIds = uniqueValues(rows, "project_id");
+        const ownerIds = uniqueValues(rows, "project_owner_id");
+        const strainIds = uniqueValues(rows, "strain_line_id");
+        if (projectIds.length) {
+            filters.project_ids = projectIds;
+        } else if (ownerIds.length) {
+            filters.owner_ids = ownerIds;
+        }
+        if (strainIds.length) {
+            filters.strain_line_ids = strainIds;
+        }
+        return filters;
+    }
+    function hasExtraPickerFilter(filters) {
+        return Object.values(filters || {}).some((value) => Array.isArray(value) ? value.length : Boolean(value));
+    }
     function setFilterStatus(message, isError = false) {
         if (!filterStatus) return;
         filterStatus.textContent = message;
@@ -524,9 +570,10 @@
         });
         tableBody.innerHTML = rows.join("");
     }
-    async function reloadMice() {
-        const loadingCurrentSelectionOnly = !hasActivePickerFilter() && hasSelectedBreeders();
-        if (!hasActivePickerFilter() && !hasSelectedBreeders()) {
+    async function reloadMice(extraFilters = {}, successMessage = "") {
+        const hasExtraFilters = hasExtraPickerFilter(extraFilters);
+        const loadingCurrentSelectionOnly = !hasActivePickerFilter() && hasSelectedBreeders() && !hasExtraFilters;
+        if (!hasActivePickerFilter() && !hasSelectedBreeders() && !hasExtraFilters) {
             mice = [];
             tableBody.innerHTML = '<tr><td colspan="9" class="muted">Select at least one filter, then click Apply filters.</td></tr>';
             setFilterStatus("Select at least one filter before loading mice.", true);
@@ -534,22 +581,41 @@
         }
         tableBody.innerHTML = `<tr><td colspan="9" class="muted">${loadingCurrentSelectionOnly ? "Loading current breeders..." : "Loading mice..."}</td></tr>`;
         applyFilterBtn.disabled = true;
+        if (loadDamCandidatesBtn) loadDamCandidatesBtn.disabled = true;
         setFilterStatus(loadingCurrentSelectionOnly ? "Loading current breeders..." : "Loading mice...");
         try {
-            mice = await MXGPicker.loadMice(mouseApiUrl, pickerFilters());
+            const filters = mergePickerFilters(pickerFilters(), extraFilters);
+            if (hasExtraFilters) {
+                delete filters.selected_only;
+                delete filters.include_inactive;
+            }
+            mice = await MXGPicker.loadMice(mouseApiUrl, filters);
             renderBreederTable();
             syncHiddenSelects();
             setFilterStatus(
-                loadingCurrentSelectionOnly
-                    ? `Showing ${mice.length} current breeder(s). Add filters to find replacement mice.`
-                    : `Showing ${mice.length} mouse(s).`
+                successMessage
+                    || (loadingCurrentSelectionOnly
+                    ? `Showing ${mice.length} current breeder(s). Use filters or Find dam candidates to add another dam or replace a breeder.`
+                    : `Showing ${mice.length} mouse(s).`)
             );
         } catch (err) {
             tableBody.innerHTML = `<tr><td colspan="9" class="field-error">Failed to load mice: ${escapeHtml(err.message)}</td></tr>`;
             setFilterStatus(`Failed to load mice: ${err.message}`, true);
         } finally {
             applyFilterBtn.disabled = false;
+            if (loadDamCandidatesBtn) loadDamCandidatesBtn.disabled = false;
         }
+    }
+    async function loadDamCandidates() {
+        if (!mice.length && hasSelectedBreeders()) {
+            await reloadMice();
+        }
+        const filters = damCandidateFiltersFromCurrentBreeders();
+        if (!filters.project_ids?.length && !filters.owner_ids?.length && !filters.strain_line_ids?.length) {
+            setFilterStatus("Use UID search or choose a project/user/strain line to find additional dams.", true);
+            return;
+        }
+        await reloadMice(filters, "Showing current breeders plus matching active female candidates.");
     }
     function markFiltersChanged() {
         if (hasActivePickerFilter()) {
@@ -585,7 +651,8 @@
     bindMultiFilter(strainFilter, strainFilter.dataset.emptyLabel || "All strain lines");
     tableBody.addEventListener("change", onTableChange);
     breedingTypeSelect?.addEventListener("change", updateBreedingTypeHint);
-    applyFilterBtn.addEventListener("click", reloadMice);
+    applyFilterBtn.addEventListener("click", () => reloadMice());
+    loadDamCandidatesBtn?.addEventListener("click", loadDamCandidates);
     uidFilter.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();

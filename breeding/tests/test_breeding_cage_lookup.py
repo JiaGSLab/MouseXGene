@@ -256,3 +256,9 @@ class BreedingTypeInferenceTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("Pair breeding requires exactly 1 dam", str(form.errors))
+
+    def test_manual_trio_error_points_to_breeder_selection(self):
+        form = self._form([self.dam_1], breeding_type=Breeding.BreedingType.TRIO)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Select one more female in Breeder Selection", str(form.errors))

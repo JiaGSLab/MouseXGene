@@ -111,4 +111,6 @@ class BreedingFormUserFilterTests(TestCase):
         self.assertIn(f'<option value="{self.male_a.pk}" selected>', html)
         self.assertIn(f'<option value="{self.female_a.pk}" selected>', html)
         self.assertIn('filters.selected_only = "1";', html)
-        self.assertIn("current breeder(s). Add filters to find replacement mice.", html)
+        self.assertIn('id="breeder-load-dam-candidates"', html)
+        self.assertIn("Find dam candidates", html)
+        self.assertIn("add another dam or replace a breeder", html)

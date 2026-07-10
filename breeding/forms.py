@@ -275,9 +275,15 @@ class BreedingForm(forms.ModelForm):
             cleaned_data["breeding_type"] = self.breeding_type_for_dam_count(len(dams)) if dams else Breeding.BreedingType.PAIR
         else:
             if breeding_type == Breeding.BreedingType.PAIR and len(dams) != 1:
-                self.add_error("dams", "Pair breeding requires exactly 1 dam. Use Auto or Custom for other breeder counts.")
+                self.add_error(
+                    "dams",
+                    "Pair breeding requires exactly 1 dam. Select one female, or switch Breeding Type to Auto.",
+                )
             if breeding_type == Breeding.BreedingType.TRIO and len(dams) != 2:
-                self.add_error("dams", "Trio breeding requires exactly 2 dams. Use Auto or Custom for other breeder counts.")
+                self.add_error(
+                    "dams",
+                    "Trio breeding requires exactly 2 dams. Select one more female in Breeder Selection, or switch Breeding Type to Auto.",
+                )
             cleaned_data["breeding_type"] = breeding_type
         if sire and sire.sex != Mouse.Sex.MALE:
             self.add_error("sire", f"{sire.mouse_uid}: sire must be male.")
