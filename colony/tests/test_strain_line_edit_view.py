@@ -5,6 +5,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from colony.models import Mouse, MouseGenotypeComponent, StrainLine
+from colony.strain_line_choices import CUSTOM_SELECT_VALUE
 from core.models import Project, ProjectMembership
 from users.models import UserProfile
 
@@ -78,6 +79,33 @@ class StrainLineEditViewTests(TestCase):
         self.assertEqual(self.line.background, StrainLine.BackgroundPreset.BALB_C)
         self.assertEqual(list(self.line.projects.values_list("pk", flat=True)), [self.project.pk])
         self.assertEqual(self.line.expected_loci_list(), ["LocusA", "LocusB"])
+
+    def test_create_redirects_to_edit_with_custom_background_and_pdf_upload(self):
+        url = reverse("colony:strain_line_create")
+        response = self.client.post(
+            url,
+            {
+                "name": "Create-Pdf-Flow",
+                "owner": str(self.user.pk),
+                "projects": [str(self.project.pk)],
+                "species": "mouse",
+                "source": "",
+                "category": StrainLine.Category.COMPOUND_STRAIN,
+                "background": CUSTOM_SELECT_VALUE,
+                "background_custom": "C57BL/6JGpt",
+                "expected_loci_template": "",
+                "expected_loci_config": "[]",
+                "is_active": "on",
+                "notes": "",
+            },
+            follow=False,
+        )
+        line = StrainLine.objects.get(line_name="Create-Pdf-Flow")
+        self.assertRedirects(response, reverse("colony:strain_line_edit", args=[line.pk]))
+        self.assertEqual(line.background, "C57BL/6JGpt")
+
+        edit_response = self.client.get(reverse("colony:strain_line_edit", args=[line.pk]))
+        self.assertContains(edit_response, 'class="strain-pdf-upload-form"')
 
     def test_edit_view_requires_reason_for_admin_correction(self):
         url = reverse("colony:strain_line_edit", args=[self.line.pk])

@@ -3322,8 +3322,8 @@ def strain_line_create(request: HttpRequest) -> HttpResponse:
                 obj=line,
                 message=f"Created strain line {line.line_name}.",
             )
-            messages.success(request, "Strain line created.")
-            return redirect("colony:strain_line_detail", pk=line.pk)
+            messages.success(request, "Strain line created. You can attach PDF introductions below.")
+            return redirect("colony:strain_line_edit", pk=line.pk)
         messages.error(request, "Could not save strain line. Please fix the errors below.")
     else:
         form = StrainLineForm(user=request.user, initial={"owner": request.user})
