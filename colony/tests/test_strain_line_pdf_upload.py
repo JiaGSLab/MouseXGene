@@ -37,14 +37,14 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self._upload_form_token(response)
         self.assertContains(response, "Add another PDF")
-        self.assertContains(response, "Upload PDF(s)")
+        self.assertContains(response, "Save PDF(s)")
         self.assertContains(response, 'id="strain-pdf-upload-row-template"')
 
     def test_detail_page_has_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
         self._upload_form_token(response)
-        self.assertContains(response, "Upload PDF(s)")
+        self.assertContains(response, "Save PDF(s)")
         self.assertContains(response, "Attach up to")
 
     def test_upload_pdf_from_edit_uses_description_as_name(self):
