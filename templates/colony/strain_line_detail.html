@@ -112,7 +112,7 @@
     </article>
 </section>
 
-{% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining allow_pdf_upload=False request=request csrf_token=csrf_token %}
+{% include "colony/includes/strain_line_documents.html" with line=line documents=documents pdf_slots_remaining=pdf_slots_remaining allow_pdf_upload=allow_pdf_upload allow_pdf_delete=allow_pdf_delete request=request csrf_token=csrf_token %}
 
 {% include "includes/record_timeline.html" with created_at=line.created_at updated_at=line.updated_at audit_entries=audit_entries created_by=created_by updated_by=updated_by only %}
 {% endblock %}

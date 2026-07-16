@@ -80,7 +80,7 @@ class StrainLineEditViewTests(TestCase):
         self.assertEqual(list(self.line.projects.values_list("pk", flat=True)), [self.project.pk])
         self.assertEqual(self.line.expected_loci_list(), ["LocusA", "LocusB"])
 
-    def test_create_redirects_to_edit_with_custom_background_and_pdf_upload(self):
+    def test_create_redirects_to_detail_with_custom_background_and_pdf_upload(self):
         url = reverse("colony:strain_line_create")
         response = self.client.post(
             url,
@@ -101,11 +101,11 @@ class StrainLineEditViewTests(TestCase):
             follow=False,
         )
         line = StrainLine.objects.get(line_name="Create-Pdf-Flow")
-        self.assertRedirects(response, reverse("colony:strain_line_edit", args=[line.pk]))
+        self.assertRedirects(response, reverse("colony:strain_line_detail", args=[line.pk]))
         self.assertEqual(line.background, "C57BL/6JGpt")
 
-        edit_response = self.client.get(reverse("colony:strain_line_edit", args=[line.pk]))
-        self.assertContains(edit_response, 'class="strain-pdf-upload-form"')
+        detail_response = self.client.get(reverse("colony:strain_line_detail", args=[line.pk]))
+        self.assertContains(detail_response, 'class="strain-pdf-upload-form"')
 
     def test_edit_view_requires_reason_for_admin_correction(self):
         url = reverse("colony:strain_line_edit", args=[self.line.pk])

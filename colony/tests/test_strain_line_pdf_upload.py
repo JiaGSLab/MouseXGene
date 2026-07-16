@@ -36,16 +36,16 @@ class StrainLinePdfUploadTests(TestCase):
         response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
         self._upload_form_token(response)
-        self.assertContains(response, "Add PDF")
         self.assertContains(response, "Add another PDF")
+        self.assertContains(response, "Upload PDF(s)")
         self.assertContains(response, 'id="strain-pdf-upload-row-template"')
 
-    def test_detail_page_has_no_pdf_upload_form(self):
+    def test_detail_page_has_pdf_upload_form(self):
         response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'class="strain-pdf-upload-form"')
-        self.assertNotContains(response, "Add PDF")
-        self.assertNotContains(response, "Attach up to")
+        self._upload_form_token(response)
+        self.assertContains(response, "Upload PDF(s)")
+        self.assertContains(response, "Attach up to")
 
     def test_upload_pdf_from_edit_uses_description_as_name(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
@@ -68,6 +68,24 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertEqual(doc.display_name, "Genotype info")
         self.assertTrue(doc.file.name.endswith(".pdf"))
         self.assertIn("Genotype", doc.file.name)
+
+    def test_upload_pdf_from_detail(self):
+        detail_url = reverse("colony:strain_line_detail", args=[self.line.pk])
+        page = self.client.get(detail_url)
+        token = self._upload_form_token(page)
+        upload_url = reverse("colony:strain_line_upload_documents", args=[self.line.pk])
+        pdf = SimpleUploadedFile("detail.pdf", b"%PDF-1.4 detail", content_type="application/pdf")
+        response = self.client.post(
+            upload_url,
+            {
+                "csrfmiddlewaretoken": token,
+                "next": detail_url,
+                "pdf_file": pdf,
+                "pdf_description_kind": "strain_line_info",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(StrainLineDocument.objects.filter(strain_line=self.line).exists())
 
     def test_upload_multiple_pdfs_from_edit(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
