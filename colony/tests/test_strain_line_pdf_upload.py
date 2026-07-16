@@ -47,6 +47,34 @@ class StrainLinePdfUploadTests(TestCase):
         self.assertContains(response, "Save PDF(s)")
         self.assertContains(response, "Attach up to")
 
+    def test_detail_page_does_not_show_pdf_remove_button(self):
+        StrainLineDocument.objects.create(
+            strain_line=self.line,
+            description="Strain line info",
+            file=SimpleUploadedFile("info.pdf", b"%PDF-1.4 info", content_type="application/pdf"),
+            uploaded_by=self.user,
+        )
+
+        response = self.client.get(reverse("colony:strain_line_detail", args=[self.line.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Strain line info")
+        self.assertNotContains(response, 'class="strain-pdf-delete-form"')
+        self.assertNotContains(response, "Remove this PDF?")
+
+    def test_edit_page_shows_pdf_remove_button_for_admin(self):
+        StrainLineDocument.objects.create(
+            strain_line=self.line,
+            description="Strain line info",
+            file=SimpleUploadedFile("info.pdf", b"%PDF-1.4 info", content_type="application/pdf"),
+            uploaded_by=self.user,
+        )
+
+        response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="strain-pdf-delete-form"')
+
     def test_upload_pdf_from_edit_uses_description_as_name(self):
         edit_url = reverse("colony:strain_line_edit", args=[self.line.pk])
         page = self.client.get(edit_url)

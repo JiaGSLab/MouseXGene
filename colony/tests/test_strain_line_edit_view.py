@@ -123,6 +123,16 @@ class StrainLineEditViewTests(TestCase):
         self.assertContains(response, 'id="strain-project-summary"')
         self.assertNotContains(response, 'size="8"')
 
+    def test_edit_view_displays_custom_background(self):
+        self.line.background = "C57BL/6JGpt"
+        self.line.save(update_fields=["background"])
+
+        response = self.client.get(reverse("colony:strain_line_edit", args=[self.line.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="__custom__" selected')
+        self.assertContains(response, 'value="C57BL/6JGpt"')
+
     def test_edit_view_detail_shows_saved_changes(self):
         url = reverse("colony:strain_line_edit", args=[self.line.pk])
         self.client.post(url, self._post_data())

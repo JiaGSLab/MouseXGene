@@ -3302,7 +3302,7 @@ def strain_line_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "pdf_count": len(documents),
             "pdf_slots_remaining": max(0, MAX_STRAIN_LINE_PDF_COUNT - len(documents)),
             "allow_pdf_upload": _can_upload_strain_line_pdf(request.user),
-            "allow_pdf_delete": _can_delete_strain_line_pdf(request.user),
+            "allow_pdf_delete": False,
             "can_edit_line": can_edit_strain_line(request.user, line),
             "audit_entries": audit_entries,
             **actors,

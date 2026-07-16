@@ -1654,16 +1654,16 @@ class StrainLineForm(AdminCorrectionFormMixin, forms.ModelForm):
         if self.instance and self.instance.pk:
             cat_sel, cat_custom = preset_select_initial(self.instance.category, StrainLine.Category)
             if cat_sel:
-                self.initial.setdefault("category", cat_sel)
+                self.initial["category"] = cat_sel
             if cat_custom:
-                self.initial.setdefault("category_custom", cat_custom)
+                self.initial["category_custom"] = cat_custom
             bg_sel, bg_custom = preset_select_initial(self.instance.background, StrainLine.BackgroundPreset)
             if bg_sel:
-                self.initial.setdefault("background", bg_sel)
+                self.initial["background"] = bg_sel
             elif not (self.instance.background or "").strip():
                 self.initial.setdefault("background", StrainLine.BackgroundPreset.C57BL_6J)
             if bg_custom:
-                self.initial.setdefault("background_custom", bg_custom)
+                self.initial["background_custom"] = bg_custom
         else:
             self.initial.setdefault("category", StrainLine.Category.COMPOUND_STRAIN)
             self.initial.setdefault("background", StrainLine.BackgroundPreset.C57BL_6J)
