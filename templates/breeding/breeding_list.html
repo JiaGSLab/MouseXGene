@@ -112,6 +112,19 @@
 
 <section class="table-wrap">
     <table class="data-table data-table--breedings">
+        <colgroup>
+            <col class="col-breeding-setup">
+            <col class="col-breeding-alert-width">
+            <col class="col-breeding-code">
+            <col class="col-breeding-cage">
+            <col class="col-breeding-type">
+            <col class="col-breeding-sire">
+            <col class="col-breeding-dams">
+            <col class="col-breeding-date">
+            <col class="col-breeding-date">
+            <col class="col-breeding-expected-date">
+            <col class="col-breeding-status">
+        </colgroup>
         <thead>
             <tr>
                 {% sort_th "setup_by" "Set up by" %}
@@ -135,11 +148,11 @@
                     <span class="breeding-alert-badge breeding-alert-badge--warning">Pending setup</span>
                     <div class="breeding-alert-days">{{ pending_cage.pending_hint }}</div>
                 </td>
-                <td>
+                <td class="breeding-code-cell">
                     <a href="{% url 'colony:cage_detail' pending_cage.pk %}">{{ pending_cage.cage_id }}</a>
                     <div class="muted small-print">Breeding cage</div>
                 </td>
-                <td><a href="{% url 'colony:cage_detail' pending_cage.pk %}">{{ pending_cage.cage_id }}</a></td>
+                <td class="breeding-cage-cell"><a href="{% url 'colony:cage_detail' pending_cage.pk %}">{{ pending_cage.cage_id }}</a></td>
                 <td>—</td>
                 <td>
                     {% if pending_cage.pending_males %}
@@ -198,8 +211,8 @@
                         <span class="muted">—</span>
                     {% endif %}
                 </td>
-                <td><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
-                <td>
+                <td class="breeding-code-cell"><a href="{% url 'breeding:breeding_detail' breeding.pk %}">{{ breeding.breeding_code }}</a></td>
+                <td class="breeding-cage-cell">
                     {% if breeding.cage %}
                         <a href="{% url 'colony:cage_detail' breeding.cage.pk %}">{{ breeding.cage.cage_id }}</a>
                     {% else %}
@@ -207,16 +220,16 @@
                     {% endif %}
                 </td>
                 <td>{{ breeding.get_breeding_type_display }}</td>
-                <td>
+                <td class="breeding-parent-cell">
                     {% if breeding.display_sire %}
                         <div><a href="{% url 'mice:mouse_detail' breeding.display_sire.pk %}">{{ breeding.display_sire.mouse_uid }}</a></div>
                         <div class="muted small-print">Age: {{ breeding.display_sire_age_display|default:"-" }}</div>
-                        <div class="muted small-print">Genotype: {{ breeding.display_sire_genotype|default:"-" }}</div>
+                        <div class="muted small-print breeding-parent-genotype">Genotype: {{ breeding.display_sire_genotype|default:"-" }}</div>
                     {% else %}
                         -
                     {% endif %}
                 </td>
-                <td>
+                <td class="breeding-parent-cell">
                     {% if breeding.display_dam_rows %}
                         <div class="breeder-stack">
                             {% for row in breeding.display_dam_rows %}
@@ -231,10 +244,10 @@
                         -
                     {% endif %}
                 </td>
-                <td>{{ breeding.start_date|default:"-" }}</td>
-                <td>{{ breeding.plug_date|default:"-" }}</td>
-                <td>{{ breeding.display_expected_birth_date|default:"-" }}</td>
-                <td><span class="status-pill">{{ breeding.get_status_display }}</span></td>
+                <td class="breeding-date-cell">{{ breeding.start_date|default:"-" }}</td>
+                <td class="breeding-date-cell">{{ breeding.plug_date|default:"-" }}</td>
+                <td class="breeding-date-cell">{{ breeding.display_expected_birth_date|default:"-" }}</td>
+                <td class="breeding-status-cell"><span class="status-pill">{{ breeding.get_status_display }}</span></td>
             </tr>
             {% empty %}
             <tr>

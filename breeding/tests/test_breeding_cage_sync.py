@@ -307,3 +307,5 @@ class BreedingCageSyncTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Age: 8w 3d")
         self.assertContains(response, '<span class="muted">8w 3d</span>', html=True)
+        self.assertContains(response, 'class="breeding-parent-cell"')
+        self.assertContains(response, 'class="breeding-date-cell"')

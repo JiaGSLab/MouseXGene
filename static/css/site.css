@@ -1885,6 +1885,83 @@ body.col-resize-active * {
 }
 
 /* Breedings list: overdue litter alerts (bar on alert column + badge) */
+.data-table--breedings {
+    min-width: 1680px;
+    table-layout: fixed;
+}
+
+.data-table--breedings col.col-breeding-setup {
+    width: 112px;
+}
+
+.data-table--breedings col.col-breeding-alert-width {
+    width: 164px;
+}
+
+.data-table--breedings col.col-breeding-code {
+    width: 156px;
+}
+
+.data-table--breedings col.col-breeding-cage {
+    width: 112px;
+}
+
+.data-table--breedings col.col-breeding-type {
+    width: 104px;
+}
+
+.data-table--breedings col.col-breeding-sire {
+    width: 260px;
+}
+
+.data-table--breedings col.col-breeding-dams {
+    width: 300px;
+}
+
+.data-table--breedings col.col-breeding-date {
+    width: 116px;
+}
+
+.data-table--breedings col.col-breeding-expected-date {
+    width: 156px;
+}
+
+.data-table--breedings col.col-breeding-status {
+    width: 112px;
+}
+
+.data-table--breedings .breeding-parent-cell {
+    white-space: normal;
+    vertical-align: top;
+}
+
+.data-table--breedings .breeding-setup-by-cell,
+.data-table--breedings .breeding-alert-cell,
+.data-table--breedings .breeding-code-cell,
+.data-table--breedings .breeding-cage-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
+}
+
+.data-table--breedings .breeding-alert-cell {
+    overflow: hidden;
+}
+
+.breeding-parent-genotype,
+.breeder-stack__genotype {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.data-table--breedings .breeding-date-cell,
+.data-table--breedings .breeding-status-cell {
+    white-space: nowrap;
+    vertical-align: top;
+}
+
 .data-table--breedings tbody tr.breeding-row-alert > td.breeding-alert-cell {
     border-left: 4px solid transparent;
 }
@@ -2804,7 +2881,7 @@ body.col-resize-active * {
 
 .breeder-stack__row {
     display: grid;
-    grid-template-columns: minmax(72px, auto) minmax(48px, auto) minmax(90px, 1fr);
+    grid-template-columns: minmax(72px, auto) minmax(48px, 1fr);
     gap: 8px;
     align-items: baseline;
     padding-bottom: 7px;
@@ -2817,6 +2894,7 @@ body.col-resize-active * {
 }
 
 .breeder-stack__genotype {
+    grid-column: 1 / -1;
     overflow-wrap: anywhere;
 }
 
